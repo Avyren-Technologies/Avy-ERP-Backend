@@ -1,0 +1,56 @@
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  companyName: string;
+}
+
+export interface RefreshTokenRequest {
+  refreshToken: string;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface AuthResponse {
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    companyId?: string;
+    tenantId?: string;
+  };
+  tokens: {
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+  };
+}
+
+export interface JWTPayload {
+  userId: string;
+  email: string;
+  tenantId?: string | undefined;
+  companyId?: string | undefined;
+  roleId: string;
+  permissions: string[];
+  iat?: number;
+  exp?: number;
+}
+
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+}
