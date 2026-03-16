@@ -1,16 +1,24 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
+import { platformPrisma } from '../config/database';
 import { cacheRedis } from '../config/redis';
 import { AuthError } from '../shared/errors';
-import { createUserCacheKey } from '../shared/utils';
+import {
+  createAccessTokenBlacklistKey,
+  createUserCacheKey,
+} from '../shared/utils';
 import { logger } from '../config/logger';
 import { RequestWithUser } from '../shared/types';
+import { hasPermission } from '../shared/constants/permissions';
 
 export interface AuthMiddlewareOptions {
   optional?: boolean;
   requireTenant?: boolean;
 }
+
+const JWT_ALGORITHM: jwt.Algorithm = 'HS256';
+const USER_CACHE_TTL_SECONDS = 1800;
 
 export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   return async (req: RequestWithUser, res: Response, next: NextFunction): Promise<void> => {
@@ -25,10 +33,19 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       }
 
       // Verify JWT token
-      const decoded = jwt.verify(token, env.JWT_SECRET) as any;
+      const decoded = jwt.verify(token, env.JWT_SECRET, {
+        algorithms: [JWT_ALGORITHM],
+      }) as {
+        userId: string;
+        email: string;
+        tenantId?: string;
+        companyId?: string;
+        roleId: string;
+        permissions?: string[];
+      };
 
       // Check if token is blacklisted (logout)
-      const isBlacklisted = await cacheRedis.get(`blacklist:${token}`);
+      const isBlacklisted = await cacheRedis.get(createAccessTokenBlacklistKey(token));
       if (isBlacklisted) {
         throw AuthError.invalidToken();
       }
@@ -38,20 +55,35 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       let userData = await cacheRedis.get(userKey);
 
       if (!userData) {
-        // TODO: Fetch user from database
-        // For now, create mock user data
+        const dbUser = await platformPrisma.user.findUnique({
+          where: { id: decoded.userId },
+          include: {
+            company: {
+              include: {
+                tenant: true,
+              },
+            },
+          },
+        });
+
+        if (!dbUser) {
+          throw AuthError.invalidToken();
+        }
+
         userData = JSON.stringify({
-          id: decoded.userId,
-          email: decoded.email,
-          tenantId: decoded.tenantId,
-          companyId: decoded.companyId,
-          roleId: decoded.roleId,
-          permissions: decoded.permissions || [],
-          isActive: true,
+          id: dbUser.id,
+          email: dbUser.email,
+          firstName: dbUser.firstName,
+          lastName: dbUser.lastName,
+          tenantId: dbUser.company?.tenant?.id,
+          companyId: dbUser.companyId,
+          roleId: dbUser.role,
+          permissions: getRolePermissions(dbUser.role),
+          isActive: dbUser.isActive,
         });
 
         // Cache for 30 minutes
-        await cacheRedis.setex(userKey, 1800, userData);
+        await cacheRedis.setex(userKey, USER_CACHE_TTL_SECONDS, userData);
       }
 
       const user = JSON.parse(userData);
@@ -91,11 +123,12 @@ export function requirePermissions(permissions: string | string[]) {
     const requiredPermissions = Array.isArray(permissions) ? permissions : [permissions];
     const userPermissions = req.user.permissions || [];
 
-    const hasPermission = requiredPermissions.some(permission =>
-      userPermissions.includes(permission) || userPermissions.includes('*')
+    // Uses hasPermission which supports wildcards: '*' and 'module:*'
+    const granted = requiredPermissions.some(perm =>
+      hasPermission(userPermissions, perm)
     );
 
-    if (!hasPermission) {
+    if (!granted) {
       throw AuthError.insufficientPermissions();
     }
 
@@ -134,17 +167,31 @@ function extractTokenFromRequest(req: RequestWithUser): string | null {
     return tokenCookie;
   }
 
-  // Check query parameter (for API testing)
-  const tokenQuery = expressReq.query.token as string;
-  if (tokenQuery) {
-    return tokenQuery;
-  }
-
   return null;
+}
+
+function getRolePermissions(role: string): string[] {
+  const rolePermissions: Record<string, string[]> = {
+    SUPER_ADMIN: ['*'],
+    COMPANY_ADMIN: [
+      'user:*',
+      'role:*',
+      'company:*',
+      'hr:*',
+      'production:*',
+      'inventory:*',
+      'sales:*',
+      'finance:*',
+      'maintenance:*',
+      'reports:*',
+    ],
+  };
+
+  return rolePermissions[role] || [];
 }
 
 export async function blacklistToken(token: string, expirySeconds?: number): Promise<void> {
   const ttl = expirySeconds || (env.JWT_EXPIRES_IN === '15m' ? 900 : 3600); // Default to 15 minutes or 1 hour
-  await cacheRedis.setex(`blacklist:${token}`, ttl, 'true');
+  await cacheRedis.setex(createAccessTokenBlacklistKey(token), ttl, 'true');
   logger.info(`Token blacklisted for ${ttl} seconds`);
 }

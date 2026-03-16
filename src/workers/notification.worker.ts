@@ -1,20 +1,11 @@
 import Queue from 'bull';
 import nodemailer from 'nodemailer';
 import { logger } from '../config/logger';
+import { getBullQueueConfig } from '../config/redis';
 import { env } from '../config/env';
 
 // Create notification queue
-const notificationQueue = new Queue('notifications', {
-  redis: {
-    host: env.REDIS_URL.split(':')[0],
-    port: parseInt(env.REDIS_URL.split(':')[1] || '6379'),
-    db: env.REDIS_QUEUE_DB,
-  },
-  defaultJobOptions: {
-    removeOnComplete: env.QUEUE_REMOVE_ON_COMPLETE,
-    removeOnFail: env.QUEUE_REMOVE_ON_FAIL,
-  },
-});
+const notificationQueue = new Queue('notifications', getBullQueueConfig('notifications'));
 
 // Email transporter
 const emailTransporter = nodemailer.createTransport({

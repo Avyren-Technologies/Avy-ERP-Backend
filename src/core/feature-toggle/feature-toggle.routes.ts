@@ -1,15 +1,13 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../middleware/auth.middleware';
+import { featureToggleController } from './feature-toggle.controller';
 
 const router = Router();
 
-// Feature toggle routes
-router.get('/', requirePermissions(['user:read']), (req, res) => {
-  res.json({ message: 'Feature toggles - TODO: Implement' });
-});
+// Get feature toggles (for self or another user)
+router.get('/', requirePermissions(['user:read']), featureToggleController.getToggles);
 
-router.put('/user/:userId', requirePermissions(['user:update']), (req, res) => {
-  res.json({ message: 'Update user feature toggles - TODO: Implement' });
-});
+// Set feature toggles for a specific user
+router.put('/user/:userId', requirePermissions(['user:update']), featureToggleController.setToggles);
 
 export { router as featureToggleRoutes };

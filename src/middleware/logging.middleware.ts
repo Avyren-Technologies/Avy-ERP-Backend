@@ -2,8 +2,36 @@ import { Request, Response, NextFunction } from 'express';
 import { logger } from '../config/logger';
 import { env } from '../config/env';
 
+const SENSITIVE_AUTH_ROUTES = [
+  '/api/v1/auth/login',
+  '/api/v1/auth/register',
+  '/api/v1/auth/refresh-token',
+  '/api/v1/auth/change-password',
+];
+
+function isSensitiveAuthRoute(path: string): boolean {
+  return SENSITIVE_AUTH_ROUTES.some((route) => path.startsWith(route));
+}
+
+function sanitizeHeaders(headers: Request['headers']): Record<string, unknown> {
+  const sanitized = { ...headers } as Record<string, unknown>;
+  delete sanitized.authorization;
+  delete sanitized.cookie;
+  delete sanitized['set-cookie'];
+  return sanitized;
+}
+
+function sanitizeQuery(query: Request['query']): Record<string, unknown> {
+  const sanitized = { ...query } as Record<string, unknown>;
+  if (typeof sanitized.token !== 'undefined') {
+    sanitized.token = '[REDACTED]';
+  }
+  return sanitized;
+}
+
 export function requestLoggingMiddleware(req: Request, res: Response, next: NextFunction): void {
   const start = Date.now();
+  const sensitiveAuthRoute = isSensitiveAuthRoute(req.path);
 
   // Log incoming request
   logger.info('Incoming Request', {
@@ -13,8 +41,8 @@ export function requestLoggingMiddleware(req: Request, res: Response, next: Next
     userAgent: req.get('User-Agent'),
     userId: (req as any).user?.id,
     tenantId: (req as any).tenant?.id,
-    query: req.query,
-    body: env.NODE_ENV === 'development' ? req.body : undefined,
+    query: sanitizeQuery(req.query),
+    body: env.NODE_ENV === 'development' && !sensitiveAuthRoute ? req.body : undefined,
   });
 
   // Log response when finished
@@ -40,7 +68,9 @@ export function auditLoggingMiddleware(req: Request, res: Response, next: NextFu
   const skipAuditRoutes = [
     '/health',
     '/api/v1/auth/login',
-    '/api/v1/auth/refresh',
+    '/api/v1/auth/register',
+    '/api/v1/auth/refresh-token',
+    '/api/v1/auth/change-password',
     '/favicon.ico',
   ];
 
@@ -69,6 +99,7 @@ export function auditLoggingMiddleware(req: Request, res: Response, next: NextFu
 // Performance monitoring middleware
 export function performanceMonitoringMiddleware(req: Request, res: Response, next: NextFunction): void {
   const start = process.hrtime.bigint();
+  const sensitiveAuthRoute = isSensitiveAuthRoute(req.path);
 
   res.on('finish', () => {
     const end = process.hrtime.bigint();
@@ -93,8 +124,8 @@ export function performanceMonitoringMiddleware(req: Request, res: Response, nex
         duration: `${duration.toFixed(2)}ms`,
         userId: (req as any).user?.id,
         tenantId: (req as any).tenant?.id,
-        query: req.query,
-        body: env.NODE_ENV === 'development' ? req.body : undefined,
+        query: sanitizeQuery(req.query),
+        body: env.NODE_ENV === 'development' && !sensitiveAuthRoute ? req.body : undefined,
       });
     }
   });
@@ -130,9 +161,9 @@ export function securityLoggingMiddleware(req: Request, res: Response, next: Nex
 
   const requestData = JSON.stringify({
     url: req.originalUrl,
-    query: req.query,
-    body: req.body,
-    headers: req.headers,
+    query: sanitizeQuery(req.query),
+    body: isSensitiveAuthRoute(req.path) ? undefined : req.body,
+    headers: sanitizeHeaders(req.headers),
   });
 
   const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(requestData));
@@ -145,8 +176,8 @@ export function securityLoggingMiddleware(req: Request, res: Response, next: Nex
       userAgent: req.get('User-Agent'),
       userId: (req as any).user?.id,
       tenantId: (req as any).tenant?.id,
-      query: req.query,
-      body: req.body,
+      query: sanitizeQuery(req.query),
+      body: isSensitiveAuthRoute(req.path) ? undefined : req.body,
     });
   }
 

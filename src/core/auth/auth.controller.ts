@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
+import { env } from '../../config/env';
 import { authService } from './auth.service';
-import { validateLogin, validateRegister, validateRefreshToken, validateChangePassword } from '../../shared/validators';
+import { AuthError } from '../../shared/errors';
+import { validateLogin, validateRegister, validateRefreshToken, validateChangePassword, validateForgotPassword, validateVerifyResetCode, validateResetPassword } from '../../shared/validators';
 import { createSuccessResponse } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
-import { blacklistToken } from '../../middleware/auth.middleware';
 
 export class AuthController {
   // Login
@@ -40,12 +41,44 @@ export class AuthController {
 
   // Logout
   logout = asyncHandler(async (req: Request, res: Response) => {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (token) {
-      await authService.logout(req.user!.id, token);
+    const headerToken = req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.substring(7)
+      : null;
+    const cookieToken = req.cookies?.[env.JWT_COOKIE_NAME] as string | undefined;
+    const token = headerToken || cookieToken;
+
+    if (!token) {
+      throw AuthError.missingToken();
     }
 
+    await authService.logout(req.user!.id, token);
+
     res.json(createSuccessResponse(null, 'Logout successful'));
+  });
+
+  // Forgot password
+  forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+    const data = validateForgotPassword(req.body);
+    await authService.forgotPassword(data);
+
+    // Always return success to prevent email enumeration
+    res.json(createSuccessResponse(null, 'If an account exists with this email, a reset code has been sent'));
+  });
+
+  // Verify reset code
+  verifyResetCode = asyncHandler(async (req: Request, res: Response) => {
+    const data = validateVerifyResetCode(req.body);
+    await authService.verifyResetCode(data);
+
+    res.json(createSuccessResponse(null, 'Reset code verified successfully'));
+  });
+
+  // Reset password
+  resetPassword = asyncHandler(async (req: Request, res: Response) => {
+    const data = validateResetPassword(req.body);
+    await authService.resetPassword(data);
+
+    res.json(createSuccessResponse(null, 'Password reset successful'));
   });
 
   // Get current user profile

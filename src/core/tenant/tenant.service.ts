@@ -1,9 +1,9 @@
+import { Prisma, TenantStatus } from '@prisma/client';
 import { platformPrisma } from '../../config/database';
-import { cacheRedis } from '../../config/redis';
+import { cacheRedis, scanAndDelete } from '../../config/redis';
 import { ApiError } from '../../shared/errors';
-import { createTenantCacheKey, generateId } from '../../shared/utils';
+import { createRedisPattern, createTenantCacheKey } from '../../shared/utils';
 import { logger } from '../../config/logger';
-import { TenantStatus } from '../../shared/types';
 
 export interface CreateTenantData {
   companyId: string;
@@ -43,12 +43,14 @@ export class TenantService {
     }
 
     // Create tenant
+    const createData: Prisma.TenantUncheckedCreateInput = {
+      companyId,
+      schemaName: finalSchemaName,
+      status,
+    };
+
     const tenant = await platformPrisma.tenant.create({
-      data: {
-        companyId,
-        schemaName: finalSchemaName,
-        status,
-      },
+      data: createData,
       include: {
         company: true,
       },
@@ -127,9 +129,14 @@ export class TenantService {
 
   // Update tenant
   async updateTenant(tenantId: string, updateData: UpdateTenantData) {
+    const data: Prisma.TenantUncheckedUpdateInput = {
+      ...(typeof updateData.schemaName !== 'undefined' ? { schemaName: updateData.schemaName } : {}),
+      ...(typeof updateData.status !== 'undefined' ? { status: updateData.status } : {}),
+    };
+
     const tenant = await platformPrisma.tenant.update({
       where: { id: tenantId },
-      data: updateData,
+      data,
       include: {
         company: true,
       },
@@ -253,10 +260,7 @@ export class TenantService {
 
   // Clear tenant cache
   private async clearTenantCache(tenantId: string): Promise<void> {
-    const keys = await cacheRedis.keys(`tenant:${tenantId}:*`);
-    if (keys.length > 0) {
-      await cacheRedis.del(keys);
-    }
+    await scanAndDelete(cacheRedis, createRedisPattern('tenant', tenantId, '*'));
   }
 
   // Get tenant statistics

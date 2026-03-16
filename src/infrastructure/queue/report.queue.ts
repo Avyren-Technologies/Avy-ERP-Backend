@@ -1,24 +1,14 @@
 // Report queue infrastructure
 
 import Queue from 'bull';
-import { env } from '../../config/env';
+import { getBullQueueConfig } from '../../config/redis';
 import { logger } from '../../config/logger';
 
 class ReportQueue {
   private queue: Queue.Queue;
 
   constructor() {
-    this.queue = new Queue('reports', {
-      redis: {
-        host: env.REDIS_URL.split(':')[0],
-        port: parseInt(env.REDIS_URL.split(':')[1] || '6379'),
-        db: env.REDIS_QUEUE_DB,
-      },
-      defaultJobOptions: {
-        removeOnComplete: env.QUEUE_REMOVE_ON_COMPLETE,
-        removeOnFail: env.QUEUE_REMOVE_ON_FAIL,
-      },
-    });
+    this.queue = new Queue('reports', getBullQueueConfig('reports'));
 
     this.setupEventHandlers();
   }
@@ -124,6 +114,12 @@ class ReportQueue {
     this.queue.on('stalled', (job) => {
       logger.warn(`Report job stalled: ${job.id}`, { type: job.name });
     });
+  }
+
+  // Expose the underlying Bull queue so workers can register processors
+  // without creating a second independent Queue instance.
+  getQueue(): Queue.Queue {
+    return this.queue;
   }
 
   // Graceful shutdown

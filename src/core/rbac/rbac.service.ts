@@ -1,0 +1,236 @@
+import { platformPrisma } from '../../config/database';
+import { cacheRedis } from '../../config/redis';
+import { ApiError } from '../../shared/errors/api-error';
+import { AuthError } from '../../shared/errors';
+import { HttpStatus } from '../../shared/types';
+import { logger } from '../../config/logger';
+import { getAllPermissions, REFERENCE_ROLE_PERMISSIONS } from '../../shared/constants/permissions';
+import { createUserCacheKey, createUserPermissionsCacheKey } from '../../shared/utils';
+import { CreateRoleRequest, UpdateRoleRequest, RoleResponse } from './rbac.types';
+
+export class RbacService {
+  // List all roles for a tenant
+  async listRoles(tenantId: string): Promise<RoleResponse[]> {
+    const roles = await platformPrisma.role.findMany({
+      where: { tenantId, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+
+    return roles.map((r) => ({
+      ...r,
+      permissions: r.permissions as string[],
+    }));
+  }
+
+  // Get a single role by ID
+  async getRole(roleId: string, tenantId: string): Promise<RoleResponse> {
+    const role = await platformPrisma.role.findFirst({
+      where: { id: roleId, tenantId },
+    });
+
+    if (!role) {
+      throw new ApiError('Role not found', HttpStatus.NOT_FOUND, true, 'ROLE_NOT_FOUND');
+    }
+
+    return { ...role, permissions: role.permissions as string[] };
+  }
+
+  // Create a custom role
+  async createRole(tenantId: string, data: CreateRoleRequest): Promise<RoleResponse> {
+    // Check for duplicate name
+    const existing = await platformPrisma.role.findUnique({
+      where: { tenantId_name: { tenantId, name: data.name } },
+    });
+
+    if (existing) {
+      throw new ApiError('A role with this name already exists', HttpStatus.CONFLICT, true, 'ROLE_DUPLICATE');
+    }
+
+    const role = await platformPrisma.role.create({
+      data: {
+        tenantId,
+        name: data.name,
+        description: data.description ?? null,
+        permissions: data.permissions,
+        isSystem: false,
+      },
+    });
+
+    logger.info(`Role created: ${role.name} for tenant ${tenantId}`);
+    return { ...role, permissions: role.permissions as string[] };
+  }
+
+  // Update a role (prevent modifying system roles)
+  async updateRole(roleId: string, tenantId: string, data: UpdateRoleRequest): Promise<RoleResponse> {
+    const role = await platformPrisma.role.findFirst({
+      where: { id: roleId, tenantId },
+    });
+
+    if (!role) {
+      throw new ApiError('Role not found', HttpStatus.NOT_FOUND, true, 'ROLE_NOT_FOUND');
+    }
+
+    if (role.isSystem) {
+      throw new ApiError('System roles cannot be modified', HttpStatus.FORBIDDEN, true, 'ROLE_SYSTEM_PROTECTED');
+    }
+
+    // Check for duplicate name if name is being changed
+    if (data.name && data.name !== role.name) {
+      const existing = await platformPrisma.role.findUnique({
+        where: { tenantId_name: { tenantId, name: data.name } },
+      });
+      if (existing) {
+        throw new ApiError('A role with this name already exists', HttpStatus.CONFLICT, true, 'ROLE_DUPLICATE');
+      }
+    }
+
+    const updated = await platformPrisma.role.update({
+      where: { id: roleId },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.permissions !== undefined && { permissions: data.permissions }),
+        ...(data.isActive !== undefined && { isActive: data.isActive }),
+      },
+    });
+
+    // Invalidate cached permissions for all users with this role
+    await this.invalidateRolePermissionsCache(roleId);
+
+    logger.info(`Role updated: ${updated.name} (${roleId}) for tenant ${tenantId}`);
+    return { ...updated, permissions: updated.permissions as string[] };
+  }
+
+  // Soft-delete a role (set isActive = false)
+  async deleteRole(roleId: string, tenantId: string): Promise<void> {
+    const role = await platformPrisma.role.findFirst({
+      where: { id: roleId, tenantId },
+    });
+
+    if (!role) {
+      throw new ApiError('Role not found', HttpStatus.NOT_FOUND, true, 'ROLE_NOT_FOUND');
+    }
+
+    if (role.isSystem) {
+      throw new ApiError('System roles cannot be deleted', HttpStatus.FORBIDDEN, true, 'ROLE_SYSTEM_PROTECTED');
+    }
+
+    // Check if any users are assigned to this role
+    const assignedUsers = await platformPrisma.tenantUser.count({
+      where: { roleId, isActive: true },
+    });
+
+    if (assignedUsers > 0) {
+      throw new ApiError(
+        `Cannot delete role: ${assignedUsers} user(s) are still assigned to it`,
+        HttpStatus.CONFLICT,
+        true,
+        'ROLE_HAS_USERS'
+      );
+    }
+
+    await platformPrisma.role.update({
+      where: { id: roleId },
+      data: { isActive: false },
+    });
+
+    logger.info(`Role deleted: ${role.name} (${roleId}) for tenant ${tenantId}`);
+  }
+
+  // Assign a role to a user within a tenant
+  async assignRole(tenantId: string, userId: string, roleId: string): Promise<void> {
+    // Verify role belongs to this tenant
+    const role = await platformPrisma.role.findFirst({
+      where: { id: roleId, tenantId, isActive: true },
+    });
+
+    if (!role) {
+      throw new ApiError('Role not found', HttpStatus.NOT_FOUND, true, 'ROLE_NOT_FOUND');
+    }
+
+    // Upsert tenant user record
+    await platformPrisma.tenantUser.upsert({
+      where: { userId_tenantId: { userId, tenantId } },
+      create: { userId, tenantId, roleId },
+      update: { roleId, isActive: true },
+    });
+
+    // Invalidate user's cached permissions
+    await cacheRedis.del(createUserCacheKey(userId, 'auth'));
+
+    logger.info(`Role ${role.name} assigned to user ${userId} in tenant ${tenantId}`);
+  }
+
+  // Get permissions for a user in a specific tenant (used by auth middleware)
+  async getUserPermissions(userId: string, tenantId: string): Promise<string[]> {
+    // Check cache first
+    const cacheKey = createUserPermissionsCacheKey(userId, tenantId);
+    const cached = await cacheRedis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
+    const tenantUser = await platformPrisma.tenantUser.findUnique({
+      where: { userId_tenantId: { userId, tenantId } },
+      include: { role: true },
+    });
+
+    if (!tenantUser || !tenantUser.isActive) {
+      return [];
+    }
+
+    const permissions = tenantUser.role.permissions as string[];
+
+    // Cache for 30 minutes
+    await cacheRedis.setex(cacheKey, 1800, JSON.stringify(permissions));
+
+    return permissions;
+  }
+
+  // Get the full permission catalogue
+  getPermissionCatalogue() {
+    return getAllPermissions();
+  }
+
+  // Get reference roles (templates for onboarding)
+  getReferenceRoles() {
+    return REFERENCE_ROLE_PERMISSIONS;
+  }
+
+  // Seed default roles for a new tenant
+  async seedDefaultRoles(tenantId: string): Promise<void> {
+    const defaultRoles = ['General Manager', 'HR Personnel', 'Finance Team', 'Production Manager', 'Security Personnel'];
+
+    for (const roleName of defaultRoles) {
+      const ref = REFERENCE_ROLE_PERMISSIONS[roleName];
+      if (!ref) continue;
+
+      await platformPrisma.role.create({
+        data: {
+          tenantId,
+          name: roleName,
+          description: ref.description,
+          permissions: ref.permissions,
+          isSystem: true,
+        },
+      });
+    }
+
+    logger.info(`Default roles seeded for tenant ${tenantId}`);
+  }
+
+  // Invalidate cached permissions for all users with a specific role
+  private async invalidateRolePermissionsCache(roleId: string): Promise<void> {
+    const tenantUsers = await platformPrisma.tenantUser.findMany({
+      where: { roleId },
+      select: { userId: true, tenantId: true },
+    });
+
+    for (const tu of tenantUsers) {
+      await cacheRedis.del(createUserCacheKey(tu.userId, 'auth'));
+      await cacheRedis.del(createUserPermissionsCacheKey(tu.userId, tu.tenantId));
+    }
+  }
+}
+
+export const rbacService = new RbacService();

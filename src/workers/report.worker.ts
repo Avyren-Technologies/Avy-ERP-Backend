@@ -1,20 +1,12 @@
-import Queue from 'bull';
 import { logger } from '../config/logger';
 import { cacheRedis } from '../config/redis';
-import { env } from '../config/env';
+import { createReportCacheKey } from '../shared/utils';
+import { reportQueue as reportQueueInfra } from '../infrastructure/queue/report.queue';
 
-// Create report queue
-const reportQueue = new Queue('reports', {
-  redis: {
-    host: env.REDIS_URL.split(':')[0],
-    port: parseInt(env.REDIS_URL.split(':')[1] || '6379'),
-    db: env.REDIS_QUEUE_DB,
-  },
-  defaultJobOptions: {
-    removeOnComplete: env.QUEUE_REMOVE_ON_COMPLETE,
-    removeOnFail: env.QUEUE_REMOVE_ON_FAIL,
-  },
-});
+// Use the centralised ReportQueue instance so there is only one Bull client
+// for this queue in the process (avoids duplicate event emitters and
+// ambiguous lifecycle ownership).
+const reportQueue = reportQueueInfra.getQueue();
 
 // Report generation jobs
 reportQueue.process('generate-sales-report', async (job) => {
@@ -32,7 +24,7 @@ reportQueue.process('generate-sales-report', async (job) => {
     const reportUrl = `https://storage.avyerp.com/reports/sales-${tenantId}-${Date.now()}.xlsx`;
 
     // Cache report URL for 24 hours
-    await cacheRedis.setex(`report:sales:${tenantId}:${job.id}`, 86400, reportUrl);
+    await cacheRedis.setex(createReportCacheKey('sales', tenantId, String(job.id)), 86400, reportUrl);
 
     logger.info(`Sales report generated successfully: ${reportUrl}`);
 
@@ -54,7 +46,7 @@ reportQueue.process('generate-production-report', async (job) => {
 
     const reportUrl = `https://storage.avyerp.com/reports/production-${tenantId}-${Date.now()}.xlsx`;
 
-    await cacheRedis.setex(`report:production:${tenantId}:${job.id}`, 86400, reportUrl);
+    await cacheRedis.setex(createReportCacheKey('production', tenantId, String(job.id)), 86400, reportUrl);
 
     return { reportUrl, status: 'completed' };
   } catch (error) {
@@ -74,7 +66,7 @@ reportQueue.process('generate-hr-report', async (job) => {
 
     const reportUrl = `https://storage.avyerp.com/reports/hr-${tenantId}-${Date.now()}.xlsx`;
 
-    await cacheRedis.setex(`report:hr:${tenantId}:${job.id}`, 86400, reportUrl);
+    await cacheRedis.setex(createReportCacheKey('hr', tenantId, String(job.id)), 86400, reportUrl);
 
     return { reportUrl, status: 'completed' };
   } catch (error) {
@@ -96,20 +88,21 @@ reportQueue.on('stalled', (job) => {
   logger.warn(`Report job stalled: ${job.id}`, { type: job.name });
 });
 
-// Graceful shutdown
+// Graceful shutdown — delegate to the infrastructure owner so lifecycle is
+// managed in one place.
 process.on('SIGTERM', async () => {
   logger.info('Report worker shutting down...');
-  await reportQueue.close();
+  await reportQueueInfra.close();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   logger.info('Report worker shutting down...');
-  await reportQueue.close();
+  await reportQueueInfra.close();
   process.exit(0);
 });
 
 logger.info('Report worker started and listening for jobs...');
 
 // Export for testing
-export { reportQueue };
+export { reportQueueInfra as reportQueue };

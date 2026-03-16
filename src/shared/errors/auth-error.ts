@@ -41,4 +41,12 @@ export class AuthError extends ApiError {
   static tenantSuspended(): AuthError {
     return new AuthError('Tenant has been suspended', 'TENANT_SUSPENDED');
   }
+
+  static invalidResetCode(): AuthError {
+    return new AuthError('Invalid or expired reset code', 'INVALID_RESET_CODE');
+  }
+
+  static resetCodeExpired(): AuthError {
+    return new AuthError('Reset code has expired', 'RESET_CODE_EXPIRED');
+  }
 }

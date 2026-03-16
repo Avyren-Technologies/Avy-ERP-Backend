@@ -1,11 +1,12 @@
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
+import { env } from '../../config/env';
 import { ApiResponse, PaginatedResponse, HttpStatus } from '../types';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../constants';
 
 // Password utilities
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
+  return bcrypt.hash(password, env.BCRYPT_ROUNDS);
 }
 
 export async function comparePassword(password: string, hashedPassword: string): Promise<boolean> {
@@ -343,10 +344,77 @@ export function createCacheKey(...parts: (string | number)[]): string {
   return parts.join(':');
 }
 
+function normalizeRedisKeyPart(part: string | number): string {
+  return String(part).trim().replace(/^:+|:+$/g, '');
+}
+
+function getRedisPrefixParts(): string[] {
+  return env.REDIS_KEY_PREFIX
+    .split(':')
+    .map(normalizeRedisKeyPart)
+    .filter(Boolean);
+}
+
+export function getRedisModulePrefix(moduleName: string, ...additional: (string | number)[]): string {
+  return createCacheKey(
+    ...getRedisPrefixParts(),
+    normalizeRedisKeyPart(moduleName),
+    ...additional.map(normalizeRedisKeyPart).filter(Boolean),
+  );
+}
+
+export function createRedisKey(moduleName: string, ...parts: (string | number)[]): string {
+  return createCacheKey(
+    ...getRedisPrefixParts(),
+    normalizeRedisKeyPart(moduleName),
+    ...parts.map(normalizeRedisKeyPart).filter(Boolean),
+  );
+}
+
+export function createRedisPattern(moduleName: string, ...parts: string[]): string {
+  return createCacheKey(
+    ...getRedisPrefixParts(),
+    normalizeRedisKeyPart(moduleName),
+    ...parts.map((part) => part.trim()).filter(Boolean),
+  );
+}
+
 export function createUserCacheKey(userId: string, ...additional: string[]): string {
-  return createCacheKey('user', userId, ...additional);
+  return createRedisKey('auth', 'user', userId, ...additional);
 }
 
 export function createTenantCacheKey(tenantId: string, ...additional: string[]): string {
-  return createCacheKey('tenant', tenantId, ...additional);
+  return createRedisKey('tenant', tenantId, ...additional);
+}
+
+export function createAccessTokenBlacklistKey(token: string): string {
+  return createRedisKey('auth', 'token', 'blacklist', token);
+}
+
+export function createRefreshTokenBlacklistKey(token: string): string {
+  return createRedisKey('auth', 'token', 'refresh-blacklist', token);
+}
+
+export function createUserPermissionsCacheKey(userId: string, tenantId: string): string {
+  return createRedisKey('rbac', 'user', userId, 'tenant', tenantId, 'permissions');
+}
+
+export function createModuleConfigCacheKey(tenantId: string, moduleName: string): string {
+  return createRedisKey('modules', 'config', tenantId, moduleName);
+}
+
+export function createAnalyticsCacheKey(type: string, tenantId: string, period: string): string {
+  return createRedisKey('analytics', type, tenantId, period);
+}
+
+export function createReportCacheKey(type: string, tenantId: string, reportId: string | number): string {
+  return createRedisKey('reports', type, tenantId, reportId);
+}
+
+export function createStoredReportCacheKey(reportId: string): string {
+  return createRedisKey('reports', 'data', reportId);
+}
+
+export function createRootRedisPattern(): string {
+  return `${env.REDIS_KEY_PREFIX}:*`;
 }

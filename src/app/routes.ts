@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { env } from '../config/env';
 import { authMiddleware, requirePermissions } from '../middleware/auth.middleware';
 import { tenantMiddleware, requireTenant, validateTenantAccess } from '../middleware/tenant.middleware';
 
@@ -76,9 +77,9 @@ router.use('/reports', reportsRoutes);
 router.use('/rbac', rbacRoutes);
 router.use('/feature-toggles', featureToggleRoutes);
 
-// API documentation (development only)
-if (process.env.NODE_ENV === 'development') {
-  // TODO: Add Swagger documentation routes
+// API documentation (gated by ENABLE_SWAGGER env)
+if (env.ENABLE_SWAGGER) {
+  // TODO: Mount Swagger UI and spec (e.g. swagger-ui-express) when added
 }
 
 // Export router

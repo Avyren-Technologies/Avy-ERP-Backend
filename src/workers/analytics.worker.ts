@@ -1,20 +1,10 @@
 import Queue from 'bull';
 import { logger } from '../config/logger';
-import { cacheRedis } from '../config/redis';
-import { env } from '../config/env';
+import { cacheRedis, getBullQueueConfig } from '../config/redis';
+import { createAnalyticsCacheKey } from '../shared/utils';
 
 // Create analytics queue
-const analyticsQueue = new Queue('analytics', {
-  redis: {
-    host: env.REDIS_URL.split(':')[0],
-    port: parseInt(env.REDIS_URL.split(':')[1] || '6379'),
-    db: env.REDIS_QUEUE_DB,
-  },
-  defaultJobOptions: {
-    removeOnComplete: env.QUEUE_REMOVE_ON_COMPLETE,
-    removeOnFail: env.QUEUE_REMOVE_ON_FAIL,
-  },
-});
+const analyticsQueue = new Queue('analytics', getBullQueueConfig('analytics'));
 
 // Analytics aggregation jobs
 analyticsQueue.process('aggregate-oee-metrics', async (job) => {
@@ -33,7 +23,7 @@ analyticsQueue.process('aggregate-oee-metrics', async (job) => {
       oee: 0.85,
     };
 
-    await cacheRedis.setex(`analytics:oee:${tenantId}:${date}`, 3600, JSON.stringify(metrics));
+    await cacheRedis.setex(createAnalyticsCacheKey('oee', tenantId, date), 3600, JSON.stringify(metrics));
 
     return { metrics, status: 'completed' };
   } catch (error) {
@@ -58,7 +48,7 @@ analyticsQueue.process('aggregate-production-metrics', async (job) => {
       downtime: 45, // minutes
     };
 
-    await cacheRedis.setex(`analytics:production:${tenantId}:${period}`, 3600, JSON.stringify(metrics));
+    await cacheRedis.setex(createAnalyticsCacheKey('production', tenantId, period), 3600, JSON.stringify(metrics));
 
     return { metrics, status: 'completed' };
   } catch (error) {

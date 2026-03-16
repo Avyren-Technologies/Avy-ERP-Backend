@@ -97,6 +97,42 @@ const limiter = rateLimit({
 
 app.use(limiter);
 
+const authLoginLimiter = rateLimit({
+  windowMs: env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
+  max: env.AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS,
+  message: {
+    success: false,
+    error: 'Too many login attempts. Please try again later.',
+    code: 'AUTH_LOGIN_RATE_LIMIT_EXCEEDED',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authRegisterLimiter = rateLimit({
+  windowMs: env.AUTH_REGISTER_RATE_LIMIT_WINDOW_MS,
+  max: env.AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS,
+  message: {
+    success: false,
+    error: 'Too many registration attempts. Please try again later.',
+    code: 'AUTH_REGISTER_RATE_LIMIT_EXCEEDED',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authRefreshLimiter = rateLimit({
+  windowMs: env.AUTH_REFRESH_RATE_LIMIT_WINDOW_MS,
+  max: env.AUTH_REFRESH_RATE_LIMIT_MAX_REQUESTS,
+  message: {
+    success: false,
+    error: 'Too many token refresh attempts. Please try again later.',
+    code: 'AUTH_REFRESH_RATE_LIMIT_EXCEEDED',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Logging middleware
 app.use(requestLoggingMiddleware);
 app.use(auditLoggingMiddleware);
@@ -123,6 +159,27 @@ app.use(cookieParser());
 
 // Health check endpoint
 app.get('/health', healthCheckMiddleware);
+
+// Forgot password rate limiter (5 per hour per IP)
+const authForgotPasswordLimiter = rateLimit({
+  windowMs: 3600000,
+  max: 5,
+  message: {
+    success: false,
+    error: 'Too many password reset attempts. Please try again later.',
+    code: 'AUTH_FORGOT_PASSWORD_RATE_LIMIT_EXCEEDED',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Strict auth endpoint-specific rate limiting
+app.use(`${env.API_PREFIX}/auth/login`, authLoginLimiter);
+app.use(`${env.API_PREFIX}/auth/register`, authRegisterLimiter);
+app.use(`${env.API_PREFIX}/auth/refresh-token`, authRefreshLimiter);
+app.use(`${env.API_PREFIX}/auth/forgot-password`, authForgotPasswordLimiter);
+app.use(`${env.API_PREFIX}/auth/verify-reset-code`, authForgotPasswordLimiter);
+app.use(`${env.API_PREFIX}/auth/reset-password`, authForgotPasswordLimiter);
 
 // API routes
 app.use(env.API_PREFIX, routes);

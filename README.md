@@ -58,7 +58,7 @@ avy-erp-backend/
 - **Cache**: Redis
 - **Queue**: Bull (Redis-based)
 - **Authentication**: JWT
-- **Validation**: Joi & Zod
+- **Validation**: Zod
 - **Logging**: Winston
 
 ## 📋 Prerequisites

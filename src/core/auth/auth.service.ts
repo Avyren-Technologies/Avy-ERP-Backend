@@ -1,20 +1,31 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
 import { env } from '../../config/env';
 import { platformPrisma } from '../../config/database';
 import { cacheRedis } from '../../config/redis';
 import { AuthError } from '../../shared/errors';
-import { hashPassword, comparePassword, generateId, createUserCacheKey } from '../../shared/utils';
+import {
+  hashPassword,
+  comparePassword,
+  createAccessTokenBlacklistKey,
+  createRefreshTokenBlacklistKey,
+  createUserCacheKey,
+} from '../../shared/utils';
 import { logger } from '../../config/logger';
 import {
   LoginRequest,
   RegisterRequest,
   RefreshTokenRequest,
   ChangePasswordRequest,
+  ForgotPasswordRequest,
+  VerifyResetCodeRequest,
+  ResetPasswordRequest,
   AuthResponse,
   JWTPayload,
   TokenPair
 } from './auth.types';
+import { sendPasswordResetCode } from '../../infrastructure/email/email.service';
+
+const JWT_ALGORITHM: jwt.Algorithm = 'HS256';
 
 export class AuthService {
   // Login user
@@ -24,7 +35,13 @@ export class AuthService {
     // Find user
     const user = await platformPrisma.user.findUnique({
       where: { email },
-      include: { company: true },
+      include: {
+        company: {
+          include: {
+            tenant: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -52,8 +69,8 @@ export class AuthService {
     const tokens = await this.generateTokens({
       userId: user.id,
       email: user.email,
-      tenantId: user.company?.tenant?.id,
-      companyId: user.companyId,
+      tenantId: user.company?.tenant?.id ?? undefined,
+      companyId: user.companyId ?? undefined,
       roleId: user.role,
       permissions: await this.getUserPermissions(user.id),
     });
@@ -73,16 +90,18 @@ export class AuthService {
 
     logger.info(`User logged in: ${user.email}`);
 
+    const responseUser: AuthResponse['user'] = {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      ...(user.companyId ? { companyId: user.companyId } : {}),
+      ...(user.company?.tenant?.id ? { tenantId: user.company.tenant.id } : {}),
+    };
+
     return {
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        companyId: user.companyId,
-        tenantId: user.company?.tenant?.id,
-      },
+      user: responseUser,
       tokens,
     };
   }
@@ -111,7 +130,7 @@ export class AuthService {
           contactPerson: {
             name: `${firstName} ${lastName}`,
             email,
-            phone: phone || '',
+            phone,
           },
         },
       });
@@ -204,10 +223,12 @@ export class AuthService {
 
     try {
       // Verify refresh token
-      const decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as JWTPayload;
+      const decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET, {
+        algorithms: [JWT_ALGORITHM],
+      }) as JWTPayload;
 
       // Check if refresh token is blacklisted
-      const isBlacklisted = await cacheRedis.get(`refresh_blacklist:${refreshToken}`);
+      const isBlacklisted = await cacheRedis.get(createRefreshTokenBlacklistKey(refreshToken));
       if (isBlacklisted) {
         throw AuthError.invalidToken();
       }
@@ -223,7 +244,7 @@ export class AuthService {
       });
 
       // Blacklist old refresh token
-      await cacheRedis.setex(`refresh_blacklist:${refreshToken}`, 86400, 'true'); // 24 hours
+      await cacheRedis.setex(createRefreshTokenBlacklistKey(refreshToken), 86400, 'true'); // 24 hours
 
       return tokens;
     } catch (error) {
@@ -268,10 +289,122 @@ export class AuthService {
     logger.info(`Password changed for user: ${user.email}`);
   }
 
+  // Forgot password — generate and email a 6-digit code
+  async forgotPassword(data: ForgotPasswordRequest): Promise<void> {
+    const { email } = data;
+
+    // Always return success to prevent email enumeration
+    const user = await platformPrisma.user.findUnique({ where: { email } });
+    if (!user || !user.isActive) {
+      logger.info(`Forgot password requested for non-existent/inactive email: ${email}`);
+      return;
+    }
+
+    // Generate 6-digit code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedCode = await hashPassword(code);
+
+    // Delete any existing tokens for this user
+    await platformPrisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
+
+    // Create new token with 15-minute expiry
+    await platformPrisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        code: hashedCode,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
+
+    // Send email
+    try {
+      await sendPasswordResetCode(user.email, code, user.firstName);
+      logger.info(`Password reset code sent to: ${user.email}`);
+    } catch (error) {
+      logger.error(`Failed to send password reset email to ${user.email}:`, error);
+    }
+  }
+
+  // Verify reset code without consuming it
+  async verifyResetCode(data: VerifyResetCodeRequest): Promise<boolean> {
+    const { email, code } = data;
+
+    const user = await platformPrisma.user.findUnique({ where: { email } });
+    if (!user) {
+      throw AuthError.invalidResetCode();
+    }
+
+    const token = await platformPrisma.passwordResetToken.findFirst({
+      where: {
+        userId: user.id,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!token) {
+      throw AuthError.resetCodeExpired();
+    }
+
+    const isCodeValid = await comparePassword(code, token.code);
+    if (!isCodeValid) {
+      throw AuthError.invalidResetCode();
+    }
+
+    return true;
+  }
+
+  // Reset password using verified code
+  async resetPassword(data: ResetPasswordRequest): Promise<void> {
+    const { email, code, newPassword } = data;
+
+    const user = await platformPrisma.user.findUnique({ where: { email } });
+    if (!user) {
+      throw AuthError.invalidResetCode();
+    }
+
+    const token = await platformPrisma.passwordResetToken.findFirst({
+      where: {
+        userId: user.id,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!token) {
+      throw AuthError.resetCodeExpired();
+    }
+
+    const isCodeValid = await comparePassword(code, token.code);
+    if (!isCodeValid) {
+      throw AuthError.invalidResetCode();
+    }
+
+    // Hash new password and update user
+    const hashedPassword = await hashPassword(newPassword);
+    await platformPrisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword },
+    });
+
+    // Mark token as used
+    await platformPrisma.passwordResetToken.update({
+      where: { id: token.id },
+      data: { usedAt: new Date() },
+    });
+
+    // Clear user cache
+    await cacheRedis.del(createUserCacheKey(user.id, 'auth'));
+
+    logger.info(`Password reset completed for user: ${user.email}`);
+  }
+
   // Logout user
   async logout(userId: string, accessToken: string): Promise<void> {
     // Blacklist access token
-    await cacheRedis.setex(`blacklist:${accessToken}`, 900, 'true'); // 15 minutes
+    await cacheRedis.setex(createAccessTokenBlacklistKey(accessToken), 900, 'true'); // 15 minutes
 
     // Clear user cache
     await cacheRedis.del(createUserCacheKey(userId, 'auth'));
@@ -283,14 +416,16 @@ export class AuthService {
   private async generateTokens(payload: Omit<JWTPayload, 'iat' | 'exp'>): Promise<TokenPair> {
     const accessToken = jwt.sign(payload as object, env.JWT_SECRET, {
       expiresIn: env.JWT_EXPIRES_IN,
+      algorithm: JWT_ALGORITHM,
     } as any);
 
     const refreshToken = jwt.sign(payload as object, env.JWT_REFRESH_SECRET, {
       expiresIn: env.JWT_REFRESH_EXPIRES_IN,
+      algorithm: JWT_ALGORITHM,
     } as any);
 
     // Calculate expiry time
-    const expiresIn = env.JWT_EXPIRES_IN === '15m' ? 900 : 3600; // Default to 15 minutes or 1 hour
+    const expiresIn = this.parseExpiresInToSeconds(env.JWT_EXPIRES_IN);
 
     return {
       accessToken,
@@ -333,6 +468,35 @@ export class AuthService {
   private async cacheUserData(userId: string, userData: any): Promise<void> {
     const cacheKey = createUserCacheKey(userId, 'auth');
     await cacheRedis.setex(cacheKey, 1800, JSON.stringify(userData)); // 30 minutes
+  }
+
+  private parseExpiresInToSeconds(expiresIn: string): number {
+    const numericValue = Number(expiresIn);
+    if (Number.isFinite(numericValue) && numericValue > 0) {
+      return Math.floor(numericValue);
+    }
+
+    const match = /^(\d+)\s*([smhdw])$/i.exec(expiresIn.trim());
+    if (!match) {
+      return 900;
+    }
+
+    const value = Number(match[1] || 0);
+    const unit = (match[2] || '').toLowerCase();
+    const unitMap: Record<string, number> = {
+      s: 1,
+      m: 60,
+      h: 60 * 60,
+      d: 60 * 60 * 24,
+      w: 60 * 60 * 24 * 7,
+    };
+
+    const multiplier = unitMap[unit];
+    if (!multiplier) {
+      return 900;
+    }
+
+    return value * multiplier;
   }
 }
 

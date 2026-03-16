@@ -8,7 +8,7 @@ export interface RegisterRequest {
   password: string;
   firstName: string;
   lastName: string;
-  phone?: string;
+  phone: string;
   companyName: string;
 }
 
@@ -53,4 +53,19 @@ export interface TokenPair {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface VerifyResetCodeRequest {
+  email: string;
+  code: string;
+}
+
+export interface ResetPasswordRequest {
+  email: string;
+  code: string;
+  newPassword: string;
 }

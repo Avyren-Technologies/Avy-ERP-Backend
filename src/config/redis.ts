@@ -1,13 +1,17 @@
 import Redis from 'ioredis';
 import { env } from './env';
 import { logger } from './logger';
+import { getRedisModulePrefix } from '../shared/utils';
+
+const redisUrl = new URL(env.REDIS_URL);
 
 // Parse Redis URL
 const getRedisConfig = (db: number) => {
-  const url = new URL(env.REDIS_URL);
   return {
-    host: url.hostname,
-    port: parseInt(url.port) || 6379,
+    host: redisUrl.hostname,
+    port: parseInt(redisUrl.port, 10) || 6379,
+    ...(redisUrl.username ? { username: decodeURIComponent(redisUrl.username) } : {}),
+    ...(redisUrl.password ? { password: decodeURIComponent(redisUrl.password) } : {}),
     db,
     lazyConnect: true,
     maxRetriesPerRequest: 3,
@@ -15,14 +19,26 @@ const getRedisConfig = (db: number) => {
   };
 };
 
+export const getBullQueueConfig = (moduleName: string) => ({
+  redis: {
+    host: redisUrl.hostname,
+    port: parseInt(redisUrl.port, 10) || 6379,
+    ...(redisUrl.username ? { username: decodeURIComponent(redisUrl.username) } : {}),
+    ...(redisUrl.password ? { password: decodeURIComponent(redisUrl.password) } : {}),
+    db: env.REDIS_QUEUE_DB,
+  },
+  prefix: getRedisModulePrefix(moduleName, 'queue'),
+  defaultJobOptions: {
+    removeOnComplete: env.QUEUE_REMOVE_ON_COMPLETE,
+    removeOnFail: env.QUEUE_REMOVE_ON_FAIL,
+  },
+});
+
 // Cache Redis instance
 export const cacheRedis = new Redis(getRedisConfig(env.REDIS_CACHE_DB));
 
 // Queue Redis instance
 export const queueRedis = new Redis(getRedisConfig(env.REDIS_QUEUE_DB));
-
-// Session Redis instance
-export const sessionRedis = new Redis(getRedisConfig(env.REDIS_SESSION_DB));
 
 // Redis connection event handlers
 function setupRedisEvents(redis: Redis, name: string) {
@@ -49,7 +65,6 @@ function setupRedisEvents(redis: Redis, name: string) {
 
 setupRedisEvents(cacheRedis, 'Cache');
 setupRedisEvents(queueRedis, 'Queue');
-setupRedisEvents(sessionRedis, 'Session');
 
 // Health check functions
 export async function checkRedisConnection(redis: Redis, name: string): Promise<boolean> {
@@ -65,9 +80,24 @@ export async function checkRedisConnection(redis: Redis, name: string): Promise<
 export async function checkAllRedisConnections(): Promise<boolean> {
   const cacheOk = await checkRedisConnection(cacheRedis, 'Cache');
   const queueOk = await checkRedisConnection(queueRedis, 'Queue');
-  const sessionOk = await checkRedisConnection(sessionRedis, 'Session');
 
-  return cacheOk && queueOk && sessionOk;
+  return cacheOk && queueOk;
+}
+
+// Scan all keys matching a pattern and delete them in batches.
+// Uses the non-blocking SCAN cursor instead of the blocking KEYS command.
+export async function scanAndDelete(redis: Redis, pattern: string): Promise<number> {
+  let cursor = '0';
+  let deleted = 0;
+  do {
+    const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+    cursor = nextCursor;
+    if (keys.length > 0) {
+      await redis.del(keys);
+      deleted += keys.length;
+    }
+  } while (cursor !== '0');
+  return deleted;
 }
 
 // Graceful shutdown
@@ -76,7 +106,6 @@ export async function disconnectRedis(): Promise<void> {
     await Promise.all([
       cacheRedis.disconnect(),
       queueRedis.disconnect(),
-      sessionRedis.disconnect(),
     ]);
     logger.info('✅ All Redis connections disconnected');
   } catch (error) {

@@ -15,9 +15,9 @@ const envSchema = z.object({
 
   // Redis
   REDIS_URL: z.string(),
+  REDIS_KEY_PREFIX: z.string().default('avy:erp-backend'),
   REDIS_CACHE_DB: z.coerce.number().default(0),
   REDIS_QUEUE_DB: z.coerce.number().default(1),
-  REDIS_SESSION_DB: z.coerce.number().default(2),
 
   // JWT
   JWT_SECRET: z.string(),
@@ -55,6 +55,12 @@ const envSchema = z.object({
   BCRYPT_ROUNDS: z.coerce.number().default(12),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(100),
+  AUTH_LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
+  AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(5),
+  AUTH_REGISTER_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(3600000),
+  AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(5),
+  AUTH_REFRESH_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
+  AUTH_REFRESH_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(20),
 
   // File Upload
   MAX_FILE_SIZE: z.coerce.number().default(10485760), // 10MB
