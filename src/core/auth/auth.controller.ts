@@ -4,12 +4,13 @@ import { authService } from './auth.service';
 import { AuthError } from '../../shared/errors';
 import { validateLogin, validateRegister, validateRefreshToken, validateChangePassword, validateForgotPassword, validateVerifyResetCode, validateResetPassword } from '../../shared/validators';
 import { createSuccessResponse } from '../../shared/utils';
+import type { LoginRequest, RegisterRequest, RefreshTokenRequest, ChangePasswordRequest, ForgotPasswordRequest, VerifyResetCodeRequest, ResetPasswordRequest } from './auth.types';
 import { asyncHandler } from '../../middleware/error.middleware';
 
 export class AuthController {
   // Login
   login = asyncHandler(async (req: Request, res: Response) => {
-    const loginData = validateLogin(req.body);
+    const loginData = validateLogin(req.body) as LoginRequest;
     const result = await authService.login(loginData);
 
     res.json(createSuccessResponse(result, 'Login successful'));
@@ -17,7 +18,7 @@ export class AuthController {
 
   // Register
   register = asyncHandler(async (req: Request, res: Response) => {
-    const registerData = validateRegister(req.body);
+    const registerData = validateRegister(req.body) as RegisterRequest;
     const result = await authService.register(registerData);
 
     res.status(201).json(createSuccessResponse(result, 'Registration successful'));
@@ -25,7 +26,7 @@ export class AuthController {
 
   // Refresh token
   refreshToken = asyncHandler(async (req: Request, res: Response) => {
-    const refreshData = validateRefreshToken(req.body);
+    const refreshData = validateRefreshToken(req.body) as RefreshTokenRequest;
     const tokens = await authService.refreshToken(refreshData);
 
     res.json(createSuccessResponse({ tokens }, 'Token refreshed successfully'));
@@ -33,7 +34,7 @@ export class AuthController {
 
   // Change password
   changePassword = asyncHandler(async (req: Request, res: Response) => {
-    const passwordData = validateChangePassword(req.body);
+    const passwordData = validateChangePassword(req.body) as ChangePasswordRequest;
     await authService.changePassword(req.user!.id, passwordData);
 
     res.json(createSuccessResponse(null, 'Password changed successfully'));
@@ -58,7 +59,7 @@ export class AuthController {
 
   // Forgot password
   forgotPassword = asyncHandler(async (req: Request, res: Response) => {
-    const data = validateForgotPassword(req.body);
+    const data = validateForgotPassword(req.body) as ForgotPasswordRequest;
     await authService.forgotPassword(data);
 
     // Always return success to prevent email enumeration
@@ -67,7 +68,7 @@ export class AuthController {
 
   // Verify reset code
   verifyResetCode = asyncHandler(async (req: Request, res: Response) => {
-    const data = validateVerifyResetCode(req.body);
+    const data = validateVerifyResetCode(req.body) as VerifyResetCodeRequest;
     await authService.verifyResetCode(data);
 
     res.json(createSuccessResponse(null, 'Reset code verified successfully'));
@@ -75,7 +76,7 @@ export class AuthController {
 
   // Reset password
   resetPassword = asyncHandler(async (req: Request, res: Response) => {
-    const data = validateResetPassword(req.body);
+    const data = validateResetPassword(req.body) as ResetPasswordRequest;
     await authService.resetPassword(data);
 
     res.json(createSuccessResponse(null, 'Password reset successful'));

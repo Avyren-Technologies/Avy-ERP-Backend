@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import swaggerUi from 'swagger-ui-express';
 import { env } from '../config/env';
 import { authMiddleware, requirePermissions } from '../middleware/auth.middleware';
 import { tenantMiddleware, requireTenant, validateTenantAccess } from '../middleware/tenant.middleware';
+import { buildOpenApiSpec } from './openapi';
 
 // Import core module routes
 import { authRoutes } from '../core/auth/auth.routes';
@@ -37,6 +39,26 @@ router.get('/health', (req, res) => {
 
 // Authentication routes (no tenant required)
 router.use('/auth', authRoutes);
+
+// API documentation (gated by ENABLE_SWAGGER env)
+if (env.ENABLE_SWAGGER) {
+  router.get('/openapi.json', (_req, res) => {
+    res.status(200).json(buildOpenApiSpec(router));
+  });
+
+  router.use('/docs', swaggerUi.serve);
+  router.get(
+    '/docs',
+    swaggerUi.setup(undefined, {
+      explorer: true,
+      customSiteTitle: `${env.APP_NAME} API Docs`,
+      swaggerOptions: {
+        url: `${env.API_PREFIX}/openapi.json`,
+        persistAuthorization: true,
+      },
+    })
+  );
+}
 
 // Super-admin only routes (platform level, no tenant context)
 router.use(
@@ -76,11 +98,6 @@ router.use('/reports', reportsRoutes);
 // Core tenant routes (for company admins)
 router.use('/rbac', rbacRoutes);
 router.use('/feature-toggles', featureToggleRoutes);
-
-// API documentation (gated by ENABLE_SWAGGER env)
-if (env.ENABLE_SWAGGER) {
-  // TODO: Mount Swagger UI and spec (e.g. swagger-ui-express) when added
-}
 
 // Export router
 export { router as routes };

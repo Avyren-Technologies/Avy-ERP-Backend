@@ -4,6 +4,7 @@ import { validateCreateRole, validateUpdateRole } from '../../shared/validators'
 import { createSuccessResponse } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { AuthError } from '../../shared/errors';
+import type { CreateRoleRequest, UpdateRoleRequest } from './rbac.types';
 
 export class RbacController {
   // List roles for the current tenant
@@ -30,7 +31,7 @@ export class RbacController {
     if (!tenantId) throw AuthError.tenantNotFound();
 
     const data = validateCreateRole(req.body);
-    const role = await rbacService.createRole(tenantId, data);
+    const role = await rbacService.createRole(tenantId, data as CreateRoleRequest);
     res.status(201).json(createSuccessResponse(role, 'Role created successfully'));
   });
 
@@ -40,7 +41,7 @@ export class RbacController {
     if (!tenantId) throw AuthError.tenantNotFound();
 
     const data = validateUpdateRole(req.body);
-    const role = await rbacService.updateRole(req.params.id!, tenantId, data);
+    const role = await rbacService.updateRole(req.params.id!, tenantId, data as UpdateRoleRequest);
     res.json(createSuccessResponse(role, 'Role updated successfully'));
   });
 

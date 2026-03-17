@@ -17,7 +17,7 @@ if (env.NODE_ENV === 'production') {
 } else {
   if (!global.__prisma) {
     global.__prisma = new PrismaClient({
-      log: ['query', 'error', 'warn'],
+      log: ['error', 'warn'],
     });
   }
   prisma = global.__prisma;
@@ -33,7 +33,7 @@ export function createTenantPrisma(schemaName: string): PrismaClient {
         url: databaseUrl,
       },
     },
-    log: env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error', 'warn'],
+    log: ['error', 'warn'],
   });
 }
 

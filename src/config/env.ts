@@ -4,6 +4,26 @@ import { z } from 'zod';
 // Load environment variables
 dotenv.config();
 
+const envBoolean = z.preprocess((value) => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+
+    if (['true', '1', 'yes', 'on'].includes(normalized)) {
+      return true;
+    }
+
+    if (['false', '0', 'no', 'off', ''].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return value;
+}, z.boolean());
+
 // Environment schema validation
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
@@ -75,8 +95,8 @@ const envSchema = z.object({
   QUEUE_REMOVE_ON_FAIL: z.coerce.number().default(100),
 
   // Features
-  ENABLE_SWAGGER: z.coerce.boolean().default(false),
-  ENABLE_CORS: z.coerce.boolean().default(true),
+  ENABLE_SWAGGER: envBoolean.default(false),
+  ENABLE_CORS: envBoolean.default(true),
 });
 
 // Parse and validate environment variables
