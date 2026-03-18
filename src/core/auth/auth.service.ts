@@ -9,6 +9,7 @@ import {
   createAccessTokenBlacklistKey,
   createRefreshTokenBlacklistKey,
   createUserCacheKey,
+  createRedisPattern,
 } from '../../shared/utils';
 import { logger } from '../../config/logger';
 import {
@@ -65,6 +66,9 @@ export class AuthService {
       data: { lastLogin: new Date() },
     });
 
+    // Fetch permissions once to avoid duplicate DB queries
+    const permissions = await this.getUserPermissions(user.id);
+
     // Generate tokens
     const tokens = await this.generateTokens({
       userId: user.id,
@@ -72,7 +76,7 @@ export class AuthService {
       tenantId: user.company?.tenant?.id ?? undefined,
       companyId: user.companyId ?? undefined,
       roleId: user.role,
-      permissions: await this.getUserPermissions(user.id),
+      permissions,
     });
 
     // Cache user data
@@ -84,7 +88,7 @@ export class AuthService {
       tenantId: user.company?.tenant?.id,
       companyId: user.companyId,
       roleId: user.role,
-      permissions: await this.getUserPermissions(user.id),
+      permissions,
       isActive: user.isActive,
     });
 
@@ -178,6 +182,9 @@ export class AuthService {
       return { user, tenant, company };
     });
 
+    // Fetch permissions once to avoid duplicate DB queries
+    const permissions = await this.getUserPermissions(result.user.id);
+
     // Generate tokens
     const tokens = await this.generateTokens({
       userId: result.user.id,
@@ -185,7 +192,7 @@ export class AuthService {
       tenantId: result.tenant.id,
       companyId: result.company.id,
       roleId: result.user.role,
-      permissions: await this.getUserPermissions(result.user.id),
+      permissions,
     });
 
     // Cache user data
@@ -197,7 +204,7 @@ export class AuthService {
       tenantId: result.tenant.id,
       companyId: result.company.id,
       roleId: result.user.role,
-      permissions: await this.getUserPermissions(result.user.id),
+      permissions,
       isActive: result.user.isActive,
     });
 
@@ -243,8 +250,8 @@ export class AuthService {
         permissions: decoded.permissions,
       });
 
-      // Blacklist old refresh token
-      await cacheRedis.setex(createRefreshTokenBlacklistKey(refreshToken), 86400, 'true'); // 24 hours
+      // Blacklist old refresh token for its full 7-day lifespan
+      await cacheRedis.setex(createRefreshTokenBlacklistKey(refreshToken), 604800, 'true'); // 7 days
 
       return tokens;
     } catch (error) {
@@ -403,13 +410,30 @@ export class AuthService {
 
   // Logout user
   async logout(userId: string, accessToken: string): Promise<void> {
-    // Blacklist access token
+    // Blacklist access token for its full 15-minute lifespan
     await cacheRedis.setex(createAccessTokenBlacklistKey(accessToken), 900, 'true'); // 15 minutes
 
-    // Clear user cache
+    // Clear user auth cache
     await cacheRedis.del(createUserCacheKey(userId, 'auth'));
 
+    // Clear all tenant-scoped permissions caches for this user using a pattern scan
+    // Pattern: avy:erp-backend:rbac:user:{userId}:tenant:*:permissions
+    const permissionsPattern = createRedisPattern('rbac', `user:${userId}:tenant:*:permissions`);
+    await this.deleteByPattern(permissionsPattern);
+
     logger.info(`User logged out: ${userId}`);
+  }
+
+  /** Delete all Redis keys matching a glob pattern using non-blocking SCAN. */
+  private async deleteByPattern(pattern: string): Promise<void> {
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await cacheRedis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await cacheRedis.del(...keys);
+      }
+    } while (cursor !== '0');
   }
 
   // Generate JWT tokens

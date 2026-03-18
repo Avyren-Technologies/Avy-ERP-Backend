@@ -191,7 +191,19 @@ function getRolePermissions(role: string): string[] {
 }
 
 export async function blacklistToken(token: string, expirySeconds?: number): Promise<void> {
-  const ttl = expirySeconds || (env.JWT_EXPIRES_IN === '15m' ? 900 : 3600); // Default to 15 minutes or 1 hour
+  const ttl = expirySeconds ?? parseJwtExpiryToSeconds(env.JWT_EXPIRES_IN);
   await cacheRedis.setex(createAccessTokenBlacklistKey(token), ttl, 'true');
   logger.info(`Token blacklisted for ${ttl} seconds`);
+}
+
+/** Parse a JWT expiry string (e.g. '15m', '7d', '3600') to seconds. */
+function parseJwtExpiryToSeconds(expiresIn: string): number {
+  const numeric = Number(expiresIn);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.floor(numeric);
+  const match = /^(\d+)\s*([smhdw])$/i.exec(expiresIn.trim());
+  if (!match) return 900; // safe fallback: 15 minutes
+  const value = Number(match[1] || 0);
+  const unit = (match[2] || '').toLowerCase();
+  const units: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800 };
+  return value * (units[unit] ?? 1);
 }
