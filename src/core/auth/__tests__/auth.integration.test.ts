@@ -40,7 +40,7 @@ jest.mock('../../../config/database', () => ({
 }));
 
 jest.mock('../../../config/redis', () => ({
-  cacheRedis: { get: jest.fn(), set: jest.fn(), setex: jest.fn(), del: jest.fn() },
+  cacheRedis: { get: jest.fn(), set: jest.fn(), setex: jest.fn(), del: jest.fn(), scan: jest.fn() },
   queueRedis: { get: jest.fn(), setex: jest.fn(), del: jest.fn() },
 }));
 
@@ -128,6 +128,8 @@ beforeEach(() => {
   mockRedis.get.mockResolvedValue(null);
   mockRedis.setex.mockResolvedValue('OK');
   mockRedis.del.mockResolvedValue(1);
+  // deleteByPattern() should not throw during logout
+  (mockRedis as any).scan.mockResolvedValue(['0', []]);
 });
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,8 @@ import { tenantRoutes } from '../core/tenant/tenant.routes';
 import { rbacRoutes } from '../core/rbac/rbac.routes';
 import { companyRoutes } from '../core/company/company.routes';
 import { billingRoutes } from '../core/billing/billing.routes';
+import { dashboardPlatformRoutes, dashboardTenantRoutes } from '../core/dashboard/dashboard.routes';
+import { auditRoutes } from '../core/audit/audit.routes';
 import { featureToggleRoutes } from '../core/feature-toggle/feature-toggle.routes';
 
 // Import business module routes
@@ -71,6 +73,8 @@ router.use(
 router.use('/platform/tenants', tenantRoutes);
 router.use('/platform/companies', companyRoutes);
 router.use('/platform/billing', billingRoutes);
+router.use('/platform/dashboard', dashboardPlatformRoutes);
+router.use('/platform/audit-logs', auditRoutes);
 
 // Tenant-scoped routes (require tenant context)
 router.use(
@@ -96,6 +100,7 @@ router.use('/maintenance', maintenanceRoutes);
 router.use('/reports', reportsRoutes);
 
 // Core tenant routes (for company admins)
+router.use('/dashboard', dashboardTenantRoutes);
 router.use('/rbac', rbacRoutes);
 router.use('/feature-toggles', featureToggleRoutes);
 

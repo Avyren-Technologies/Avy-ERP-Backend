@@ -41,6 +41,8 @@ jest.mock('../../../config/redis', () => ({
     set: jest.fn(),
     setex: jest.fn(),
     del: jest.fn(),
+    // Used by AuthService.deleteByPattern() during logout
+    scan: jest.fn(),
   },
 }));
 
@@ -107,11 +109,14 @@ describe('AuthService', () => {
   let service: AuthService;
 
   beforeEach(() => {
+    jest.resetAllMocks();
     service = new AuthService();
     // Default: Redis get returns null (cache miss) so code falls through to DB
     mockRedis.get.mockResolvedValue(null);
     mockRedis.setex.mockResolvedValue('OK');
     mockRedis.del.mockResolvedValue(1);
+    // SCAN loop terminates immediately with no keys
+    mockRedis.scan.mockResolvedValue(['0', []]);
   });
 
   // =========================================================================
@@ -263,7 +268,7 @@ describe('AuthService', () => {
       // Old token should be blacklisted
       expect(mockRedis.setex).toHaveBeenCalledWith(
         createRefreshTokenBlacklistKey(token),
-        86400,
+        604800,
         'true'
       );
     });

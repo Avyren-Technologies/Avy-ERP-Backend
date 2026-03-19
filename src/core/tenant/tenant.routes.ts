@@ -7,7 +7,16 @@ const router = Router();
 // All tenant routes require super-admin permissions
 router.use(requirePermissions(['platform:admin']));
 
-// Tenant management routes
+// ── Onboarding ────────────────────────────────────────────────────────
+router.post('/onboard', tenantController.onboardTenant);
+
+// ── Company detail & section updates ──────────────────────────────────
+router.get('/company/:companyId/detail', tenantController.getFullCompanyDetail);
+router.patch('/company/:companyId/section/:sectionKey', tenantController.updateCompanySection);
+router.patch('/company/:companyId/status', tenantController.updateCompanyStatus);
+router.delete('/company/:companyId', tenantController.deleteCompany);
+
+// ── Existing tenant management routes ─────────────────────────────────
 router.post('/', tenantController.createTenant);
 router.get('/', tenantController.listTenants);
 router.get('/stats', tenantController.getTenantStats);

@@ -38,14 +38,79 @@ model Company {
   size        CompanySize
   website     String?
   gstNumber   String?  @unique
-  address     Json     // Street, city, state, country, pincode
-  contactPerson Json   // Name, email, phone
+  address     Json?    // Street, city, state, country, pincode (legacy, use registeredAddress/corporateAddress)
+  contactPerson Json?  // Name, email, phone (legacy, use contacts relation)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // === Step 1: Company Identity ===
+  displayName       String?
+  legalName         String?
+  shortName         String?
+  businessType      String?
+  companyCode       String?  @unique
+  cin               String?
+  incorporationDate String?
+  employeeCount     String?
+  emailDomain       String?
+  logoUrl           String?
+
+  // === Step 2: Statutory & Tax ===
+  pan               String?
+  tan               String?
+  gstin             String?
+  pfRegNo           String?
+  esiCode           String?
+  ptReg             String?
+  lwfrNo            String?
+  rocState          String?
+
+  // === Step 3: Address ===
+  registeredAddress Json?    // { line1, line2, city, district, state, pin, country, stdCode }
+  corporateAddress  Json?    // Same structure, null if sameAsRegistered
+  sameAsRegistered  Boolean  @default(true)
+
+  // === Step 4: Fiscal & Calendar ===
+  fiscalConfig      Json?    // { fyType, fyCustomStartMonth?, fyCustomEndMonth?, payrollFreq, cutoffDay, disbursementDay, weekStart, timezone, workingDays }
+
+  // === Step 5: Preferences ===
+  preferences       Json?    // { currency, language, dateFormat, numberFormat, timeFormat, indiaCompliance, multiCurrency, ess, mobileApp, webApp, systemApp, aiChatbot, eSign, biometric, bankIntegration, emailNotif, whatsapp }
+  razorpayConfig    Json?    // { enabled, keyId, keySecret, webhookSecret, accountNumber, autoDisbursement, testMode }
+
+  // === Step 6: Backend Endpoint ===
+  endpointType      String   @default("default") // 'default' | 'custom'
+  customEndpointUrl String?
+
+  // === Step 7 & 8: Modules & Tier (company-level / common) ===
+  multiLocationMode   Boolean @default(false)
+  locationConfig      String  @default("common") // 'common' | 'per-location'
+  selectedModuleIds   Json?   // string[] of module IDs (used when locationConfig=common)
+  customModulePricing Json?   // Record<string, number>
+  userTier            String? // starter/growth/scale/enterprise/custom
+  customUserLimit     String?
+  customTierPrice     String?
+  billingCycle        String? @default("monthly")
+  trialDays           Int     @default(0)
+
+  // === Step 11: Shifts & Time ===
+  dayStartTime      String?
+  dayEndTime        String?
+  weeklyOffs        Json?    // string[] e.g. ["Sunday"]
+
+  // === Step 14: System Controls ===
+  systemControls    Json?    // { ncEditMode, loadUnload, cycleTime, payrollLock, leaveCarryForward, overtimeApproval, mfa }
+
+  // === Wizard Status ===
+  wizardStatus      String   @default("Draft") // Draft/Pilot/Active/Inactive
 
   // Relations
   tenant      Tenant?
   users       User[]
+  locations   Location[]
+  contacts    CompanyContact[]
+  shifts      CompanyShift[]
+  noSeries    NoSeriesConfig[]
+  iotReasons  IotReason[]
 
   @@map("companies")
 }
@@ -196,6 +261,132 @@ model AuditLog {
   timestamp   DateTime @default(now())
 
   @@map("audit_logs")
+}
+
+// ==========================================
+// TENANT ONBOARDING MODELS
+// ==========================================
+
+// Plants & Branches (Step 10)
+model Location {
+  id                  String   @id @default(cuid())
+  companyId           String
+  name                String
+  code                String
+  facilityType        String
+  customFacilityType  String?
+  status              String   @default("Active")
+  isHQ                Boolean  @default(false)
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  district            String?
+  state               String?
+  pin                 String?
+  country             String?  @default("India")
+  stdCode             String?
+  gstin               String?
+  stateGST            String?
+  contactName         String?
+  contactDesignation  String?
+  contactEmail        String?
+  contactCountryCode  String?  @default("+91")
+  contactPhone        String?
+  geoEnabled          Boolean  @default(false)
+  geoLocationName     String?
+  geoLat              String?
+  geoLng              String?
+  geoRadius           Int      @default(50)
+  geoShape            String?  @default("circle")
+  moduleIds           Json?
+  customModulePricing Json?
+  userTier            String?
+  customUserLimit     String?
+  customTierPrice     String?
+  billingCycle        String?  @default("monthly")
+  trialDays           Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, code])
+  @@map("locations")
+}
+
+// Key Contacts (Step 9)
+model CompanyContact {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  designation String?
+  department  String?
+  type        String
+  email       String
+  countryCode String   @default("+91")
+  mobile      String
+  linkedin    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_contacts")
+}
+
+// Shifts (Step 11)
+model CompanyShift {
+  id            String   @id @default(cuid())
+  companyId     String
+  name          String
+  fromTime      String
+  toTime        String
+  noShuffle     Boolean  @default(false)
+  downtimeSlots Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_shifts")
+}
+
+// Number Series (Step 12)
+model NoSeriesConfig {
+  id           String   @id @default(cuid())
+  companyId    String
+  code         String
+  linkedScreen String
+  description  String?
+  prefix       String
+  suffix       String?
+  numberCount  Int      @default(5)
+  startNumber  Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, code])
+  @@map("no_series_configs")
+}
+
+// IOT Reasons (Step 13)
+model IotReason {
+  id          String   @id @default(cuid())
+  companyId   String
+  reasonType  String
+  reason      String
+  description String?
+  department  String?
+  planned     Boolean  @default(false)
+  duration    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("iot_reasons")
 }
 
 // ==========================================

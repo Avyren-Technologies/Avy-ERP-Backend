@@ -1,19 +1,18 @@
 import { Router } from 'express';
-import { requirePermissions } from '../../middleware/auth.middleware';
+import { billingController } from './billing.controller';
 
 const router = Router();
 
-// Billing module routes
-router.get('/subscriptions', requirePermissions(['billing:read']), (req, res) => {
-  res.json({ message: 'Subscriptions - TODO: Implement' });
-});
+// All billing routes are mounted under /platform/billing
+// which already has platform:admin permission from the main router
 
-router.get('/invoices', requirePermissions(['billing:read']), (req, res) => {
-  res.json({ message: 'Invoices - TODO: Implement' });
-});
+// Revenue summary KPIs
+router.get('/summary', billingController.getBillingSummary);
 
-router.post('/invoices/:id/pay', requirePermissions(['billing:update']), (req, res) => {
-  res.json({ message: 'Process payment - TODO: Implement' });
-});
+// List invoices (paginated, filterable by status)
+router.get('/invoices', billingController.listInvoices);
+
+// Monthly revenue chart data
+router.get('/revenue-chart', billingController.getRevenueChart);
 
 export { router as billingRoutes };

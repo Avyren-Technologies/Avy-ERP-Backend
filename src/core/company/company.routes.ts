@@ -1,19 +1,24 @@
 import { Router } from 'express';
-import { requirePermissions } from '../../middleware/auth.middleware';
+import { companyController } from './company.controller';
 
 const router = Router();
 
-// Company management routes
-router.get('/', requirePermissions(['company:read']), (req, res) => {
-  res.json({ message: 'Company list - TODO: Implement' });
-});
+// All company routes are mounted under /platform/companies
+// which already has platform:admin permission from the main router
 
-router.get('/:id', requirePermissions(['company:read']), (req, res) => {
-  res.json({ message: 'Get company - TODO: Implement' });
-});
+// List companies (paginated, searchable, filterable)
+router.get('/', companyController.listCompanies);
 
-router.put('/:id', requirePermissions(['company:update']), (req, res) => {
-  res.json({ message: 'Update company - TODO: Implement' });
-});
+// Get full company detail
+router.get('/:companyId', companyController.getCompany);
+
+// Section-based partial update
+router.patch('/:companyId/sections/:sectionKey', companyController.updateCompanySection);
+
+// Update company wizard status
+router.put('/:companyId/status', companyController.updateCompanyStatus);
+
+// Delete company
+router.delete('/:companyId', companyController.deleteCompany);
 
 export { router as companyRoutes };

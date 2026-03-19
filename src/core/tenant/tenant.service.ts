@@ -1,9 +1,18 @@
-import { Prisma, TenantStatus } from '@prisma/client';
+import { Prisma, TenantStatus, CompanySize } from '@prisma/client';
 import { platformPrisma } from '../../config/database';
 import { cacheRedis, scanAndDelete } from '../../config/redis';
 import { ApiError } from '../../shared/errors';
-import { createRedisPattern, createTenantCacheKey } from '../../shared/utils';
+import { createRedisPattern, createTenantCacheKey, hashPassword } from '../../shared/utils';
 import { logger } from '../../config/logger';
+import type {
+  OnboardTenantPayload,
+  CompanySectionKey,
+  LocationPayload,
+  ContactPayload,
+  NoSeriesPayload,
+  IotReasonPayload,
+  UserPayload,
+} from './tenant.types';
 
 export interface CreateTenantData {
   companyId: string;
@@ -16,7 +25,815 @@ export interface UpdateTenantData {
   schemaName?: string;
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────
+
+/** Convert undefined → null so Prisma nullable fields are happy with exactOptionalPropertyTypes. */
+function n<T>(value: T | undefined): T | null {
+  return value === undefined ? null : value;
+}
+
+/** Map frontend employeeCount string to a Prisma CompanySize enum value. */
+function mapCompanySize(employeeCount?: string): CompanySize {
+  if (!employeeCount) return 'SMALL';
+  const num = parseInt(employeeCount, 10);
+  if (isNaN(num)) return 'SMALL';
+  if (num <= 10) return 'STARTUP';
+  if (num <= 50) return 'SMALL';
+  if (num <= 200) return 'MEDIUM';
+  if (num <= 500) return 'LARGE';
+  return 'ENTERPRISE';
+}
+
+/** Map frontend wizard status to Prisma TenantStatus. */
+function mapWizardStatusToTenantStatus(wizardStatus?: string): TenantStatus {
+  switch (wizardStatus) {
+    case 'Active':
+      return TenantStatus.ACTIVE;
+    case 'Inactive':
+      return TenantStatus.SUSPENDED;
+    case 'Draft':
+    case 'Pilot':
+    default:
+      return TenantStatus.TRIAL;
+  }
+}
+
+/** Map userTier string from frontend to the Prisma UserTier enum key. */
+function mapUserTier(tier?: string): 'STARTER' | 'GROWTH' | 'SCALE' | 'ENTERPRISE' | 'CUSTOM' {
+  const upper = (tier || 'starter').toUpperCase();
+  if (['STARTER', 'GROWTH', 'SCALE', 'ENTERPRISE', 'CUSTOM'].includes(upper)) {
+    return upper as any;
+  }
+  return 'STARTER';
+}
+
+/** Map billingCycle string to Prisma enum. */
+function mapBillingCycle(cycle?: string): 'MONTHLY' | 'ANNUAL' {
+  return cycle?.toUpperCase() === 'ANNUAL' ? 'ANNUAL' : 'MONTHLY';
+}
+
+/** Split "Full Name" into firstName + lastName. */
+function splitName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/);
+  const firstName = parts[0] || fullName;
+  const lastName = parts.slice(1).join(' ') || '';
+  return { firstName, lastName };
+}
+
+/** Build a Prisma-compatible Location createMany data entry. */
+function buildLocationData(companyId: string, loc: LocationPayload, defaults?: { hqStdCode?: string }) {
+  const derivedStateGST = loc.stateGST || (loc.gstin ? loc.gstin.slice(0, 2) : undefined);
+  const derivedStdCode = loc.stdCode || (loc.isHQ ? defaults?.hqStdCode : undefined);
+  return {
+    companyId,
+    name: loc.name,
+    code: loc.code,
+    facilityType: loc.facilityType,
+    customFacilityType: n(loc.customFacilityType),
+    status: loc.status || 'Active',
+    isHQ: loc.isHQ ?? false,
+    addressLine1: n(loc.addressLine1),
+    addressLine2: n(loc.addressLine2),
+    city: n(loc.city),
+    district: n(loc.district),
+    state: n(loc.state),
+    pin: n(loc.pin),
+    country: n(loc.country),
+    stdCode: n(derivedStdCode),
+    gstin: n(loc.gstin),
+    stateGST: n(derivedStateGST),
+    contactName: n(loc.contactName),
+    contactDesignation: n(loc.contactDesignation),
+    contactEmail: n(loc.contactEmail),
+    contactCountryCode: n(loc.contactCountryCode),
+    contactPhone: n(loc.contactPhone),
+    geoEnabled: loc.geoEnabled ?? false,
+    geoLocationName: n(loc.geoLocationName),
+    geoLat: n(loc.geoLat),
+    geoLng: n(loc.geoLng),
+    geoRadius: loc.geoRadius ?? 50,
+    geoShape: n(loc.geoShape) ?? 'circle',
+    moduleIds: loc.moduleIds as any ?? Prisma.JsonNull,
+    customModulePricing: loc.customModulePricing as any ?? Prisma.JsonNull,
+    userTier: n(loc.userTier),
+    customUserLimit: n(loc.customUserLimit),
+    customTierPrice: n(loc.customTierPrice),
+    billingCycle: n(loc.billingCycle),
+    trialDays: loc.trialDays ?? 0,
+  };
+}
+
+/** Build a Prisma-compatible Contact createMany data entry. */
+function buildContactData(companyId: string, c: ContactPayload) {
+  return {
+    companyId,
+    name: c.name,
+    designation: n(c.designation),
+    department: n(c.department),
+    type: c.type,
+    email: c.email,
+    countryCode: c.countryCode ?? '+91',
+    mobile: c.mobile,
+    linkedin: n(c.linkedin),
+  };
+}
+
+/** Build a Prisma-compatible NoSeriesConfig createMany data entry. */
+function buildNoSeriesData(companyId: string, ns: NoSeriesPayload) {
+  return {
+    companyId,
+    code: ns.code,
+    linkedScreen: ns.linkedScreen,
+    description: n(ns.description),
+    prefix: ns.prefix,
+    suffix: n(ns.suffix),
+    numberCount: ns.numberCount ?? 5,
+    startNumber: ns.startNumber ?? 1,
+  };
+}
+
+/** Build a Prisma-compatible IotReason createMany data entry. */
+function buildIotReasonData(companyId: string, r: IotReasonPayload) {
+  return {
+    companyId,
+    reasonType: r.reasonType,
+    reason: r.reason,
+    description: n(r.description),
+    department: n(r.department),
+    planned: r.planned ?? false,
+    duration: n(r.duration),
+  };
+}
+
+// ── Service ──────────────────────────────────────────────────────────
+
 export class TenantService {
+  // ────────────────────────────────────────────────────────────────────
+  // Full wizard onboarding (atomic transaction)
+  // ────────────────────────────────────────────────────────────────────
+  async onboardTenant(payload: OnboardTenantPayload) {
+    const { identity, statutory, address, fiscal, preferences, endpoint, strategy, commercial, controls, shifts } = payload;
+
+    // Check for duplicate company code
+    const existing = await platformPrisma.company.findUnique({ where: { companyCode: identity.companyCode } });
+    if (existing) {
+      throw ApiError.conflict(`Company code "${identity.companyCode}" is already in use`);
+    }
+
+    const wizardStatus = identity.wizardStatus || 'Draft';
+    const tenantStatus = mapWizardStatusToTenantStatus(wizardStatus);
+
+    const hqStdCode = address.sameAsRegistered
+      ? address.registered?.stdCode
+      : address.corporate?.stdCode || address.registered?.stdCode;
+    const perLocationModuleIds = payload.locations.flatMap((loc) => loc.moduleIds ?? []);
+    const dedupedPerLocationModuleIds = Array.from(new Set(perLocationModuleIds));
+    const perLocationBillingCycles = payload.locations.map((loc) => loc.billingCycle).filter(Boolean) as string[];
+    const effectiveBillingCycle = strategy.locationConfig === 'per-location'
+      ? (perLocationBillingCycles[0] ?? 'monthly')
+      : (commercial?.billingCycle ?? 'monthly');
+    const effectiveTrialDays = strategy.locationConfig === 'per-location'
+      ? (payload.locations[0]?.trialDays ?? 14)
+      : (commercial?.trialDays ?? 14);
+    const effectiveUserTier = strategy.locationConfig === 'per-location'
+      ? (payload.locations[0]?.userTier ?? undefined)
+      : commercial?.userTier;
+
+    // Build razorpay config JSON (only when relevant)
+    const razorpayConfig = preferences.razorpayEnabled
+      ? {
+          enabled: true,
+          keyId: preferences.razorpayKeyId,
+          keySecret: preferences.razorpayKeySecret,
+          webhookSecret: preferences.razorpayWebhookSecret,
+          accountNumber: preferences.razorpayAccountNumber,
+          autoDisbursement: preferences.razorpayAutoDisbursement ?? false,
+          testMode: preferences.razorpayTestMode ?? true,
+        }
+      : null;
+
+    // Preferences JSON (strip razorpay fields — stored separately)
+    const preferencesJson = {
+      currency: preferences.currency,
+      language: preferences.language,
+      dateFormat: preferences.dateFormat,
+      numberFormat: preferences.numberFormat,
+      timeFormat: preferences.timeFormat,
+      indiaCompliance: preferences.indiaCompliance,
+      multiCurrency: preferences.multiCurrency,
+      ess: preferences.ess,
+      mobileApp: preferences.mobileApp,
+      webApp: preferences.webApp,
+      systemApp: preferences.systemApp,
+      aiChatbot: preferences.aiChatbot,
+      eSign: preferences.eSign,
+      biometric: preferences.biometric,
+      bankIntegration: preferences.bankIntegration,
+      emailNotif: preferences.emailNotif,
+      whatsapp: preferences.whatsapp,
+    };
+
+    const result = await platformPrisma.$transaction(async (tx) => {
+      // ── 1. Create Company ──────────────────────────────────────
+      const company = await tx.company.create({
+        data: {
+          name: identity.displayName,
+          industry: identity.industry,
+          size: mapCompanySize(identity.employeeCount),
+          website: n(identity.website),
+          gstNumber: n(statutory.gstin),
+          // Step 1 – Identity
+          displayName: identity.displayName,
+          legalName: identity.legalName,
+          shortName: n(identity.shortName),
+          businessType: identity.businessType,
+          companyCode: identity.companyCode,
+          cin: n(identity.cin),
+          incorporationDate: n(identity.incorporationDate),
+          employeeCount: n(identity.employeeCount),
+          emailDomain: identity.emailDomain,
+          logoUrl: n(identity.logoUrl),
+          // Step 2 – Statutory
+          pan: n(statutory.pan),
+          tan: n(statutory.tan),
+          gstin: n(statutory.gstin),
+          pfRegNo: n(statutory.pfRegNo),
+          esiCode: n(statutory.esiCode),
+          ptReg: n(statutory.ptReg),
+          lwfrNo: n(statutory.lwfrNo),
+          rocState: n(statutory.rocState),
+          // Step 3 – Address
+          registeredAddress: address.registered as any,
+          corporateAddress: address.sameAsRegistered ? Prisma.JsonNull : (address.corporate as any) ?? Prisma.JsonNull,
+          sameAsRegistered: address.sameAsRegistered,
+          // Step 4 – Fiscal
+          fiscalConfig: fiscal as any,
+          // Step 5 – Preferences
+          preferences: preferencesJson as any,
+          razorpayConfig: razorpayConfig as any ?? Prisma.JsonNull,
+          // Step 6 – Endpoint
+          endpointType: endpoint.endpointType,
+          customEndpointUrl: n(endpoint.customBaseUrl),
+          // Step 7 – Strategy
+          multiLocationMode: strategy.multiLocationMode,
+          locationConfig: strategy.locationConfig,
+          // Company-level commercial (common mode)
+          selectedModuleIds: strategy.locationConfig === 'per-location'
+            ? dedupedPerLocationModuleIds as any
+            : commercial?.selectedModuleIds as any ?? Prisma.JsonNull,
+          customModulePricing: strategy.locationConfig === 'per-location'
+            ? Prisma.JsonNull
+            : commercial?.customModulePricing as any ?? Prisma.JsonNull,
+          userTier: n(effectiveUserTier),
+          customUserLimit: strategy.locationConfig === 'per-location' ? null : n(commercial?.customUserLimit),
+          customTierPrice: strategy.locationConfig === 'per-location' ? null : n(commercial?.customTierPrice),
+          billingCycle: effectiveBillingCycle,
+          trialDays: effectiveTrialDays,
+          // Step 12 – Shifts (company-level fields)
+          dayStartTime: n(shifts.dayStartTime),
+          dayEndTime: n(shifts.dayEndTime),
+          weeklyOffs: shifts.weeklyOffs as any ?? Prisma.JsonNull,
+          // Step 15 – Controls
+          systemControls: controls as any,
+          // Wizard status
+          wizardStatus,
+        },
+      });
+
+      // ── 2. Create Tenant ───────────────────────────────────────
+      const schemaName = `tenant_${company.id.replace(/-/g, '_')}`;
+      const tenant = await tx.tenant.create({
+        data: {
+          companyId: company.id,
+          schemaName,
+          status: tenantStatus,
+        },
+      });
+
+      // ── 3. Locations (batch) ───────────────────────────────────
+      if (payload.locations.length > 0) {
+        await tx.location.createMany({
+          data: payload.locations.map((loc) => buildLocationData(
+            company.id,
+            loc,
+            hqStdCode ? { hqStdCode } : undefined,
+          )),
+        });
+      }
+
+      // ── 4. Contacts (batch) ────────────────────────────────────
+      if (payload.contacts.length > 0) {
+        await tx.companyContact.createMany({
+          data: payload.contacts.map((c) => buildContactData(company.id, c)),
+        });
+      }
+
+      // ── 5. Shifts (batch) ──────────────────────────────────────
+      if (shifts.items.length > 0) {
+        await tx.companyShift.createMany({
+          data: shifts.items.map((s) => ({
+            companyId: company.id,
+            name: s.name,
+            fromTime: s.fromTime,
+            toTime: s.toTime,
+            noShuffle: s.noShuffle ?? false,
+            downtimeSlots: s.downtimeSlots as any ?? Prisma.JsonNull,
+          })),
+        });
+      }
+
+      // ── 6. No. Series (batch) ──────────────────────────────────
+      if (payload.noSeries.length > 0) {
+        await tx.noSeriesConfig.createMany({
+          data: payload.noSeries.map((ns) => buildNoSeriesData(company.id, ns)),
+        });
+      }
+
+      // ── 7. IOT Reasons (batch) ─────────────────────────────────
+      if (payload.iotReasons.length > 0) {
+        await tx.iotReason.createMany({
+          data: payload.iotReasons.map((r) => buildIotReasonData(company.id, r)),
+        });
+      }
+
+      // ── 8. Subscription (default TRIAL) ────────────────────────
+      const moduleIds = strategy.locationConfig === 'per-location'
+        ? dedupedPerLocationModuleIds
+        : (commercial?.selectedModuleIds ?? []);
+      const modulesJson: Record<string, boolean> = {};
+      moduleIds.forEach((m) => { modulesJson[m] = true; });
+
+      const trialDays = effectiveTrialDays;
+      await tx.subscription.create({
+        data: {
+          tenantId: tenant.id,
+          planId: effectiveUserTier ?? 'starter',
+          userTier: mapUserTier(effectiveUserTier),
+          billingCycle: mapBillingCycle(effectiveBillingCycle),
+          modules: modulesJson as any,
+          status: tenantStatus === TenantStatus.ACTIVE ? 'ACTIVE' : 'TRIAL',
+          trialEndsAt: trialDays > 0 ? new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000) : null,
+        },
+      });
+
+      // ── 9. Users ───────────────────────────────────────────────
+      if (payload.users.length > 0) {
+        for (const u of payload.users) {
+          const { firstName, lastName } = splitName(u.fullName);
+          const hashed = await hashPassword(u.password);
+          await tx.user.create({
+            data: {
+              email: u.email,
+              password: hashed,
+              firstName,
+              lastName,
+              phone: n(u.mobile),
+              role: 'COMPANY_ADMIN',
+              companyId: company.id,
+            },
+          });
+        }
+      }
+
+      return { company, tenant };
+    });
+
+    // Create the PostgreSQL schema for tenant isolation.
+    // If this fails, roll back the committed transaction records.
+    try {
+      await this.createTenantSchema(result.tenant.schemaName);
+    } catch (schemaError) {
+      logger.error(`Schema creation failed for ${result.tenant.schemaName}, rolling back tenant records`);
+      try {
+        await platformPrisma.company.delete({ where: { id: result.company.id } });
+      } catch (rollbackError) {
+        logger.error(`Rollback also failed for company ${result.company.id}:`, rollbackError);
+      }
+      throw schemaError;
+    }
+
+    // Cache
+    await this.cacheTenantData(result.tenant.id, result);
+
+    logger.info(`Tenant onboarded: ${result.tenant.id} (${result.company.companyCode})`);
+
+    // Return full detail
+    return this.getFullCompanyDetail(result.company.id);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Full company detail (for company detail screen)
+  // ────────────────────────────────────────────────────────────────────
+  async getFullCompanyDetail(companyId: string) {
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      include: {
+        locations: { orderBy: { createdAt: 'asc' } },
+        contacts: { orderBy: { createdAt: 'asc' } },
+        shifts: { orderBy: { createdAt: 'asc' } },
+        noSeries: { orderBy: { createdAt: 'asc' } },
+        iotReasons: { orderBy: { createdAt: 'asc' } },
+        tenant: {
+          include: {
+            subscriptions: true,
+          },
+        },
+        users: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            role: true,
+            isActive: true,
+            lastLogin: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!company) {
+      throw ApiError.notFound('Company not found');
+    }
+
+    // Strip sensitive secrets from response
+    return this.sanitizeCompanyResponse(company);
+  }
+
+  /** Remove Razorpay secrets and mask sensitive fields before returning to client. */
+  private sanitizeCompanyResponse(company: any) {
+    company = {
+      ...company,
+      // Remove legacy fields completely from response contract.
+      address: undefined,
+      contactPerson: undefined,
+    };
+
+    const registeredStdCode = (company?.registeredAddress as any)?.stdCode;
+    const corporateStdCode = (company?.corporateAddress as any)?.stdCode;
+
+    if (Array.isArray(company?.locations)) {
+      company = {
+        ...company,
+        locations: company.locations.map((loc: any) => ({
+          ...loc,
+          // Backward-safe read fallback for old rows where stdCode/stateGST were stored null.
+          stdCode: loc.stdCode ?? (loc.isHQ ? (company.sameAsRegistered ? registeredStdCode : (corporateStdCode || registeredStdCode)) : null),
+          stateGST: loc.stateGST ?? (loc.gstin ? String(loc.gstin).slice(0, 2) : null),
+        })),
+      };
+    }
+
+    if (Array.isArray(company?.users)) {
+      company = {
+        ...company,
+        users: company.users.map((u: any) => ({
+          ...u,
+          // Username is not yet a persisted DB field; expose stable fallback from email.
+          username: u.username ?? (u.email ? String(u.email).split('@')[0] : undefined),
+          // Keep explicit placeholders so clients can render a predictable "—" fallback.
+          department: u.department ?? null,
+          location: u.location ?? null,
+        })),
+      };
+    }
+
+    if (company.razorpayConfig && typeof company.razorpayConfig === 'object') {
+      const rp = { ...company.razorpayConfig } as Record<string, any>;
+      if (rp.keySecret) rp.keySecret = '••••••••';
+      if (rp.webhookSecret) rp.webhookSecret = '••••••••';
+      company = { ...company, razorpayConfig: rp };
+    }
+    if (company.locationConfig === 'per-location') {
+      company = {
+        ...company,
+        selectedModuleIds: undefined,
+        customModulePricing: undefined,
+        userTier: undefined,
+        customUserLimit: undefined,
+        customTierPrice: undefined,
+        billingCycle: undefined,
+        trialDays: undefined,
+      };
+    }
+    return company;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Section-based partial update
+  // ────────────────────────────────────────────────────────────────────
+  async updateCompanySection(companyId: string, section: CompanySectionKey, data: any) {
+    // Ensure company exists
+    const company = await platformPrisma.company.findUnique({ where: { id: companyId } });
+    if (!company) {
+      throw ApiError.notFound('Company not found');
+    }
+
+    switch (section) {
+      // ── Simple field updates on Company ─────────────────────────
+      case 'identity':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: {
+            displayName: data.displayName,
+            legalName: data.legalName,
+            name: data.displayName, // keep legacy name in sync
+            shortName: n(data.shortName),
+            businessType: data.businessType,
+            industry: data.industry,
+            companyCode: data.companyCode,
+            cin: n(data.cin),
+            incorporationDate: n(data.incorporationDate),
+            employeeCount: n(data.employeeCount),
+            size: mapCompanySize(data.employeeCount),
+            emailDomain: data.emailDomain,
+            logoUrl: n(data.logoUrl),
+            website: n(data.website),
+            wizardStatus: data.wizardStatus ?? company.wizardStatus,
+          },
+        });
+        break;
+
+      case 'statutory':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: {
+            pan: n(data.pan),
+            tan: n(data.tan),
+            gstin: n(data.gstin),
+            gstNumber: n(data.gstin), // legacy field
+            pfRegNo: n(data.pfRegNo),
+            esiCode: n(data.esiCode),
+            ptReg: n(data.ptReg),
+            lwfrNo: n(data.lwfrNo),
+            rocState: n(data.rocState),
+          },
+        });
+        break;
+
+      case 'address':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: {
+            registeredAddress: data.registered as any,
+            corporateAddress: data.sameAsRegistered ? Prisma.JsonNull : (data.corporate as any) ?? Prisma.JsonNull,
+            sameAsRegistered: data.sameAsRegistered,
+          },
+        });
+        break;
+
+      case 'fiscal':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: { fiscalConfig: data as any },
+        });
+        break;
+
+      case 'preferences': {
+        const { razorpayEnabled, razorpayKeyId, razorpayKeySecret, razorpayWebhookSecret, razorpayAccountNumber, razorpayAutoDisbursement, razorpayTestMode, ...prefs } = data;
+        const rpConfig = razorpayEnabled
+          ? { enabled: true, keyId: razorpayKeyId, keySecret: razorpayKeySecret, webhookSecret: razorpayWebhookSecret, accountNumber: razorpayAccountNumber, autoDisbursement: razorpayAutoDisbursement ?? false, testMode: razorpayTestMode ?? true }
+          : null;
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: {
+            preferences: prefs as any,
+            razorpayConfig: rpConfig as any ?? Prisma.JsonNull,
+          },
+        });
+        break;
+      }
+
+      case 'endpoint':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: {
+            endpointType: data.endpointType,
+            customEndpointUrl: n(data.customBaseUrl),
+          },
+        });
+        break;
+
+      case 'strategy':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: {
+            multiLocationMode: data.multiLocationMode,
+            locationConfig: data.locationConfig,
+          },
+        });
+        break;
+
+      case 'controls':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: { systemControls: data as any },
+        });
+        break;
+
+      case 'commercial':
+        await platformPrisma.company.update({
+          where: { id: companyId },
+          data: {
+            selectedModuleIds: data.selectedModuleIds as any ?? Prisma.JsonNull,
+            customModulePricing: data.customModulePricing as any ?? Prisma.JsonNull,
+            userTier: n(data.userTier),
+            customUserLimit: n(data.customUserLimit),
+            customTierPrice: n(data.customTierPrice),
+            billingCycle: data.billingCycle ?? 'monthly',
+            trialDays: data.trialDays ?? 0,
+          },
+        });
+        break;
+
+      // ── Array sections: delete-all + re-create ──────────────────
+      case 'locations':
+        await platformPrisma.$transaction(async (tx) => {
+          const currentCompany = await tx.company.findUnique({
+            where: { id: companyId },
+            select: { registeredAddress: true, corporateAddress: true, sameAsRegistered: true },
+          });
+          const regStdCode = (currentCompany?.registeredAddress as any)?.stdCode as string | undefined;
+          const corpStdCode = (currentCompany?.corporateAddress as any)?.stdCode as string | undefined;
+          const hqStdCode = currentCompany?.sameAsRegistered ? regStdCode : (corpStdCode || regStdCode);
+          await tx.location.deleteMany({ where: { companyId } });
+          if (Array.isArray(data) && data.length > 0) {
+            await tx.location.createMany({
+              data: (data as LocationPayload[]).map((loc) => buildLocationData(
+                companyId,
+                loc,
+                hqStdCode ? { hqStdCode } : undefined,
+              )),
+            });
+          }
+        });
+        break;
+
+      case 'contacts':
+        await platformPrisma.$transaction(async (tx) => {
+          await tx.companyContact.deleteMany({ where: { companyId } });
+          if (Array.isArray(data) && data.length > 0) {
+            await tx.companyContact.createMany({
+              data: (data as ContactPayload[]).map((c) => buildContactData(companyId, c)),
+            });
+          }
+        });
+        break;
+
+      case 'shifts': {
+        const shiftsData = data as OnboardTenantPayload['shifts'];
+        await platformPrisma.$transaction(async (tx) => {
+          // Update company-level shift fields
+          await tx.company.update({
+            where: { id: companyId },
+            data: {
+              dayStartTime: n(shiftsData.dayStartTime),
+              dayEndTime: n(shiftsData.dayEndTime),
+              weeklyOffs: shiftsData.weeklyOffs as any ?? Prisma.JsonNull,
+            },
+          });
+          // Replace shift items
+          await tx.companyShift.deleteMany({ where: { companyId } });
+          if (shiftsData.items && shiftsData.items.length > 0) {
+            await tx.companyShift.createMany({
+              data: shiftsData.items.map((s) => ({
+                companyId,
+                name: s.name,
+                fromTime: s.fromTime,
+                toTime: s.toTime,
+                noShuffle: s.noShuffle ?? false,
+                downtimeSlots: s.downtimeSlots as any ?? Prisma.JsonNull,
+              })),
+            });
+          }
+        });
+        break;
+      }
+
+      case 'noSeries':
+        await platformPrisma.$transaction(async (tx) => {
+          await tx.noSeriesConfig.deleteMany({ where: { companyId } });
+          if (Array.isArray(data) && data.length > 0) {
+            await tx.noSeriesConfig.createMany({
+              data: (data as NoSeriesPayload[]).map((ns) => buildNoSeriesData(companyId, ns)),
+            });
+          }
+        });
+        break;
+
+      case 'iotReasons':
+        await platformPrisma.$transaction(async (tx) => {
+          await tx.iotReason.deleteMany({ where: { companyId } });
+          if (Array.isArray(data) && data.length > 0) {
+            await tx.iotReason.createMany({
+              data: (data as IotReasonPayload[]).map((r) => buildIotReasonData(companyId, r)),
+            });
+          }
+        });
+        break;
+
+      case 'users':
+        // Users are additive — we don't delete existing users.
+        // Wrapped in transaction so partial failures don't leave orphan users.
+        if (Array.isArray(data) && data.length > 0) {
+          const usersToCreate = data as UserPayload[];
+          // Pre-hash all passwords before entering the transaction
+          const prepared = await Promise.all(
+            usersToCreate.map(async (u) => {
+              const { firstName, lastName } = splitName(u.fullName);
+              const hashed = await hashPassword(u.password);
+              return { email: u.email, password: hashed, firstName, lastName, phone: n(u.mobile), companyId };
+            }),
+          );
+          await platformPrisma.$transaction(async (tx) => {
+            for (const p of prepared) {
+              await tx.user.create({
+                data: { ...p, role: 'COMPANY_ADMIN' },
+              });
+            }
+          });
+        }
+        break;
+
+      default:
+        throw ApiError.badRequest(`Unknown section key: ${section}`);
+    }
+
+    // Return updated full detail
+    return this.getFullCompanyDetail(companyId);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Update company wizard status (+ tenant status)
+  // ────────────────────────────────────────────────────────────────────
+  async updateCompanyStatus(companyId: string, status: string) {
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      include: { tenant: true },
+    });
+
+    if (!company) {
+      throw ApiError.notFound('Company not found');
+    }
+
+    const tenantStatus = mapWizardStatusToTenantStatus(status);
+
+    await platformPrisma.$transaction(async (tx) => {
+      await tx.company.update({
+        where: { id: companyId },
+        data: { wizardStatus: status },
+      });
+
+      if (company.tenant) {
+        await tx.tenant.update({
+          where: { id: company.tenant.id },
+          data: { status: tenantStatus },
+        });
+      }
+    });
+
+    logger.info(`Company ${companyId} status updated to ${status}`);
+    return this.getFullCompanyDetail(companyId);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Delete company (cascade) + drop tenant schema
+  // ────────────────────────────────────────────────────────────────────
+  async deleteCompany(companyId: string) {
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      include: { tenant: true },
+    });
+
+    if (!company) {
+      throw ApiError.notFound('Company not found');
+    }
+
+    // Delete DB records first (cascade deletes locations, contacts, etc.)
+    // If this fails, schema is still intact and can be retried.
+    const schemaName = company.tenant?.schemaName;
+    const tenantId = company.tenant?.id;
+
+    await platformPrisma.company.delete({ where: { id: companyId } });
+
+    // Now drop the PostgreSQL schema (safe — DB records already gone)
+    if (schemaName) {
+      await this.dropTenantSchema(schemaName);
+    }
+    if (tenantId) {
+      await this.clearTenantCache(tenantId);
+    }
+
+    logger.info(`Company deleted: ${companyId}`);
+    return { message: 'Company deleted' };
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // Existing CRUD methods (unchanged)
+  // ════════════════════════════════════════════════════════════════════
+
   // Create new tenant
   async createTenant(tenantData: CreateTenantData) {
     const { companyId, schemaName, status = TenantStatus.ACTIVE } = tenantData;
@@ -194,7 +1011,9 @@ export class TenantService {
       where.company = {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
-          { contactPerson: { path: ['email'], string_contains: search } },
+          { displayName: { contains: search, mode: 'insensitive' } },
+          { emailDomain: { contains: search, mode: 'insensitive' } },
+          { companyCode: { contains: search, mode: 'insensitive' } },
         ],
       };
     }
