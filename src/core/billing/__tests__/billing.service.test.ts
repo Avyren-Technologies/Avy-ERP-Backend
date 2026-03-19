@@ -75,6 +75,7 @@ describe('BillingService', () => {
       overdueCount = 0,
       pendingAmount = null as number | null,
       pendingCount = 0,
+      oneTimeAmount = null as number | null,
     } = {}) {
       // First aggregate call: MRR
       mockInvoice.aggregate
@@ -82,7 +83,9 @@ describe('BillingService', () => {
         // Second: overdue
         .mockResolvedValueOnce({ _sum: { amount: overdueAmount }, _count: { id: overdueCount } } as any)
         // Third: pending
-        .mockResolvedValueOnce({ _sum: { amount: pendingAmount }, _count: { id: pendingCount } } as any);
+        .mockResolvedValueOnce({ _sum: { amount: pendingAmount }, _count: { id: pendingCount } } as any)
+        // Fourth: one-time revenue
+        .mockResolvedValueOnce({ _sum: { totalAmount: oneTimeAmount } } as any);
     }
 
     it('should return the correct shape with all zeros when there are no invoices', async () => {
@@ -95,6 +98,7 @@ describe('BillingService', () => {
         arr: 0,
         overdue: { count: 0, amount: 0 },
         pending: { count: 0, amount: 0 },
+        oneTimeRevenue: 0,
       });
     });
 
@@ -199,6 +203,7 @@ describe('BillingService', () => {
         overdueCount: 2,
         pendingAmount: 15000,
         pendingCount: 4,
+        oneTimeAmount: 500000,
       });
 
       const result = await service.getBillingSummary();
@@ -208,7 +213,32 @@ describe('BillingService', () => {
         arr: 1200000,
         overdue: { count: 2, amount: 25000 },
         pending: { count: 4, amount: 15000 },
+        oneTimeRevenue: 500000,
       });
+    });
+
+    it('should return oneTimeRevenue from paid ONE_TIME_LICENSE invoices', async () => {
+      setupAggregateMocks({ oneTimeAmount: 250000 });
+
+      const result = await service.getBillingSummary();
+
+      expect(result.oneTimeRevenue).toBe(250000);
+
+      // Verify the 4th aggregate call queries ONE_TIME_LICENSE + PAID
+      const oneTimeCall = mockInvoice.aggregate.mock.calls[3][0];
+      expect(oneTimeCall.where).toMatchObject({
+        status: 'PAID',
+        invoiceType: 'ONE_TIME_LICENSE',
+      });
+      expect(oneTimeCall._sum).toMatchObject({ totalAmount: true });
+    });
+
+    it('should return 0 for oneTimeRevenue when the aggregate sum is null', async () => {
+      setupAggregateMocks({ oneTimeAmount: null });
+
+      const result = await service.getBillingSummary();
+
+      expect(result.oneTimeRevenue).toBe(0);
     });
   });
 
@@ -307,6 +337,7 @@ describe('BillingService', () => {
                     name: true,
                     displayName: true,
                     companyCode: true,
+                    endpointType: true,
                   },
                 },
               },

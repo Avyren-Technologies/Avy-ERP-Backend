@@ -184,6 +184,7 @@ function getRolePermissions(role: string): string[] {
       'finance:*',
       'maintenance:*',
       'reports:*',
+      'audit:read',
     ],
   };
 

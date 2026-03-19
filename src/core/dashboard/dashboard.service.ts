@@ -145,12 +145,16 @@ export class DashboardService {
   // Company Admin dashboard KPIs (tenant-scoped)
   // ────────────────────────────────────────────────────────────────────
   async getCompanyAdminStats(companyId: string) {
-    const [usersCount, locationsCount, company] = await Promise.all([
+    const [usersCount, locationsCount, shiftsCount, contactsCount, noSeriesCount, iotReasonsCount, company] = await Promise.all([
       platformPrisma.user.count({ where: { companyId } }),
       platformPrisma.location.count({ where: { companyId } }),
+      platformPrisma.companyShift.count({ where: { companyId } }),
+      platformPrisma.companyContact.count({ where: { companyId } }),
+      platformPrisma.noSeriesConfig.count({ where: { companyId } }),
+      platformPrisma.iotReason.count({ where: { companyId } }),
       platformPrisma.company.findUnique({
         where: { id: companyId },
-        select: { selectedModuleIds: true, wizardStatus: true, displayName: true },
+        select: { selectedModuleIds: true, wizardStatus: true, displayName: true, tenant: { select: { id: true } } },
       }),
     ]);
 
@@ -161,9 +165,36 @@ export class DashboardService {
       wizardStatus: company?.wizardStatus ?? 'Draft',
       totalUsers: usersCount,
       totalLocations: locationsCount,
+      shiftsCount,
+      contactsCount,
+      noSeriesCount,
+      iotReasonsCount,
       activeModules: moduleIds.length,
       moduleIds,
     };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Company Admin recent activity (tenant-scoped audit logs)
+  // ────────────────────────────────────────────────────────────────────
+  async getCompanyAdminActivity(companyId: string, limit = 10) {
+    // Resolve tenantId from companyId
+    const tenant = await platformPrisma.tenant.findUnique({
+      where: { companyId },
+      select: { id: true },
+    });
+
+    if (!tenant) {
+      return [];
+    }
+
+    const activities = await platformPrisma.auditLog.findMany({
+      where: { tenantId: tenant.id },
+      orderBy: { timestamp: 'desc' },
+      take: limit,
+    });
+
+    return activities;
   }
 }
 

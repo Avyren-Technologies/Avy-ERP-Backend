@@ -84,7 +84,7 @@ export class CompanyService {
           userTier: undefined,
           customUserLimit: undefined,
           customTierPrice: undefined,
-          billingCycle: undefined,
+          billingType: undefined,
         };
       }
       return {

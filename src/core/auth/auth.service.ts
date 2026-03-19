@@ -167,7 +167,7 @@ export class AuthService {
           tenantId: tenant.id,
           planId: 'trial',
           userTier: 'STARTER',
-          billingCycle: 'MONTHLY',
+          billingType: 'MONTHLY',
           modules: {
             hr: true,
             production: true,

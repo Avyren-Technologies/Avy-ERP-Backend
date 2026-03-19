@@ -2,28 +2,16 @@ import { Router, Request, Response } from 'express';
 import { requirePermissions } from '../../middleware/auth.middleware';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { createSuccessResponse } from '../../shared/utils';
+import { orgStructureRoutes } from './org-structure/org-structure.routes';
+import { employeeRoutes } from './employee/employee.routes';
 
 const router = Router();
 
-// HR module routes
-// TODO: Implement HR controllers and services
+// Org structure masters (departments, designations, grades, employee-types, cost-centres)
+router.use('/', orgStructureRoutes);
 
-// Employee management
-router.get('/employees', requirePermissions(['hr:read']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'HR employees endpoint - TODO: Implement' }));
-}));
-
-router.post('/employees', requirePermissions(['hr:create']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Create employee endpoint - TODO: Implement' }));
-}));
-
-router.get('/employees/:id', requirePermissions(['hr:read']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Get employee endpoint - TODO: Implement' }));
-}));
-
-router.put('/employees/:id', requirePermissions(['hr:update']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Update employee endpoint - TODO: Implement' }));
-}));
+// Employee management (full CRUD + sub-resources: nominees, education, prev-employment, documents, timeline)
+router.use('/', employeeRoutes);
 
 // Attendance management
 router.get('/attendance', requirePermissions(['hr:read']), asyncHandler(async (req: Request, res: Response) => {

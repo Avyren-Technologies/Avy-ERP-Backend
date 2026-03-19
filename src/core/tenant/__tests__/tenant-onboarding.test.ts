@@ -252,7 +252,7 @@ describe('onboardTenantSchema', () => {
           commercial: {
             selectedModuleIds: ['hr', 'payroll'],
             userTier: 'growth',
-            billingCycle: 'annual',
+            billingType: 'annual',
             trialDays: 30,
           },
           contacts: [

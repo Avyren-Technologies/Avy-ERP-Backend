@@ -224,7 +224,7 @@ export const moduleConfigSchema = z.object({
 export const subscriptionSchema = z.object({
   planId: idSchema,
   userTier: z.enum(['starter', 'growth', 'scale', 'enterprise', 'custom']),
-  billingCycle: z.enum(['monthly', 'annual']),
+  billingType: z.enum(['monthly', 'annual', 'one_time_amc']),
   modules: z.array(
     z.object({
       moduleId: z.string(),

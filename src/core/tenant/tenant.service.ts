@@ -67,9 +67,12 @@ function mapUserTier(tier?: string): 'STARTER' | 'GROWTH' | 'SCALE' | 'ENTERPRIS
   return 'STARTER';
 }
 
-/** Map billingCycle string to Prisma enum. */
-function mapBillingCycle(cycle?: string): 'MONTHLY' | 'ANNUAL' {
-  return cycle?.toUpperCase() === 'ANNUAL' ? 'ANNUAL' : 'MONTHLY';
+/** Map billingType string to Prisma BillingType enum. */
+function mapBillingType(type?: string): 'MONTHLY' | 'ANNUAL' | 'ONE_TIME_AMC' {
+  const upper = type?.toUpperCase();
+  if (upper === 'ANNUAL') return 'ANNUAL';
+  if (upper === 'ONE_TIME_AMC') return 'ONE_TIME_AMC';
+  return 'MONTHLY';
 }
 
 /** Split "Full Name" into firstName + lastName. */
@@ -118,7 +121,7 @@ function buildLocationData(companyId: string, loc: LocationPayload, defaults?: {
     userTier: n(loc.userTier),
     customUserLimit: n(loc.customUserLimit),
     customTierPrice: n(loc.customTierPrice),
-    billingCycle: n(loc.billingCycle),
+    billingType: n(loc.billingType),
     trialDays: loc.trialDays ?? 0,
   };
 }
@@ -188,10 +191,10 @@ export class TenantService {
       : address.corporate?.stdCode || address.registered?.stdCode;
     const perLocationModuleIds = payload.locations.flatMap((loc) => loc.moduleIds ?? []);
     const dedupedPerLocationModuleIds = Array.from(new Set(perLocationModuleIds));
-    const perLocationBillingCycles = payload.locations.map((loc) => loc.billingCycle).filter(Boolean) as string[];
+    const perLocationBillingCycles = payload.locations.map((loc) => loc.billingType).filter(Boolean) as string[];
     const effectiveBillingCycle = strategy.locationConfig === 'per-location'
       ? (perLocationBillingCycles[0] ?? 'monthly')
-      : (commercial?.billingCycle ?? 'monthly');
+      : (commercial?.billingType ?? 'monthly');
     const effectiveTrialDays = strategy.locationConfig === 'per-location'
       ? (payload.locations[0]?.trialDays ?? 14)
       : (commercial?.trialDays ?? 14);
@@ -287,7 +290,7 @@ export class TenantService {
           userTier: n(effectiveUserTier),
           customUserLimit: strategy.locationConfig === 'per-location' ? null : n(commercial?.customUserLimit),
           customTierPrice: strategy.locationConfig === 'per-location' ? null : n(commercial?.customTierPrice),
-          billingCycle: effectiveBillingCycle,
+          billingType: effectiveBillingCycle,
           trialDays: effectiveTrialDays,
           // Step 12 – Shifts (company-level fields)
           dayStartTime: n(shifts.dayStartTime),
@@ -369,7 +372,7 @@ export class TenantService {
           tenantId: tenant.id,
           planId: effectiveUserTier ?? 'starter',
           userTier: mapUserTier(effectiveUserTier),
-          billingCycle: mapBillingCycle(effectiveBillingCycle),
+          billingType: mapBillingType(effectiveBillingCycle),
           modules: modulesJson as any,
           status: tenantStatus === TenantStatus.ACTIVE ? 'ACTIVE' : 'TRIAL',
           trialEndsAt: trialDays > 0 ? new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000) : null,
@@ -514,7 +517,7 @@ export class TenantService {
         userTier: undefined,
         customUserLimit: undefined,
         customTierPrice: undefined,
-        billingCycle: undefined,
+        billingType: undefined,
         trialDays: undefined,
       };
     }
@@ -642,7 +645,7 @@ export class TenantService {
             userTier: n(data.userTier),
             customUserLimit: n(data.customUserLimit),
             customTierPrice: n(data.customTierPrice),
-            billingCycle: data.billingCycle ?? 'monthly',
+            billingType: data.billingType ?? 'monthly',
             trialDays: data.trialDays ?? 0,
           },
         });

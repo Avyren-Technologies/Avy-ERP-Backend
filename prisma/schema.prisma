@@ -89,8 +89,10 @@ model Company {
   userTier            String? // starter/growth/scale/enterprise/custom
   customUserLimit     String?
   customTierPrice     String?
-  billingCycle        String? @default("monthly")
+  billingType         String? @default("monthly")
   trialDays           Int     @default(0)
+  oneTimeMultiplier   Float?
+  amcPercentage       Float?
 
   // === Step 11: Shifts & Time ===
   dayStartTime      String?
@@ -111,6 +113,14 @@ model Company {
   shifts      CompanyShift[]
   noSeries    NoSeriesConfig[]
   iotReasons  IotReason[]
+
+  // HRMS Relations
+  departments     Department[]
+  designations    Designation[]
+  grades          Grade[]
+  employeeTypes   EmployeeType[]
+  costCentres     CostCentre[]
+  employees       Employee[]
 
   @@map("companies")
 }
@@ -214,7 +224,11 @@ model Subscription {
   tenantId    String   @unique
   planId      String
   userTier    UserTier
-  billingCycle BillingCycle
+  billingType        BillingType @default(MONTHLY)
+  oneTimeLicenseFee  Float?
+  amcAmount          Float?
+  amcDueDate         DateTime?
+  amcStatus          AmcStatus  @default(NOT_APPLICABLE)
   modules     Json     // Enabled modules with pricing
   status      SubscriptionStatus @default(TRIAL)
   startDate   DateTime @default(now())
@@ -240,10 +254,59 @@ model Invoice {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Billing enhancement fields
+  invoiceNumber      String       @unique @default("")
+  invoiceType        InvoiceType  @default(SUBSCRIPTION)
+  lineItems          Json         @default("[]")
+  subtotal           Float        @default(0)
+  cgst               Float        @default(0)
+  sgst               Float        @default(0)
+  igst               Float        @default(0)
+  totalTax           Float        @default(0)
+  totalAmount        Float        @default(0)
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  paidVia            PaymentMethod?
+  paymentReference   String?
+  sentAt             DateTime?
+  pdfUrl             String?
+  gstNotApplicable   Boolean      @default(false)
+
   // Relations
   subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  payments     Payment[]
 
   @@map("invoices")
+}
+
+// Payment records for invoices
+model Payment {
+  id                   String        @id @default(cuid())
+  invoiceId            String
+  invoice              Invoice       @relation(fields: [invoiceId], references: [id])
+  amount               Float
+  method               PaymentMethod
+  transactionReference String?
+  paidAt               DateTime
+  recordedBy           String
+  notes                String?
+  createdAt            DateTime      @default(now())
+  @@map("payments")
+}
+
+// Platform-wide billing configuration
+model PlatformBillingConfig {
+  id                       String   @id @default(cuid())
+  defaultOneTimeMultiplier Float    @default(24)
+  defaultAmcPercentage     Float    @default(18)
+  defaultCgstRate          Float    @default(9)
+  defaultSgstRate          Float    @default(9)
+  defaultIgstRate          Float    @default(18)
+  platformGstin            String?
+  invoicePrefix            String   @default("INV")
+  nextInvoiceSeq           Int      @default(1)
+  updatedAt                DateTime @updatedAt
+  @@map("platform_billing_config")
 }
 
 // Audit Logs (Platform level)
@@ -303,12 +366,18 @@ model Location {
   userTier            String?
   customUserLimit     String?
   customTierPrice     String?
-  billingCycle        String?  @default("monthly")
+  billingType         String?  @default("monthly")
   trialDays           Int      @default(0)
+  oneTimeLicenseFee   Float?
+  amcAmount           Float?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // HRMS Relations
+  costCentres     CostCentre[]
+  employees       Employee[]
 
   @@unique([companyId, code])
   @@map("locations")
@@ -347,6 +416,9 @@ model CompanyShift {
   updatedAt     DateTime @updatedAt
 
   company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // HRMS Relations
+  employees     Employee[]
 
   @@map("company_shifts")
 }
@@ -422,9 +494,33 @@ enum UserTier {
   CUSTOM      // 1000+ users
 }
 
-enum BillingCycle {
+enum BillingType {
   MONTHLY
   ANNUAL
+  ONE_TIME_AMC
+}
+
+enum InvoiceType {
+  SUBSCRIPTION
+  ONE_TIME_LICENSE
+  AMC
+  PRORATED_ADJUSTMENT
+}
+
+enum AmcStatus {
+  ACTIVE
+  OVERDUE
+  LAPSED
+  NOT_APPLICABLE
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CHEQUE
+  CASH
+  RAZORPAY
+  UPI
+  OTHER
 }
 
 enum SubscriptionStatus {
@@ -440,4 +536,379 @@ enum InvoiceStatus {
   PAID
   OVERDUE
   CANCELLED
+}
+
+// ==========================================
+// HRMS ENUMS
+// ==========================================
+
+enum EmployeeStatus {
+  ACTIVE
+  PROBATION
+  CONFIRMED
+  ON_NOTICE
+  SUSPENDED
+  EXITED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+enum JobLevel {
+  L1
+  L2
+  L3
+  L4
+  L5
+  L6
+  L7
+}
+
+enum WorkType {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+
+enum PaymentMode {
+  NEFT
+  IMPS
+  CHEQUE
+}
+
+enum AccountType {
+  SAVINGS
+  CURRENT
+}
+
+enum TimelineEventType {
+  JOINED
+  PROBATION_STARTED
+  CONFIRMED
+  PROMOTED
+  TRANSFERRED
+  SALARY_REVISED
+  ONBOARDING_COMPLETE
+  RESIGNED
+  TERMINATED
+  EXITED
+  DOCUMENT_UPLOADED
+  CUSTOM
+}
+
+// ==========================================
+// HRMS MODELS — Org Structure
+// ==========================================
+
+model Department {
+  id               String       @id @default(cuid())
+  name             String
+  code             String
+  parentId         String?
+  parent           Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+  children         Department[] @relation("DepartmentHierarchy")
+  headEmployeeId   String?
+  costCentreCode   String?
+  status           String       @default("Active")
+  companyId        String
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  designations     Designation[]
+  costCentres      CostCentre[]
+  employees        Employee[]
+
+  @@unique([companyId, code])
+  @@map("departments")
+}
+
+model Designation {
+  id              String      @id @default(cuid())
+  name            String
+  code            String
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+  gradeId         String?
+  grade           Grade?      @relation(fields: [gradeId], references: [id])
+  jobLevel        JobLevel?
+  managerialFlag  Boolean     @default(false)
+  reportsTo       String?
+  probationDays   Int?
+  status          String      @default("Active")
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  employees       Employee[]
+
+  @@unique([companyId, code])
+  @@map("designations")
+}
+
+model Grade {
+  id              String      @id @default(cuid())
+  code            String
+  name            String
+  ctcMin          Decimal?    @db.Decimal(15, 2)
+  ctcMax          Decimal?    @db.Decimal(15, 2)
+  hraPercent      Decimal?    @db.Decimal(5, 2)
+  pfTier          String?
+  benefitFlags    Json?
+  probationMonths Int?
+  noticeDays      Int?
+  status          String      @default("Active")
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  designations    Designation[]
+  employees       Employee[]
+
+  @@unique([companyId, code])
+  @@map("grades")
+}
+
+model EmployeeType {
+  id                String   @id @default(cuid())
+  name              String
+  code              String
+  pfApplicable      Boolean  @default(false)
+  esiApplicable     Boolean  @default(false)
+  ptApplicable      Boolean  @default(false)
+  gratuityEligible  Boolean  @default(false)
+  bonusEligible     Boolean  @default(false)
+  status            String   @default("Active")
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  employees         Employee[]
+
+  @@unique([companyId, code])
+  @@map("employee_types")
+}
+
+model CostCentre {
+  id              String      @id @default(cuid())
+  code            String
+  name            String
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+  locationId      String?
+  location        Location?   @relation(fields: [locationId], references: [id])
+  annualBudget    Decimal?    @db.Decimal(15, 2)
+  glAccountCode   String?
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  employees       Employee[]
+
+  @@unique([companyId, code])
+  @@map("cost_centres")
+}
+
+// ==========================================
+// HRMS MODELS — Employee Master
+// ==========================================
+
+model Employee {
+  id                  String          @id @default(cuid())
+  employeeId          String
+
+  // Personal Info (Tab 1)
+  firstName           String
+  middleName          String?
+  lastName            String
+  dateOfBirth         DateTime
+  gender              Gender
+  maritalStatus       MaritalStatus?
+  bloodGroup          String?
+  fatherMotherName    String?
+  nationality         String          @default("Indian")
+  religion            String?
+  category            String?
+  differentlyAbled    Boolean         @default(false)
+  disabilityType      String?
+  profilePhotoUrl     String?
+
+  // Contact Info
+  personalMobile      String
+  alternativeMobile   String?
+  personalEmail       String
+  officialEmail       String?
+  currentAddress      Json?
+  permanentAddress    Json?
+  emergencyContactName     String
+  emergencyContactRelation String
+  emergencyContactMobile   String
+
+  // Professional Details (Tab 2)
+  joiningDate         DateTime
+  employeeTypeId      String
+  employeeType        EmployeeType    @relation(fields: [employeeTypeId], references: [id])
+  departmentId        String
+  department          Department      @relation(fields: [departmentId], references: [id])
+  designationId       String
+  designation         Designation     @relation(fields: [designationId], references: [id])
+  gradeId             String?
+  grade               Grade?          @relation(fields: [gradeId], references: [id])
+  reportingManagerId  String?
+  reportingManager    Employee?       @relation("ReportingManager", fields: [reportingManagerId], references: [id])
+  reportees           Employee[]      @relation("ReportingManager")
+  functionalManagerId String?
+  functionalManager   Employee?       @relation("FunctionalManager", fields: [functionalManagerId], references: [id])
+  functionalReportees Employee[]      @relation("FunctionalManager")
+  workType            WorkType?
+  shiftId             String?
+  shift               CompanyShift?   @relation(fields: [shiftId], references: [id])
+  costCentreId        String?
+  costCentre          CostCentre?     @relation(fields: [costCentreId], references: [id])
+  locationId          String?
+  location            Location?       @relation(fields: [locationId], references: [id])
+  noticePeriodDays    Int?
+  probationEndDate    DateTime?
+  confirmationDate    DateTime?
+
+  // Salary (Tab 3)
+  annualCtc           Decimal?        @db.Decimal(15, 2)
+  salaryStructure     Json?
+  paymentMode         PaymentMode?
+
+  // Bank (Tab 4)
+  bankAccountNumber   String?
+  bankIfscCode        String?
+  bankName            String?
+  bankBranch          String?
+  accountType         AccountType?
+
+  // Statutory IDs
+  panNumber           String?
+  aadhaarNumber       String?
+  uan                 String?
+  esiIpNumber         String?
+  passportNumber      String?
+  passportExpiry      DateTime?
+  drivingLicence      String?
+  voterId             String?
+  pran                String?
+
+  // Status
+  status              EmployeeStatus  @default(PROBATION)
+  lastWorkingDate     DateTime?
+  exitReason          String?
+
+  // Relations
+  companyId           String
+  company             Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  nominees            EmployeeNominee[]
+  education           EmployeeEducation[]
+  previousEmployment  EmployeePrevEmployment[]
+  documents           EmployeeDocument[]
+  timeline            EmployeeTimeline[]
+
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@unique([companyId, employeeId])
+  @@map("employees")
+}
+
+model EmployeeNominee {
+  id            String    @id @default(cuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  name          String
+  relation      String
+  dateOfBirth   DateTime?
+  sharePercent  Decimal?  @db.Decimal(5, 2)
+  aadhaar       String?
+  pan           String?
+  address       Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("employee_nominees")
+}
+
+model EmployeeEducation {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  qualification   String
+  degree          String?
+  institution     String?
+  university      String?
+  yearOfPassing   Int?
+  marks           String?
+  certificateUrl  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("employee_education")
+}
+
+model EmployeePrevEmployment {
+  id                  String    @id @default(cuid())
+  employeeId          String
+  employee            Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employerName        String
+  designation         String?
+  lastCtc             Decimal?  @db.Decimal(15, 2)
+  joinDate            DateTime?
+  leaveDate           DateTime?
+  reason              String?
+  experienceLetterUrl String?
+  relievingLetterUrl  String?
+  previousPfAccount   String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("employee_prev_employments")
+}
+
+model EmployeeDocument {
+  id              String    @id @default(cuid())
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  documentType    String
+  documentNumber  String?
+  expiryDate      DateTime?
+  fileUrl         String
+  fileName        String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("employee_documents")
+}
+
+model EmployeeTimeline {
+  id          String            @id @default(cuid())
+  employeeId  String
+  employee    Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  eventType   TimelineEventType
+  title       String
+  description String?
+  eventData   Json?
+  performedBy String?
+  createdAt   DateTime          @default(now())
+
+  @@map("employee_timeline")
 }

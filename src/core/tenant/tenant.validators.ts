@@ -46,7 +46,7 @@ const locationSchema = z.object({
   userTier: z.string().optional(),
   customUserLimit: z.string().optional(),
   customTierPrice: z.string().optional(),
-  billingCycle: z.string().optional(),
+  billingType: z.string().optional(),
   trialDays: z.number().int().min(0).optional(),
 });
 
@@ -56,7 +56,7 @@ const commercialSchema = z.object({
   userTier: z.string().optional(),
   customUserLimit: z.string().optional(),
   customTierPrice: z.string().optional(),
-  billingCycle: z.string().optional(),
+  billingType: z.string().optional(),
   trialDays: z.number().int().min(0).optional(),
 });
 

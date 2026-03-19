@@ -13,6 +13,7 @@ export class BillingService {
       mrrData,
       overdueData,
       pendingData,
+      oneTimeData,
     ] = await Promise.all([
       // MRR: sum of paid invoices this month from active subscriptions
       platformPrisma.invoice.aggregate({
@@ -41,6 +42,15 @@ export class BillingService {
           status: 'PENDING',
         },
       }),
+
+      // One-time revenue: sum of totalAmount from paid one-time license invoices
+      platformPrisma.invoice.aggregate({
+        _sum: { totalAmount: true },
+        where: {
+          status: 'PAID',
+          invoiceType: 'ONE_TIME_LICENSE',
+        },
+      }),
     ]);
 
     const mrr = mrrData._sum.amount ?? 0;
@@ -57,6 +67,7 @@ export class BillingService {
         count: pendingData._count.id,
         amount: pendingData._sum.amount ?? 0,
       },
+      oneTimeRevenue: oneTimeData._sum.totalAmount ?? 0,
     };
   }
 
@@ -90,6 +101,7 @@ export class BillingService {
                       name: true,
                       displayName: true,
                       companyCode: true,
+                      endpointType: true,
                     },
                   },
                 },

@@ -13,5 +13,6 @@ platformRouter.get('/revenue', dashboardController.getRevenueMetrics);
 // Mounted at /dashboard — inherits tenant auth guard from routes.ts
 const tenantRouter = Router();
 tenantRouter.get('/company-stats', dashboardController.getCompanyAdminStats);
+tenantRouter.get('/company-activity', dashboardController.getCompanyAdminActivity);
 
 export { platformRouter as dashboardPlatformRoutes, tenantRouter as dashboardTenantRoutes };

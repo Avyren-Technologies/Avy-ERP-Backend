@@ -14,6 +14,7 @@ import { billingRoutes } from '../core/billing/billing.routes';
 import { dashboardPlatformRoutes, dashboardTenantRoutes } from '../core/dashboard/dashboard.routes';
 import { auditRoutes } from '../core/audit/audit.routes';
 import { featureToggleRoutes } from '../core/feature-toggle/feature-toggle.routes';
+import { companyAdminRoutes } from '../core/company-admin/company-admin.routes';
 
 // Import business module routes
 import { hrRoutes } from '../modules/hr/routes';
@@ -103,6 +104,7 @@ router.use('/reports', reportsRoutes);
 router.use('/dashboard', dashboardTenantRoutes);
 router.use('/rbac', rbacRoutes);
 router.use('/feature-toggles', featureToggleRoutes);
+router.use('/company', companyAdminRoutes);
 
 // Export router
 export { router as routes };

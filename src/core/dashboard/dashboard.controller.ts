@@ -34,6 +34,17 @@ export class DashboardController {
     const stats = await dashboardService.getCompanyAdminStats(companyId);
     res.json(createSuccessResponse(stats, 'Company dashboard stats retrieved successfully'));
   });
+  // ── Company Admin Activity (tenant-scoped) ──────────────────────────
+  getCompanyAdminActivity = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      throw ApiError.badRequest('Company ID is required');
+    }
+
+    const limit = parseInt(req.query.limit as string) || 10;
+    const activity = await dashboardService.getCompanyAdminActivity(companyId, limit);
+    res.json(createSuccessResponse(activity, 'Company activity retrieved successfully'));
+  });
 }
 
 export const dashboardController = new DashboardController();

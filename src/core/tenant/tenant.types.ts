@@ -175,7 +175,7 @@ export interface LocationPayload {
   userTier?: string;
   customUserLimit?: string;
   customTierPrice?: string;
-  billingCycle?: string;
+  billingType?: string;
   trialDays?: number;
 }
 
@@ -185,7 +185,7 @@ export interface CommercialPayload {
   userTier?: string;
   customUserLimit?: string;
   customTierPrice?: string;
-  billingCycle?: string;
+  billingType?: string;
   trialDays?: number;
 }
 
