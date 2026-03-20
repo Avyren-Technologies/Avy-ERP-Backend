@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { subscriptionService } from './subscription.service';
 import { createSuccessResponse } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
+import { ApiError } from '../../shared/errors';
+import { changeBillingTypeSchema, changeTierSchema, extendTrialSchema } from './billing.validators';
 
 export class SubscriptionController {
   // ── Get subscription detail ────────────────────────────────────────
@@ -24,21 +26,39 @@ export class SubscriptionController {
   // ── Change billing type ────────────────────────────────────────────
   changeBillingType = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.params.companyId!;
-    const result = await subscriptionService.changeBillingType(companyId, req.body);
+
+    const parsed = changeBillingTypeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    const result = await subscriptionService.changeBillingType(companyId, parsed.data as any);
     res.json(createSuccessResponse(result, 'Billing type updated successfully'));
   });
 
   // ── Change tier ────────────────────────────────────────────────────
   changeTier = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.params.companyId!;
-    const result = await subscriptionService.changeTier(companyId, req.body);
+
+    const parsed = changeTierSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    const result = await subscriptionService.changeTier(companyId, parsed.data as any);
     res.json(createSuccessResponse(result, 'Tier updated successfully'));
   });
 
   // ── Extend trial ──────────────────────────────────────────────────
   extendTrial = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.params.companyId!;
-    const result = await subscriptionService.extendTrial(companyId, req.body);
+
+    const parsed = extendTrialSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    const result = await subscriptionService.extendTrial(companyId, parsed.data as any);
     res.json(createSuccessResponse(result, 'Trial extended successfully'));
   });
 

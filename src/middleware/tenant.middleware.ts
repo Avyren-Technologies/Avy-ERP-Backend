@@ -69,12 +69,16 @@ function extractTenantFromRequest(req: Request): string | null {
   }
 
   // Check subdomain (e.g., company1.avyerp.com)
-  const host = req.headers.host;
+  const host = req.headers.host?.split(':')[0]; // strip port
   if (host) {
-    const subdomain = host.split('.')[0];
-    // Skip 'www' and other common subdomains
-    if (subdomain && !['www', 'api', 'app'].includes(subdomain)) {
-      return subdomain;
+    // Skip IP addresses (e.g., 100.121.191.43, 192.168.1.1, localhost)
+    const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host === 'localhost';
+    if (!isIP) {
+      const subdomain = host.split('.')[0];
+      // Skip 'www' and other common subdomains
+      if (subdomain && !['www', 'api', 'app'].includes(subdomain)) {
+        return subdomain;
+      }
     }
   }
 

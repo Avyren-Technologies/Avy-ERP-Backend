@@ -3,6 +3,8 @@ import { paymentService } from './payment.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { HttpStatus } from '../../shared/types';
+import { ApiError } from '../../shared/errors';
+import { recordPaymentSchema } from './billing.validators';
 
 export class PaymentController {
   // ── List Payments (paginated, filterable) ──────────────────────────
@@ -47,16 +49,21 @@ export class PaymentController {
 
   // ── Record Payment ────────────────────────────────────────────────
   recordPayment = asyncHandler(async (req: Request, res: Response) => {
-    const { invoiceId, amount, method, transactionReference, paidAt, notes } = req.body;
+    const parsed = recordPaymentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    const { invoiceId, amount, method, transactionReference, paidAt, notes } = parsed.data;
     const recordedBy = req.user?.id ?? 'system';
 
     const payment = await paymentService.recordPayment({
       invoiceId,
       amount,
       method,
-      transactionReference,
+      ...(transactionReference !== undefined && { transactionReference }),
       paidAt: paidAt ? new Date(paidAt) : new Date(),
-      notes,
+      ...(notes !== undefined && { notes }),
       recordedBy,
     });
 

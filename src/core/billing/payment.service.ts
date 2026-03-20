@@ -137,57 +137,64 @@ export class PaymentService {
     notes?: string;
     recordedBy: string;
   }) {
-    // 1. Verify invoice exists and is not CANCELLED
-    const invoice = await platformPrisma.invoice.findUnique({
-      where: { id: data.invoiceId },
-    });
-
-    if (!invoice) {
-      throw ApiError.notFound('Invoice not found');
-    }
-
-    if (invoice.status === 'CANCELLED') {
-      throw ApiError.badRequest('Cannot record payment for a cancelled invoice');
-    }
-
-    // 2. Create payment record
-    const payment = await platformPrisma.payment.create({
-      data: {
-        invoiceId: data.invoiceId,
-        amount: data.amount,
-        method: data.method as any,
-        transactionReference: data.transactionReference ?? null,
-        paidAt: data.paidAt,
-        notes: data.notes ?? null,
-        recordedBy: data.recordedBy,
-      },
-      include: {
-        invoice: true,
-      },
-    });
-
-    // 3. Check if sum of all payments >= invoice totalAmount
-    const paymentSum = await platformPrisma.payment.aggregate({
-      _sum: { amount: true },
-      where: { invoiceId: data.invoiceId },
-    });
-
-    const totalPaid = paymentSum._sum.amount ?? 0;
-
-    if (totalPaid >= invoice.totalAmount) {
-      await platformPrisma.invoice.update({
+    // Wrap entire flow in a transaction to prevent double-payment race conditions
+    return platformPrisma.$transaction(async (tx) => {
+      // 1. Verify invoice exists and is not CANCELLED (read inside transaction)
+      const invoice = await tx.invoice.findUnique({
         where: { id: data.invoiceId },
+      });
+
+      if (!invoice) {
+        throw ApiError.notFound('Invoice not found');
+      }
+
+      if (invoice.status === 'CANCELLED') {
+        throw ApiError.badRequest('Cannot record payment for a cancelled invoice');
+      }
+
+      if (invoice.status === 'PAID') {
+        throw ApiError.badRequest('Invoice is already fully paid');
+      }
+
+      // 2. Create payment record
+      const payment = await tx.payment.create({
         data: {
-          status: 'PAID',
-          paidAt: new Date(),
+          invoiceId: data.invoiceId,
+          amount: data.amount,
+          method: data.method as any,
+          transactionReference: data.transactionReference ?? null,
+          paidAt: data.paidAt,
+          notes: data.notes ?? null,
+          recordedBy: data.recordedBy,
+        },
+        include: {
+          invoice: true,
         },
       });
 
-      logger.info(`Invoice ${data.invoiceId} marked as PAID (total paid: ${totalPaid})`);
-    }
+      // 3. Check if sum of all payments >= invoice totalAmount
+      const paymentSum = await tx.payment.aggregate({
+        _sum: { amount: true },
+        where: { invoiceId: data.invoiceId },
+      });
 
-    // 4. Return created payment
-    return payment;
+      const totalPaid = paymentSum._sum.amount ?? 0;
+
+      if (totalPaid >= invoice.totalAmount) {
+        await tx.invoice.update({
+          where: { id: data.invoiceId },
+          data: {
+            status: 'PAID',
+            paidAt: new Date(),
+          },
+        });
+
+        logger.info(`Invoice ${data.invoiceId} marked as PAID (total paid: ${totalPaid})`);
+      }
+
+      // 4. Return created payment
+      return payment;
+    });
   }
 }
 

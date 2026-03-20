@@ -48,8 +48,15 @@ export class CompanyAdminService {
 
     // Strip sensitive fields
     const result: any = { ...company, address: undefined, contactPerson: undefined };
-    if (result.razorpayConfig && typeof result.razorpayConfig === 'object') {
-      const rp = { ...result.razorpayConfig } as Record<string, any>;
+    if (result.razorpayConfig) {
+      // Parse JSON string if needed
+      let rp: Record<string, any> =
+        typeof result.razorpayConfig === 'string'
+          ? JSON.parse(result.razorpayConfig)
+          : { ...result.razorpayConfig };
+      if (rp.keyId && typeof rp.keyId === 'string') {
+        rp.keyId = rp.keyId.length > 4 ? '••••' + rp.keyId.slice(-4) : '••••••••';
+      }
       if (rp.keySecret) rp.keySecret = '••••••••';
       if (rp.webhookSecret) rp.webhookSecret = '••••••••';
       result.razorpayConfig = rp;
@@ -199,6 +206,18 @@ export class CompanyAdminService {
       throw ApiError.badRequest('Cannot delete the HQ location. Contact Super Admin to reassign HQ first.');
     }
 
+    // Check for assigned employees
+    const employeeCount = await platformPrisma.employee.count({ where: { locationId } });
+    if (employeeCount > 0) {
+      throw ApiError.badRequest(`Cannot delete: ${employeeCount} employee(s) are assigned to this location`);
+    }
+
+    // Check for linked cost centres
+    const costCentreCount = await platformPrisma.costCentre.count({ where: { locationId } });
+    if (costCentreCount > 0) {
+      throw ApiError.badRequest(`Cannot delete: ${costCentreCount} cost centre(s) are linked to this location`);
+    }
+
     await platformPrisma.location.delete({ where: { id: locationId } });
     return { message: 'Location deleted' };
   }
@@ -267,6 +286,12 @@ export class CompanyAdminService {
 
     if (!shift || shift.companyId !== companyId) {
       throw ApiError.notFound('Shift not found');
+    }
+
+    // Check for assigned employees
+    const employeeCount = await platformPrisma.employee.count({ where: { shiftId } });
+    if (employeeCount > 0) {
+      throw ApiError.badRequest(`Cannot delete: ${employeeCount} employee(s) are assigned to this shift`);
     }
 
     await platformPrisma.companyShift.delete({ where: { id: shiftId } });

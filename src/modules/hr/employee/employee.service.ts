@@ -13,18 +13,43 @@ export class EmployeeService {
   // Employee ID Generation (from NoSeries)
   // ────────────────────────────────────────────────────────────────────
 
-  async generateEmployeeId(companyId: string): Promise<string> {
-    const noSeries = await platformPrisma.noSeriesConfig.findFirst({
+  private async generateEmployeeId(companyId: string, tx: typeof platformPrisma = platformPrisma): Promise<string> {
+    const noSeries = await tx.noSeriesConfig.findFirst({
       where: { companyId, linkedScreen: 'Employee Onboarding' },
     });
 
     if (!noSeries) {
-      // Fallback: EMP-<timestamp>
+      // Fallback: EMP-<timestamp> (timestamp ensures uniqueness)
       return `EMP-${Date.now()}`;
     }
 
-    const count = await platformPrisma.employee.count({ where: { companyId } });
-    const nextNum = (noSeries.startNumber || 1) + count;
+    // Find the actual last used employee ID to derive the next number.
+    // Using count() is not safe under concurrency — two concurrent creates
+    // would get the same count and generate duplicate IDs.
+    const lastEmployee = await tx.employee.findFirst({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' },
+      select: { employeeId: true },
+    });
+
+    let nextNum = noSeries.startNumber || 1;
+    if (lastEmployee?.employeeId) {
+      // Extract the numeric portion from the last employee ID
+      const prefix = noSeries.prefix || '';
+      const suffix = noSeries.suffix || '';
+      let numericPart = lastEmployee.employeeId;
+      if (prefix && numericPart.startsWith(prefix)) {
+        numericPart = numericPart.slice(prefix.length);
+      }
+      if (suffix && numericPart.endsWith(suffix)) {
+        numericPart = numericPart.slice(0, -suffix.length);
+      }
+      const parsed = parseInt(numericPart, 10);
+      if (!isNaN(parsed)) {
+        nextNum = parsed + 1;
+      }
+    }
+
     const padded = String(nextNum).padStart(noSeries.numberCount || 5, '0');
     return `${noSeries.prefix || ''}${padded}${noSeries.suffix || ''}`;
   }
@@ -122,120 +147,140 @@ export class EmployeeService {
   }
 
   async createEmployee(companyId: string, data: any, performedBy?: string) {
-    // Validate references exist
+    // Validate references exist (outside transaction — read-only checks)
     await this.validateReferences(companyId, data);
 
-    const employeeId = await this.generateEmployeeId(companyId);
+    // Retry loop to handle concurrent employee ID collisions.
+    // The @@unique([companyId, employeeId]) constraint ensures no duplicates;
+    // on collision (Prisma P2002), we retry with the next available number.
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        return await platformPrisma.$transaction(async (tx) => {
+          const employeeId = await this.generateEmployeeId(companyId, tx as any);
 
-    // Calculate probation end date if grade has probationMonths
-    let probationEndDate: Date | null = null;
-    if (data.gradeId) {
-      const grade = await platformPrisma.grade.findUnique({
-        where: { id: data.gradeId },
-        select: { probationMonths: true },
-      });
-      if (grade?.probationMonths) {
-        const joiningDate = new Date(data.joiningDate);
-        probationEndDate = new Date(joiningDate);
-        probationEndDate.setMonth(probationEndDate.getMonth() + grade.probationMonths);
+          // Calculate probation end date if grade has probationMonths
+          let probationEndDate: Date | null = null;
+          if (data.gradeId) {
+            const grade = await tx.grade.findUnique({
+              where: { id: data.gradeId },
+              select: { probationMonths: true },
+            });
+            if (grade?.probationMonths) {
+              const joiningDate = new Date(data.joiningDate);
+              probationEndDate = new Date(joiningDate);
+              probationEndDate.setMonth(probationEndDate.getMonth() + grade.probationMonths);
+            }
+          }
+
+          const employee = await tx.employee.create({
+            data: {
+              companyId,
+              employeeId,
+
+              // Personal
+              firstName: data.firstName,
+              middleName: n(data.middleName),
+              lastName: data.lastName,
+              dateOfBirth: new Date(data.dateOfBirth),
+              gender: data.gender,
+              maritalStatus: n(data.maritalStatus),
+              bloodGroup: n(data.bloodGroup),
+              fatherMotherName: n(data.fatherMotherName),
+              nationality: data.nationality ?? 'Indian',
+              religion: n(data.religion),
+              category: n(data.category),
+              differentlyAbled: data.differentlyAbled ?? false,
+              disabilityType: n(data.disabilityType),
+              profilePhotoUrl: n(data.profilePhotoUrl),
+
+              // Contact
+              personalMobile: data.personalMobile,
+              alternativeMobile: n(data.alternativeMobile),
+              personalEmail: data.personalEmail,
+              officialEmail: n(data.officialEmail),
+              currentAddress: data.currentAddress ? (data.currentAddress as any) : Prisma.JsonNull,
+              permanentAddress: data.permanentAddress ? (data.permanentAddress as any) : Prisma.JsonNull,
+              emergencyContactName: data.emergencyContactName,
+              emergencyContactRelation: data.emergencyContactRelation,
+              emergencyContactMobile: data.emergencyContactMobile,
+
+              // Professional
+              joiningDate: new Date(data.joiningDate),
+              employeeTypeId: data.employeeTypeId,
+              departmentId: data.departmentId,
+              designationId: data.designationId,
+              gradeId: n(data.gradeId),
+              reportingManagerId: n(data.reportingManagerId),
+              functionalManagerId: n(data.functionalManagerId),
+              workType: n(data.workType),
+              shiftId: n(data.shiftId),
+              costCentreId: n(data.costCentreId),
+              locationId: n(data.locationId),
+              noticePeriodDays: n(data.noticePeriodDays),
+              probationEndDate,
+
+              // Salary
+              annualCtc: data.annualCtc ?? null,
+              salaryStructure: data.salaryStructure ? (data.salaryStructure as any) : Prisma.JsonNull,
+              paymentMode: n(data.paymentMode),
+
+              // Bank
+              bankAccountNumber: n(data.bankAccountNumber),
+              bankIfscCode: n(data.bankIfscCode),
+              bankName: n(data.bankName),
+              bankBranch: n(data.bankBranch),
+              accountType: n(data.accountType),
+
+              // Statutory
+              panNumber: n(data.panNumber),
+              aadhaarNumber: n(data.aadhaarNumber),
+              uan: n(data.uan),
+              esiIpNumber: n(data.esiIpNumber),
+              passportNumber: n(data.passportNumber),
+              passportExpiry: data.passportExpiry ? new Date(data.passportExpiry) : null,
+              drivingLicence: n(data.drivingLicence),
+              voterId: n(data.voterId),
+              pran: n(data.pran),
+
+              // Status defaults to PROBATION (from schema default)
+              status: 'PROBATION',
+
+              // Timeline: JOINED event
+              timeline: {
+                create: {
+                  eventType: 'JOINED',
+                  title: 'Employee Joined',
+                  description: `${data.firstName} ${data.lastName} joined the organization`,
+                  eventData: { joiningDate: data.joiningDate, employeeId } as any,
+                  performedBy: n(performedBy),
+                },
+              },
+            },
+            include: {
+              department: { select: { id: true, name: true, code: true } },
+              designation: { select: { id: true, name: true, code: true } },
+              grade: { select: { id: true, name: true, code: true } },
+              employeeType: { select: { id: true, name: true, code: true } },
+              timeline: true,
+            },
+          });
+
+          logger.info(`Employee created: ${employee.id} (${employee.employeeId}) for company ${companyId}`);
+          return employee;
+        });
+      } catch (error: any) {
+        // P2002 = unique constraint violation — retry with next available ID
+        if (error?.code === 'P2002' && attempt < MAX_RETRIES - 1) {
+          logger.warn(`Employee ID collision for company ${companyId}, retrying (attempt ${attempt + 2}/${MAX_RETRIES})`);
+          continue;
+        }
+        throw error;
       }
     }
 
-    const employee = await platformPrisma.employee.create({
-      data: {
-        companyId,
-        employeeId,
-
-        // Personal
-        firstName: data.firstName,
-        middleName: n(data.middleName),
-        lastName: data.lastName,
-        dateOfBirth: new Date(data.dateOfBirth),
-        gender: data.gender,
-        maritalStatus: n(data.maritalStatus),
-        bloodGroup: n(data.bloodGroup),
-        fatherMotherName: n(data.fatherMotherName),
-        nationality: data.nationality ?? 'Indian',
-        religion: n(data.religion),
-        category: n(data.category),
-        differentlyAbled: data.differentlyAbled ?? false,
-        disabilityType: n(data.disabilityType),
-        profilePhotoUrl: n(data.profilePhotoUrl),
-
-        // Contact
-        personalMobile: data.personalMobile,
-        alternativeMobile: n(data.alternativeMobile),
-        personalEmail: data.personalEmail,
-        officialEmail: n(data.officialEmail),
-        currentAddress: data.currentAddress ? (data.currentAddress as any) : Prisma.JsonNull,
-        permanentAddress: data.permanentAddress ? (data.permanentAddress as any) : Prisma.JsonNull,
-        emergencyContactName: data.emergencyContactName,
-        emergencyContactRelation: data.emergencyContactRelation,
-        emergencyContactMobile: data.emergencyContactMobile,
-
-        // Professional
-        joiningDate: new Date(data.joiningDate),
-        employeeTypeId: data.employeeTypeId,
-        departmentId: data.departmentId,
-        designationId: data.designationId,
-        gradeId: n(data.gradeId),
-        reportingManagerId: n(data.reportingManagerId),
-        functionalManagerId: n(data.functionalManagerId),
-        workType: n(data.workType),
-        shiftId: n(data.shiftId),
-        costCentreId: n(data.costCentreId),
-        locationId: n(data.locationId),
-        noticePeriodDays: n(data.noticePeriodDays),
-        probationEndDate,
-
-        // Salary
-        annualCtc: data.annualCtc ?? null,
-        salaryStructure: data.salaryStructure ? (data.salaryStructure as any) : Prisma.JsonNull,
-        paymentMode: n(data.paymentMode),
-
-        // Bank
-        bankAccountNumber: n(data.bankAccountNumber),
-        bankIfscCode: n(data.bankIfscCode),
-        bankName: n(data.bankName),
-        bankBranch: n(data.bankBranch),
-        accountType: n(data.accountType),
-
-        // Statutory
-        panNumber: n(data.panNumber),
-        aadhaarNumber: n(data.aadhaarNumber),
-        uan: n(data.uan),
-        esiIpNumber: n(data.esiIpNumber),
-        passportNumber: n(data.passportNumber),
-        passportExpiry: data.passportExpiry ? new Date(data.passportExpiry) : null,
-        drivingLicence: n(data.drivingLicence),
-        voterId: n(data.voterId),
-        pran: n(data.pran),
-
-        // Status defaults to PROBATION (from schema default)
-        status: 'PROBATION',
-
-        // Timeline: JOINED event
-        timeline: {
-          create: {
-            eventType: 'JOINED',
-            title: 'Employee Joined',
-            description: `${data.firstName} ${data.lastName} joined the organization`,
-            eventData: { joiningDate: data.joiningDate, employeeId } as any,
-            performedBy: n(performedBy),
-          },
-        },
-      },
-      include: {
-        department: { select: { id: true, name: true, code: true } },
-        designation: { select: { id: true, name: true, code: true } },
-        grade: { select: { id: true, name: true, code: true } },
-        employeeType: { select: { id: true, name: true, code: true } },
-        timeline: true,
-      },
-    });
-
-    logger.info(`Employee created: ${employee.id} (${employee.employeeId}) for company ${companyId}`);
-    return employee;
+    // Should never reach here, but TypeScript needs it
+    throw ApiError.internal('Failed to generate unique employee ID after retries');
   }
 
   async updateEmployee(companyId: string, id: string, data: any, performedBy?: string) {

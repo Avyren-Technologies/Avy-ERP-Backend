@@ -2,12 +2,22 @@ import { platformPrisma } from '../../config/database';
 
 export class BillingConfigService {
   async getConfig() {
-    // Upsert: return existing or create with defaults
+    // Return existing or create with defaults.
+    // Use try-catch to handle race condition where two concurrent calls
+    // both pass the findFirst check — the loser's create will fail,
+    // so we fall back to findFirst again.
     let config = await platformPrisma.platformBillingConfig.findFirst();
-    if (!config) {
+    if (config) return config;
+
+    try {
       config = await platformPrisma.platformBillingConfig.create({ data: {} });
+      return config;
+    } catch {
+      // Another concurrent call likely created the config first
+      config = await platformPrisma.platformBillingConfig.findFirst();
+      if (config) return config;
+      throw new Error('Failed to create or retrieve platform billing config');
     }
-    return config;
   }
 
   async updateConfig(data: {
@@ -19,11 +29,18 @@ export class BillingConfigService {
     platformGstin?: string;
     invoicePrefix?: string;
   }) {
-    // Validate IGST = CGST + SGST if tax rates provided
-    const cgst = data.defaultCgstRate;
-    const sgst = data.defaultSgstRate;
-    const igst = data.defaultIgstRate;
-    if (cgst !== undefined && sgst !== undefined && igst !== undefined) {
+    // Validate IGST = CGST + SGST when any tax rate is updated
+    if (
+      data.defaultCgstRate !== undefined ||
+      data.defaultSgstRate !== undefined ||
+      data.defaultIgstRate !== undefined
+    ) {
+      // Fetch current config to merge with partial update
+      const current = await this.getConfig();
+      const cgst = data.defaultCgstRate ?? current.defaultCgstRate;
+      const sgst = data.defaultSgstRate ?? current.defaultSgstRate;
+      const igst = data.defaultIgstRate ?? current.defaultIgstRate;
+
       if (Math.abs(igst - (cgst + sgst)) > 0.01) {
         throw new Error('IGST rate must equal CGST + SGST');
       }

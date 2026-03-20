@@ -81,14 +81,14 @@ router.use('/platform/audit-logs', auditRoutes);
 router.use(
   '/tenants/:tenantId',
   requireTenant(),
-  validateTenantAccess
+  validateTenantAccess()
 );
 
 // Apply authentication and tenant validation to business routes
 router.use(
   authMiddleware({ requireTenant: true }),
   requireTenant(),
-  validateTenantAccess
+  validateTenantAccess()
 );
 
 // Business module routes

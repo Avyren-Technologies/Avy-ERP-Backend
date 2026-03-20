@@ -217,9 +217,14 @@ class PdfService {
     addTotalRow('Subtotal:', invoice.subtotal);
 
     if (!invoice.gstNotApplicable) {
-      if (invoice.cgst > 0) addTotalRow('CGST (9%):', invoice.cgst);
-      if (invoice.sgst > 0) addTotalRow('SGST (9%):', invoice.sgst);
-      if (invoice.igst > 0) addTotalRow('IGST (18%):', invoice.igst);
+      // Calculate actual tax rate percentages from amounts
+      const cgstPct = invoice.subtotal > 0 ? ((invoice.cgst / invoice.subtotal) * 100).toFixed(1).replace(/\.0$/, '') : '0';
+      const sgstPct = invoice.subtotal > 0 ? ((invoice.sgst / invoice.subtotal) * 100).toFixed(1).replace(/\.0$/, '') : '0';
+      const igstPct = invoice.subtotal > 0 ? ((invoice.igst / invoice.subtotal) * 100).toFixed(1).replace(/\.0$/, '') : '0';
+
+      if (invoice.cgst > 0) addTotalRow(`CGST (${cgstPct}%):`, invoice.cgst);
+      if (invoice.sgst > 0) addTotalRow(`SGST (${sgstPct}%):`, invoice.sgst);
+      if (invoice.igst > 0) addTotalRow(`IGST (${igstPct}%):`, invoice.igst);
       addTotalRow('Total Tax:', invoice.totalTax);
     } else {
       doc.font('Helvetica').fontSize(8).fillColor('#999999');

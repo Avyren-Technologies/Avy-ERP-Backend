@@ -4,6 +4,8 @@ import { pdfService } from './pdf.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { HttpStatus } from '../../shared/types';
+import { ApiError } from '../../shared/errors';
+import { generateInvoiceSchema, markAsPaidSchema } from './billing.validators';
 
 export class InvoiceController {
   // ── List Invoices (paginated + filtered) ────────────────────────────
@@ -49,7 +51,12 @@ export class InvoiceController {
 
   // ── Generate Invoice ────────────────────────────────────────────────
   generateInvoice = asyncHandler(async (req: Request, res: Response) => {
-    const { companyId, locationId, invoiceType, billingPeriodStart, billingPeriodEnd, customLineItems, notes } = req.body;
+    const parsed = generateInvoiceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    const { companyId, locationId, invoiceType, billingPeriodStart, billingPeriodEnd, customLineItems, notes } = parsed.data;
 
     const invoice = await invoiceService.generateInvoice({
       companyId,
@@ -67,7 +74,13 @@ export class InvoiceController {
   // ── Mark Invoice as Paid ────────────────────────────────────────────
   markAsPaid = asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const { method, transactionReference, paidAt, notes } = req.body;
+
+    const parsed = markAsPaidSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    const { method, transactionReference, paidAt, notes } = parsed.data;
 
     const result = await invoiceService.markAsPaid(id, {
       method,

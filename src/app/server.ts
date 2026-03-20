@@ -3,6 +3,7 @@ import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { checkDatabaseConnection, disconnectDatabase } from '../config/database';
 import { checkAllRedisConnections, disconnectRedis } from '../config/redis';
+import { startSLACron } from '../workers/sla-cron';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -22,12 +23,16 @@ async function startServer(): Promise<void> {
     }
 
     // Start HTTP server
-    const server = app.listen(env.PORT, () => {
+    const server = app.listen(env.PORT, '0.0.0.0', () => {
       logger.info(`🚀 Avy ERP Backend Server started successfully!`);
+      logger.info(`📡 Server bound to host: 0.0.0.0`);
       logger.info(`📍 Server running on: http://localhost:${env.PORT}`);
       logger.info(`🌍 Environment: ${env.NODE_ENV}`);
       logger.info(`📊 API Prefix: ${env.API_PREFIX}`);
       logger.info(`🏥 Health Check: http://localhost:${env.PORT}/health`);
+
+      // Start SLA enforcement cron job
+      startSLACron();
     });
 
     // Handle server errors

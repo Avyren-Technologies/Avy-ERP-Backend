@@ -97,6 +97,7 @@ const envSchema = z.object({
   // Features
   ENABLE_SWAGGER: envBoolean.default(false),
   ENABLE_CORS: envBoolean.default(true),
+  CORS_ALLOWED_ORIGINS: z.string().default(''),
 });
 
 // Parse and validate environment variables

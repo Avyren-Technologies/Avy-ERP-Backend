@@ -1,9 +1,15 @@
-import { Router, Request, Response } from 'express';
-import { requirePermissions } from '../../middleware/auth.middleware';
-import { asyncHandler } from '../../middleware/error.middleware';
-import { createSuccessResponse } from '../../shared/utils';
+import { Router } from 'express';
 import { orgStructureRoutes } from './org-structure/org-structure.routes';
 import { employeeRoutes } from './employee/employee.routes';
+import { attendanceRoutes } from './attendance/attendance.routes';
+import { leaveRoutes } from './leave/leave.routes';
+import { payrollRoutes } from './payroll/payroll.routes';
+import { payrollRunRoutes } from './payroll-run/payroll-run.routes';
+import { essRoutes } from './ess/ess.routes';
+import { performanceRoutes } from './performance/performance.routes';
+import { offboardingRoutes } from './offboarding/offboarding.routes';
+import { advancedRoutes } from './advanced/advanced.routes';
+import { transferRoutes } from './transfer/transfer.routes';
 
 const router = Router();
 
@@ -13,35 +19,31 @@ router.use('/', orgStructureRoutes);
 // Employee management (full CRUD + sub-resources: nominees, education, prev-employment, documents, timeline)
 router.use('/', employeeRoutes);
 
-// Attendance management
-router.get('/attendance', requirePermissions(['hr:read']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'HR attendance endpoint - TODO: Implement' }));
-}));
+// Attendance management (records, rules, overrides, holidays, rosters, overtime)
+router.use('/', attendanceRoutes);
 
-router.post('/attendance', requirePermissions(['hr:create']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Log attendance endpoint - TODO: Implement' }));
-}));
+// Leave management (leave-types, leave-policies, leave-balances, leave-requests, leave/summary)
+router.use('/', leaveRoutes);
 
-// Leave management
-router.get('/leave-requests', requirePermissions(['hr:read']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Leave requests endpoint - TODO: Implement' }));
-}));
+// Payroll management (salary components, structures, employee salaries, statutory configs, bank, loans, tax)
+router.use('/', payrollRoutes);
 
-router.post('/leave-requests', requirePermissions(['hr:create']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Create leave request endpoint - TODO: Implement' }));
-}));
+// Payroll run engine (runs, entries, payslips, holds, revisions, arrears, statutory filings, reports)
+router.use('/', payrollRunRoutes);
 
-router.put('/leave-requests/:id/approve', requirePermissions(['hr:update']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Approve leave request endpoint - TODO: Implement' }));
-}));
+// ESS config, approval workflows, notifications, IT declarations, ESS/MSS self-service
+router.use('/', essRoutes);
 
-// Payroll management
-router.get('/payroll', requirePermissions(['hr:read']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Payroll endpoint - TODO: Implement' }));
-}));
+// Performance management (appraisal cycles, goals, entries, 360 feedback, skills, succession, dashboard)
+router.use('/', performanceRoutes);
 
-router.post('/payroll/process', requirePermissions(['hr:create']), asyncHandler(async (req: Request, res: Response) => {
-  res.json(createSuccessResponse({ message: 'Process payroll endpoint - TODO: Implement' }));
-}));
+// Offboarding & F&F (exit requests, clearances, exit interviews, F&F settlements)
+router.use('/', offboardingRoutes);
+
+// Advanced HR (recruitment, training, assets, expenses, letters, grievance, discipline)
+router.use('/', advancedRoutes);
+
+// Transfer & Promotion (with approval workflow integration)
+router.use('/', transferRoutes);
 
 export { router as hrRoutes };

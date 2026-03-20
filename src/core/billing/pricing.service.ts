@@ -261,20 +261,29 @@ export class PricingService {
       return existing;
     }
 
-    // Upsert with defaults if none exists
-    const created = await platformPrisma.platformBillingConfig.create({
-      data: {
-        defaultOneTimeMultiplier: 24,
-        defaultAmcPercentage: 18,
-        defaultCgstRate: 9,
-        defaultSgstRate: 9,
-        defaultIgstRate: 18,
-        platformGstin: null,
-        invoicePrefix: 'INV',
-      },
-    });
-
-    return created;
+    // Create with defaults if none exists.
+    // Use try-catch to handle race condition where two concurrent calls
+    // both pass the findFirst check — the second create will fail with
+    // a unique constraint error, so we retry the findFirst.
+    try {
+      const created = await platformPrisma.platformBillingConfig.create({
+        data: {
+          defaultOneTimeMultiplier: 24,
+          defaultAmcPercentage: 18,
+          defaultCgstRate: 9,
+          defaultSgstRate: 9,
+          defaultIgstRate: 18,
+          platformGstin: null,
+          invoicePrefix: 'INV',
+        },
+      });
+      return created;
+    } catch {
+      // Another concurrent call likely created the config first — fetch it
+      const fallback = await platformPrisma.platformBillingConfig.findFirst();
+      if (fallback) return fallback;
+      throw new Error('Failed to create or retrieve platform billing config');
+    }
   }
 }
 

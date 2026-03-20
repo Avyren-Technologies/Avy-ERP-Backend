@@ -44,27 +44,41 @@ app.use(helmet({
 
 // CORS configuration
 if (env.ENABLE_CORS) {
+  const configuredOrigins = env.CORS_ALLOWED_ORIGINS
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  const defaultProductionOrigins = [
+    'https://avyerp.com',
+    'https://www.avyerp.com',
+    'https://app.avyerp.com',
+  ];
+
+  const allowedOrigins = configuredOrigins.length > 0
+    ? configuredOrigins
+    : (env.NODE_ENV === 'production' ? defaultProductionOrigins : []);
+  const allowAllOrigins = allowedOrigins.includes('*');
+
   app.use(cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, etc.)
       if (!origin) return callback(null, true);
 
-      // In production, check against allowed origins
-      if (env.NODE_ENV === 'production') {
-        const allowedOrigins = [
-          'https://avyerp.com',
-          'https://www.avyerp.com',
-          'https://app.avyerp.com',
-        ];
+      // Temporary wildcard support via env: CORS_ALLOWED_ORIGINS="*"
+      if (allowAllOrigins) {
+        return callback(null, true);
+      }
 
+      // Use configured allow-list when available. In production, fallback to defaults.
+      if (allowedOrigins.length > 0) {
         if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-
         return callback(new Error('Not allowed by CORS'), false);
       }
 
-      // In development, allow all origins
+      // In development without configured allow-list, allow all origins.
       return callback(null, true);
     },
     credentials: true,
@@ -79,59 +93,84 @@ if (env.ENABLE_CORS) {
 }
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: env.RATE_LIMIT_WINDOW_MS,
-  max: env.RATE_LIMIT_MAX_REQUESTS,
-  message: {
-    success: false,
-    error: 'Too many requests from this IP, please try again later.',
-    code: 'RATE_LIMIT_EXCEEDED',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health';
-  },
-});
+const enableRateLimiting = env.NODE_ENV !== 'development';
 
-app.use(limiter);
+if (enableRateLimiting) {
+  const limiter = rateLimit({
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    max: env.RATE_LIMIT_MAX_REQUESTS,
+    message: {
+      success: false,
+      error: 'Too many requests from this IP, please try again later.',
+      code: 'RATE_LIMIT_EXCEEDED',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => {
+      // Skip rate limiting for health checks
+      return req.path === '/health';
+    },
+  });
 
-const authLoginLimiter = rateLimit({
-  windowMs: env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
-  max: env.AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS,
-  message: {
-    success: false,
-    error: 'Too many login attempts. Please try again later.',
-    code: 'AUTH_LOGIN_RATE_LIMIT_EXCEEDED',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+  app.use(limiter);
 
-const authRegisterLimiter = rateLimit({
-  windowMs: env.AUTH_REGISTER_RATE_LIMIT_WINDOW_MS,
-  max: env.AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS,
-  message: {
-    success: false,
-    error: 'Too many registration attempts. Please try again later.',
-    code: 'AUTH_REGISTER_RATE_LIMIT_EXCEEDED',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+  const authLoginLimiter = rateLimit({
+    windowMs: env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
+    max: env.AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS,
+    message: {
+      success: false,
+      error: 'Too many login attempts. Please try again later.',
+      code: 'AUTH_LOGIN_RATE_LIMIT_EXCEEDED',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
 
-const authRefreshLimiter = rateLimit({
-  windowMs: env.AUTH_REFRESH_RATE_LIMIT_WINDOW_MS,
-  max: env.AUTH_REFRESH_RATE_LIMIT_MAX_REQUESTS,
-  message: {
-    success: false,
-    error: 'Too many token refresh attempts. Please try again later.',
-    code: 'AUTH_REFRESH_RATE_LIMIT_EXCEEDED',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+  const authRegisterLimiter = rateLimit({
+    windowMs: env.AUTH_REGISTER_RATE_LIMIT_WINDOW_MS,
+    max: env.AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS,
+    message: {
+      success: false,
+      error: 'Too many registration attempts. Please try again later.',
+      code: 'AUTH_REGISTER_RATE_LIMIT_EXCEEDED',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  const authRefreshLimiter = rateLimit({
+    windowMs: env.AUTH_REFRESH_RATE_LIMIT_WINDOW_MS,
+    max: env.AUTH_REFRESH_RATE_LIMIT_MAX_REQUESTS,
+    message: {
+      success: false,
+      error: 'Too many token refresh attempts. Please try again later.',
+      code: 'AUTH_REFRESH_RATE_LIMIT_EXCEEDED',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Forgot password rate limiter (5 per hour per IP)
+  const authForgotPasswordLimiter = rateLimit({
+    windowMs: 3600000,
+    max: 5,
+    message: {
+      success: false,
+      error: 'Too many password reset attempts. Please try again later.',
+      code: 'AUTH_FORGOT_PASSWORD_RATE_LIMIT_EXCEEDED',
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Strict auth endpoint-specific rate limiting
+  app.use(`${env.API_PREFIX}/auth/login`, authLoginLimiter);
+  app.use(`${env.API_PREFIX}/auth/register`, authRegisterLimiter);
+  app.use(`${env.API_PREFIX}/auth/refresh-token`, authRefreshLimiter);
+  app.use(`${env.API_PREFIX}/auth/forgot-password`, authForgotPasswordLimiter);
+  app.use(`${env.API_PREFIX}/auth/verify-reset-code`, authForgotPasswordLimiter);
+  app.use(`${env.API_PREFIX}/auth/reset-password`, authForgotPasswordLimiter);
+}
 
 // Logging middleware
 app.use(requestLoggingMiddleware);
@@ -151,7 +190,7 @@ app.use(express.json({
 
 app.use(express.urlencoded({
   extended: true,
-  limit: '10mb',
+  limit: '100mb',
 }));
 
 // Cookie parser
@@ -159,27 +198,6 @@ app.use(cookieParser());
 
 // Health check endpoint
 app.get('/health', healthCheckMiddleware);
-
-// Forgot password rate limiter (5 per hour per IP)
-const authForgotPasswordLimiter = rateLimit({
-  windowMs: 3600000,
-  max: 5,
-  message: {
-    success: false,
-    error: 'Too many password reset attempts. Please try again later.',
-    code: 'AUTH_FORGOT_PASSWORD_RATE_LIMIT_EXCEEDED',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Strict auth endpoint-specific rate limiting
-app.use(`${env.API_PREFIX}/auth/login`, authLoginLimiter);
-app.use(`${env.API_PREFIX}/auth/register`, authRegisterLimiter);
-app.use(`${env.API_PREFIX}/auth/refresh-token`, authRefreshLimiter);
-app.use(`${env.API_PREFIX}/auth/forgot-password`, authForgotPasswordLimiter);
-app.use(`${env.API_PREFIX}/auth/verify-reset-code`, authForgotPasswordLimiter);
-app.use(`${env.API_PREFIX}/auth/reset-password`, authForgotPasswordLimiter);
 
 // API routes
 app.use(env.API_PREFIX, routes);

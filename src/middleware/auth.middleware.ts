@@ -96,6 +96,20 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       // Attach user to request
       req.user = user;
 
+      // If tenant not resolved yet (e.g., no X-Tenant-ID header, IP-based host),
+      // resolve from user context
+      if (!req.tenant && user.tenantId) {
+        const { tenantMiddleware: _, ...tenantUtils } = await import('../middleware/tenant.middleware');
+        // Build tenant object from user context
+        req.tenant = {
+          id: user.tenantId,
+          schemaName: `tenant_${user.tenantId.replace(/-/g, '_')}`,
+          companyId: user.companyId || user.tenantId,
+          databaseUrl: env.DATABASE_URL_TEMPLATE?.replace('{schema}', `tenant_${user.tenantId.replace(/-/g, '_')}`) || '',
+          status: 'active',
+        } as any;
+      }
+
       // Check tenant requirement
       if (options.requireTenant && !req.tenant) {
         throw AuthError.tenantNotFound();
