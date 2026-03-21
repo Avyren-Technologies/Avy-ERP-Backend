@@ -1,12 +1,15 @@
-/*
-  Warnings:
+-- CreateEnum
+CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'CANCELLED', 'TRIAL', 'EXPIRED');
 
-  - You are about to drop the column `billingCycle` on the `companies` table. All the data in the column will be lost.
-  - You are about to drop the column `billingCycle` on the `locations` table. All the data in the column will be lost.
-  - You are about to drop the column `billingCycle` on the `subscriptions` table. All the data in the column will be lost.
-  - A unique constraint covering the columns `[invoiceNumber]` on the table `invoices` will be added. If there are existing duplicate values, this will fail.
+-- CreateEnum
+CREATE TYPE "CompanySize" AS ENUM ('STARTUP', 'SMALL', 'MEDIUM', 'LARGE', 'ENTERPRISE');
 
-*/
+-- CreateEnum
+CREATE TYPE "UserRole" AS ENUM ('SUPER_ADMIN', 'COMPANY_ADMIN');
+
+-- CreateEnum
+CREATE TYPE "UserTier" AS ENUM ('STARTER', 'GROWTH', 'SCALE', 'ENTERPRISE', 'CUSTOM');
+
 -- CreateEnum
 CREATE TYPE "BillingType" AS ENUM ('MONTHLY', 'ANNUAL', 'ONE_TIME_AMC');
 
@@ -18,6 +21,12 @@ CREATE TYPE "AmcStatus" AS ENUM ('ACTIVE', 'OVERDUE', 'LAPSED', 'NOT_APPLICABLE'
 
 -- CreateEnum
 CREATE TYPE "PaymentMethod" AS ENUM ('BANK_TRANSFER', 'CHEQUE', 'CASH', 'RAZORPAY', 'UPI', 'OTHER');
+
+-- CreateEnum
+CREATE TYPE "SubscriptionStatus" AS ENUM ('TRIAL', 'ACTIVE', 'SUSPENDED', 'CANCELLED', 'EXPIRED');
+
+-- CreateEnum
+CREATE TYPE "InvoiceStatus" AS ENUM ('PENDING', 'PAID', 'OVERDUE', 'CANCELLED');
 
 -- CreateEnum
 CREATE TYPE "EmployeeStatus" AS ENUM ('ACTIVE', 'PROBATION', 'CONFIRMED', 'ON_NOTICE', 'SUSPENDED', 'EXITED');
@@ -169,46 +178,199 @@ CREATE TYPE "TransferStatus" AS ENUM ('REQUESTED', 'APPROVED', 'REJECTED', 'APPL
 -- CreateEnum
 CREATE TYPE "PromotionStatus" AS ENUM ('RECOMMENDED', 'REQUESTED', 'APPROVED', 'REJECTED', 'APPLIED', 'CANCELLED');
 
--- AlterTable
-ALTER TABLE "companies" DROP COLUMN "billingCycle",
-ADD COLUMN     "amcPercentage" DOUBLE PRECISION,
-ADD COLUMN     "billingType" TEXT DEFAULT 'monthly',
-ADD COLUMN     "oneTimeMultiplier" DOUBLE PRECISION;
+-- CreateTable
+CREATE TABLE "tenants" (
+    "id" TEXT NOT NULL,
+    "schemaName" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
--- AlterTable
-ALTER TABLE "invoices" ADD COLUMN     "billingPeriodEnd" TIMESTAMP(3),
-ADD COLUMN     "billingPeriodStart" TIMESTAMP(3),
-ADD COLUMN     "cgst" DOUBLE PRECISION NOT NULL DEFAULT 0,
-ADD COLUMN     "gstNotApplicable" BOOLEAN NOT NULL DEFAULT false,
-ADD COLUMN     "igst" DOUBLE PRECISION NOT NULL DEFAULT 0,
-ADD COLUMN     "invoiceNumber" TEXT NOT NULL DEFAULT '',
-ADD COLUMN     "invoiceType" "InvoiceType" NOT NULL DEFAULT 'SUBSCRIPTION',
-ADD COLUMN     "lineItems" JSONB NOT NULL DEFAULT '[]',
-ADD COLUMN     "paidVia" "PaymentMethod",
-ADD COLUMN     "paymentReference" TEXT,
-ADD COLUMN     "pdfUrl" TEXT,
-ADD COLUMN     "sentAt" TIMESTAMP(3),
-ADD COLUMN     "sgst" DOUBLE PRECISION NOT NULL DEFAULT 0,
-ADD COLUMN     "subtotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
-ADD COLUMN     "totalAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
-ADD COLUMN     "totalTax" DOUBLE PRECISION NOT NULL DEFAULT 0;
+    CONSTRAINT "tenants_pkey" PRIMARY KEY ("id")
+);
 
--- AlterTable
-ALTER TABLE "locations" DROP COLUMN "billingCycle",
-ADD COLUMN     "amcAmount" DOUBLE PRECISION,
-ADD COLUMN     "billingType" TEXT DEFAULT 'monthly',
-ADD COLUMN     "oneTimeLicenseFee" DOUBLE PRECISION;
+-- CreateTable
+CREATE TABLE "companies" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "industry" TEXT NOT NULL,
+    "size" "CompanySize" NOT NULL,
+    "website" TEXT,
+    "gstNumber" TEXT,
+    "address" JSONB,
+    "contactPerson" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "displayName" TEXT,
+    "legalName" TEXT,
+    "shortName" TEXT,
+    "businessType" TEXT,
+    "companyCode" TEXT,
+    "cin" TEXT,
+    "incorporationDate" TEXT,
+    "employeeCount" TEXT,
+    "emailDomain" TEXT,
+    "logoUrl" TEXT,
+    "pan" TEXT,
+    "tan" TEXT,
+    "gstin" TEXT,
+    "pfRegNo" TEXT,
+    "esiCode" TEXT,
+    "ptReg" TEXT,
+    "lwfrNo" TEXT,
+    "rocState" TEXT,
+    "registeredAddress" JSONB,
+    "corporateAddress" JSONB,
+    "sameAsRegistered" BOOLEAN NOT NULL DEFAULT true,
+    "fiscalConfig" JSONB,
+    "preferences" JSONB,
+    "razorpayConfig" JSONB,
+    "endpointType" TEXT NOT NULL DEFAULT 'default',
+    "customEndpointUrl" TEXT,
+    "multiLocationMode" BOOLEAN NOT NULL DEFAULT false,
+    "locationConfig" TEXT NOT NULL DEFAULT 'common',
+    "selectedModuleIds" JSONB,
+    "customModulePricing" JSONB,
+    "userTier" TEXT,
+    "customUserLimit" TEXT,
+    "customTierPrice" TEXT,
+    "billingType" TEXT DEFAULT 'monthly',
+    "trialDays" INTEGER NOT NULL DEFAULT 0,
+    "oneTimeMultiplier" DOUBLE PRECISION,
+    "amcPercentage" DOUBLE PRECISION,
+    "dayStartTime" TEXT,
+    "dayEndTime" TEXT,
+    "weeklyOffs" JSONB,
+    "systemControls" JSONB,
+    "wizardStatus" TEXT NOT NULL DEFAULT 'Draft',
 
--- AlterTable
-ALTER TABLE "subscriptions" DROP COLUMN "billingCycle",
-ADD COLUMN     "amcAmount" DOUBLE PRECISION,
-ADD COLUMN     "amcDueDate" TIMESTAMP(3),
-ADD COLUMN     "amcStatus" "AmcStatus" NOT NULL DEFAULT 'NOT_APPLICABLE',
-ADD COLUMN     "billingType" "BillingType" NOT NULL DEFAULT 'MONTHLY',
-ADD COLUMN     "oneTimeLicenseFee" DOUBLE PRECISION;
+    CONSTRAINT "companies_pkey" PRIMARY KEY ("id")
+);
 
--- DropEnum
-DROP TYPE "BillingCycle";
+-- CreateTable
+CREATE TABLE "users" (
+    "id" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "password" TEXT NOT NULL,
+    "firstName" TEXT NOT NULL,
+    "lastName" TEXT NOT NULL,
+    "phone" TEXT,
+    "role" "UserRole" NOT NULL DEFAULT 'COMPANY_ADMIN',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "lastLogin" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "companyId" TEXT,
+    "employeeId" TEXT,
+
+    CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "password_reset_tokens" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "usedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "password_reset_tokens_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "roles" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "permissions" JSONB NOT NULL,
+    "isSystem" BOOLEAN NOT NULL DEFAULT false,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "roles_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "tenant_users" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "roleId" TEXT NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "tenant_users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "feature_toggles" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "feature" TEXT NOT NULL,
+    "enabled" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "feature_toggles_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "subscriptions" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "planId" TEXT NOT NULL,
+    "userTier" "UserTier" NOT NULL,
+    "billingType" "BillingType" NOT NULL DEFAULT 'MONTHLY',
+    "oneTimeLicenseFee" DOUBLE PRECISION,
+    "amcAmount" DOUBLE PRECISION,
+    "amcDueDate" TIMESTAMP(3),
+    "amcStatus" "AmcStatus" NOT NULL DEFAULT 'NOT_APPLICABLE',
+    "modules" JSONB NOT NULL,
+    "status" "SubscriptionStatus" NOT NULL DEFAULT 'TRIAL',
+    "startDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "endDate" TIMESTAMP(3),
+    "trialEndsAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "subscriptions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "invoices" (
+    "id" TEXT NOT NULL,
+    "subscriptionId" TEXT NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
+    "status" "InvoiceStatus" NOT NULL DEFAULT 'PENDING',
+    "dueDate" TIMESTAMP(3) NOT NULL,
+    "paidAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "invoiceNumber" TEXT NOT NULL DEFAULT '',
+    "invoiceType" "InvoiceType" NOT NULL DEFAULT 'SUBSCRIPTION',
+    "lineItems" JSONB NOT NULL DEFAULT '[]',
+    "subtotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "cgst" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "sgst" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "igst" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "totalTax" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "totalAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "billingPeriodStart" TIMESTAMP(3),
+    "billingPeriodEnd" TIMESTAMP(3),
+    "paidVia" "PaymentMethod",
+    "paymentReference" TEXT,
+    "sentAt" TIMESTAMP(3),
+    "pdfUrl" TEXT,
+    "gstNotApplicable" BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT "invoices_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateTable
 CREATE TABLE "payments" (
@@ -239,6 +401,135 @@ CREATE TABLE "platform_billing_config" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "platform_billing_config_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "audit_logs" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT,
+    "userId" TEXT,
+    "action" TEXT NOT NULL,
+    "entityType" TEXT NOT NULL,
+    "entityId" TEXT NOT NULL,
+    "oldValues" JSONB,
+    "newValues" JSONB,
+    "ipAddress" TEXT,
+    "userAgent" TEXT,
+    "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "locations" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "facilityType" TEXT NOT NULL,
+    "customFacilityType" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'Active',
+    "isHQ" BOOLEAN NOT NULL DEFAULT false,
+    "addressLine1" TEXT,
+    "addressLine2" TEXT,
+    "city" TEXT,
+    "district" TEXT,
+    "state" TEXT,
+    "pin" TEXT,
+    "country" TEXT DEFAULT 'India',
+    "stdCode" TEXT,
+    "gstin" TEXT,
+    "stateGST" TEXT,
+    "contactName" TEXT,
+    "contactDesignation" TEXT,
+    "contactEmail" TEXT,
+    "contactCountryCode" TEXT DEFAULT '+91',
+    "contactPhone" TEXT,
+    "geoEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "geoLocationName" TEXT,
+    "geoLat" TEXT,
+    "geoLng" TEXT,
+    "geoRadius" INTEGER NOT NULL DEFAULT 50,
+    "geoShape" TEXT DEFAULT 'circle',
+    "moduleIds" JSONB,
+    "customModulePricing" JSONB,
+    "userTier" TEXT,
+    "customUserLimit" TEXT,
+    "customTierPrice" TEXT,
+    "billingType" TEXT DEFAULT 'monthly',
+    "trialDays" INTEGER NOT NULL DEFAULT 0,
+    "oneTimeLicenseFee" DOUBLE PRECISION,
+    "amcAmount" DOUBLE PRECISION,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "locations_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "company_contacts" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "designation" TEXT,
+    "department" TEXT,
+    "type" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "countryCode" TEXT NOT NULL DEFAULT '+91',
+    "mobile" TEXT NOT NULL,
+    "linkedin" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "company_contacts_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "company_shifts" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "fromTime" TEXT NOT NULL,
+    "toTime" TEXT NOT NULL,
+    "noShuffle" BOOLEAN NOT NULL DEFAULT false,
+    "downtimeSlots" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "company_shifts_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "no_series_configs" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "linkedScreen" TEXT NOT NULL,
+    "description" TEXT,
+    "prefix" TEXT NOT NULL,
+    "suffix" TEXT,
+    "numberCount" INTEGER NOT NULL DEFAULT 5,
+    "startNumber" INTEGER NOT NULL DEFAULT 1,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "no_series_configs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "iot_reasons" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "reasonType" TEXT NOT NULL,
+    "reason" TEXT NOT NULL,
+    "description" TEXT,
+    "department" TEXT,
+    "planned" BOOLEAN NOT NULL DEFAULT false,
+    "duration" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "iot_reasons_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -1731,6 +2022,57 @@ CREATE TABLE "employee_promotions" (
 );
 
 -- CreateIndex
+CREATE UNIQUE INDEX "tenants_schemaName_key" ON "tenants"("schemaName");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tenants_companyId_key" ON "tenants"("companyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "companies_gstNumber_key" ON "companies"("gstNumber");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "companies_companyCode_key" ON "companies"("companyCode");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_employeeId_key" ON "users"("employeeId");
+
+-- CreateIndex
+CREATE INDEX "password_reset_tokens_userId_idx" ON "password_reset_tokens"("userId");
+
+-- CreateIndex
+CREATE INDEX "roles_tenantId_idx" ON "roles"("tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "roles_tenantId_name_key" ON "roles"("tenantId", "name");
+
+-- CreateIndex
+CREATE INDEX "tenant_users_tenantId_idx" ON "tenant_users"("tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tenant_users_userId_tenantId_key" ON "tenant_users"("userId", "tenantId");
+
+-- CreateIndex
+CREATE INDEX "feature_toggles_tenantId_idx" ON "feature_toggles"("tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "feature_toggles_tenantId_userId_feature_key" ON "feature_toggles"("tenantId", "userId", "feature");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "subscriptions_tenantId_key" ON "subscriptions"("tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "invoices_invoiceNumber_key" ON "invoices"("invoiceNumber");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "locations_companyId_code_key" ON "locations"("companyId", "code");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "no_series_configs_companyId_code_key" ON "no_series_configs"("companyId", "code");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "departments_companyId_code_key" ON "departments"("companyId", "code");
 
 -- CreateIndex
@@ -1844,11 +2186,47 @@ CREATE UNIQUE INDEX "exit_interviews_exitRequestId_key" ON "exit_interviews"("ex
 -- CreateIndex
 CREATE UNIQUE INDEX "fnf_settlements_exitRequestId_key" ON "fnf_settlements"("exitRequestId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "invoices_invoiceNumber_key" ON "invoices"("invoiceNumber");
+-- AddForeignKey
+ALTER TABLE "tenants" ADD CONSTRAINT "tenants_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "users" ADD CONSTRAINT "users_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "users" ADD CONSTRAINT "users_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "employees"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "password_reset_tokens" ADD CONSTRAINT "password_reset_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tenant_users" ADD CONSTRAINT "tenant_users_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tenant_users" ADD CONSTRAINT "tenant_users_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "invoices" ADD CONSTRAINT "invoices_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "subscriptions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "payments" ADD CONSTRAINT "payments_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "invoices"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "locations" ADD CONSTRAINT "locations_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "company_contacts" ADD CONSTRAINT "company_contacts_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "company_shifts" ADD CONSTRAINT "company_shifts_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "no_series_configs" ADD CONSTRAINT "no_series_configs_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "iot_reasons" ADD CONSTRAINT "iot_reasons_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "departments" ADD CONSTRAINT "departments_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "departments"("id") ON DELETE SET NULL ON UPDATE CASCADE;

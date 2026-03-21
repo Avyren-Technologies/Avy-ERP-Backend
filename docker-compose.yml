@@ -1,0 +1,179 @@
+# ============================================
+# Avy ERP Backend - Docker Compose (Production)
+# Services: App + PostgreSQL 18 + Redis
+# ============================================
+
+services:
+  # ---------- PostgreSQL 18 ----------
+  postgres:
+    image: postgres:18
+    container_name: avy-erp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-avy_erp}
+      POSTGRES_USER: ${POSTGRES_USER:-avy_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-avy_admin} -d ${POSTGRES_DB:-avy_erp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - avy-network
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # ---------- Redis (Latest) ----------
+  redis:
+    image: redis:latest
+    container_name: avy-erp-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - avy-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # ---------- Avy ERP Backend ----------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: avy-erp-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      # Core
+      NODE_ENV: production
+      PORT: 3000
+
+      # Database — points to the postgres service
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-avy_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-avy_erp}?schema=public"
+      DATABASE_URL_TEMPLATE: "postgresql://${POSTGRES_USER:-avy_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-avy_erp}?schema={schema}"
+
+      # Redis — points to the redis service
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-avy:erp-backend}
+      REDIS_CACHE_DB: ${REDIS_CACHE_DB:-0}
+      REDIS_QUEUE_DB: ${REDIS_QUEUE_DB:-1}
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env.production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      JWT_COOKIE_NAME: ${JWT_COOKIE_NAME:-avy_erp_token}
+
+      # Email (SMTP)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      FROM_EMAIL: ${FROM_EMAIL:-noreply@avyerp.com}
+      FROM_NAME: ${FROM_NAME:-Avy ERP}
+
+      # SMS (Optional)
+      SMS_API_KEY: ${SMS_API_KEY:-}
+      SMS_API_URL: ${SMS_API_URL:-}
+
+      # Storage
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-./uploads}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      AWS_ACCESS_KEY: ${AWS_ACCESS_KEY:-}
+      AWS_SECRET_KEY: ${AWS_SECRET_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+
+      # Application
+      APP_NAME: ${APP_NAME:-Avy ERP}
+      APP_URL: ${APP_URL:?Set APP_URL in .env.production}
+      API_PREFIX: ${API_PREFIX:-/api/v1}
+
+      # Security
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+      AUTH_LOGIN_RATE_LIMIT_WINDOW_MS: ${AUTH_LOGIN_RATE_LIMIT_WINDOW_MS:-900000}
+      AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS: ${AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS:-5}
+      AUTH_REGISTER_RATE_LIMIT_WINDOW_MS: ${AUTH_REGISTER_RATE_LIMIT_WINDOW_MS:-3600000}
+      AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS: ${AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS:-5}
+      AUTH_REFRESH_RATE_LIMIT_WINDOW_MS: ${AUTH_REFRESH_RATE_LIMIT_WINDOW_MS:-900000}
+      AUTH_REFRESH_RATE_LIMIT_MAX_REQUESTS: ${AUTH_REFRESH_RATE_LIMIT_MAX_REQUESTS:-20}
+
+      # File Upload
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-10485760}
+      ALLOWED_FILE_TYPES: ${ALLOWED_FILE_TYPES:-.jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FILE_PATH: ${LOG_FILE_PATH:-./logs/app.log}
+
+      # Queue
+      QUEUE_REMOVE_ON_COMPLETE: ${QUEUE_REMOVE_ON_COMPLETE:-50}
+      QUEUE_REMOVE_ON_FAIL: ${QUEUE_REMOVE_ON_FAIL:-100}
+
+      # Features
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}
+      ENABLE_CORS: ${ENABLE_CORS:-true}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+    volumes:
+      - app_logs:/app/logs
+      - app_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - avy-network
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_logs:
+    driver: local
+  app_uploads:
+    driver: local
+
+networks:
+  avy-network:
+    driver: bridge

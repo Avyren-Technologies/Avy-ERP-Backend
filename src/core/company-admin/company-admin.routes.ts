@@ -43,6 +43,16 @@ router.post('/iot-reasons', requirePermissions(['company:create']), controller.c
 router.patch('/iot-reasons/:id', requirePermissions(['company:update']), controller.updateIotReason);
 router.delete('/iot-reasons/:id', requirePermissions(['company:delete']), controller.deleteIotReason);
 
+// ── Module Catalogue ────────────────────────────────────────────────
+router.get('/modules/catalogue', requirePermissions(['company:read']), controller.getModuleCatalogue);
+
+// ── Billing ────────────────────────────────────────────────────────
+router.get('/billing/subscription', requirePermissions(['company:read']), controller.getMySubscription);
+router.get('/billing/invoices', requirePermissions(['company:read']), controller.getMyInvoices);
+router.get('/billing/invoices/:id', requirePermissions(['company:read']), controller.getMyInvoiceDetail);
+router.get('/billing/payments', requirePermissions(['company:read']), controller.getMyPayments);
+router.get('/billing/cost-breakdown', requirePermissions(['company:read']), controller.getMyCostBreakdown);
+
 // ── Controls ────────────────────────────────────────────────────────
 router.get('/controls', requirePermissions(['company:read']), controller.getControls);
 router.patch('/controls', requirePermissions(['company:update']), controller.updateControls);

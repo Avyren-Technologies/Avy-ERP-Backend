@@ -414,6 +414,60 @@ export class CompanyAdminController {
     res.json(createSuccessResponse(user, `User ${parsed.data.isActive ? 'activated' : 'deactivated'}`));
   });
 
+  // ── Module Catalogue ────────────────────────────────────────────────
+
+  getModuleCatalogue = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const catalogue = await companyAdminService.getModuleCatalogue(companyId);
+    res.json(createSuccessResponse(catalogue, 'Module catalogue retrieved'));
+  });
+
+  // ── Billing ────────────────────────────────────────────────────────
+
+  getMySubscription = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const subscription = await companyAdminService.getMySubscription(companyId);
+    res.json(createSuccessResponse(subscription, 'Subscription retrieved'));
+  });
+
+  getMyInvoices = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const result = await companyAdminService.getMyInvoices(companyId, page, limit);
+    res.json(createPaginatedResponse(result.invoices, result.page, result.limit, result.total, 'Invoices retrieved'));
+  });
+
+  getMyInvoiceDetail = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const invoice = await companyAdminService.getMyInvoiceDetail(companyId, req.params.id!);
+    res.json(createSuccessResponse(invoice, 'Invoice detail retrieved'));
+  });
+
+  getMyPayments = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const result = await companyAdminService.getMyPayments(companyId, page, limit);
+    res.json(createPaginatedResponse(result.payments, result.page, result.limit, result.total, 'Payments retrieved'));
+  });
+
+  getMyCostBreakdown = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const breakdown = await companyAdminService.getMyCostBreakdown(companyId);
+    res.json(createSuccessResponse(breakdown, 'Cost breakdown retrieved'));
+  });
+
   // ── Audit Logs ──────────────────────────────────────────────────────
 
   listAuditLogs = asyncHandler(async (req: Request, res: Response) => {

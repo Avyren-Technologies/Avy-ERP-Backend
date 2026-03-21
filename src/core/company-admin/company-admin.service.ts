@@ -3,6 +3,7 @@ import { platformPrisma } from '../../config/database';
 import { ApiError } from '../../shared/errors';
 import { hashPassword } from '../../shared/utils';
 import { logger } from '../../config/logger';
+import { MODULE_CATALOGUE, USER_TIERS, pricingService } from '../billing/pricing.service';
 
 /** Convert undefined → null so Prisma nullable fields are happy. */
 function n<T>(value: T | undefined): T | null {
@@ -878,6 +879,356 @@ export class CompanyAdminService {
     return {
       actionTypes: actionResults.map((r) => r.action),
       entityTypes: entityTypeResults.map((r) => r.entityType),
+    };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Module Catalogue
+  // ────────────────────────────────────────────────────────────────────
+
+  async getModuleCatalogue(companyId: string) {
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      select: {
+        selectedModuleIds: true,
+        locationConfig: true,
+        locations: {
+          select: { id: true, name: true, moduleIds: true },
+        },
+      },
+    });
+
+    if (!company) {
+      throw ApiError.notFound('Company not found');
+    }
+
+    // Parse company-level selected module IDs
+    let companyModuleIds: string[] = [];
+    if (company.selectedModuleIds) {
+      const raw = company.selectedModuleIds;
+      companyModuleIds = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : [];
+    }
+
+    // Build catalogue with active status
+    const catalogue = MODULE_CATALOGUE.map((mod) => ({
+      id: mod.id,
+      name: mod.name,
+      pricePerMonth: mod.price, // already in rupees
+      isActive: companyModuleIds.includes(mod.id),
+    }));
+
+    // Per-location module breakdown (if per-location config)
+    let locationModules: { locationId: string; locationName: string; activeModuleIds: string[] }[] | undefined;
+    if (company.locationConfig === 'per-location') {
+      locationModules = company.locations.map((loc) => {
+        let locModuleIds: string[] = [];
+        if (loc.moduleIds) {
+          const raw = loc.moduleIds;
+          locModuleIds = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : [];
+        }
+        return {
+          locationId: loc.id,
+          locationName: loc.name,
+          activeModuleIds: locModuleIds,
+        };
+      });
+    }
+
+    return {
+      catalogue,
+      companyActiveModuleIds: companyModuleIds,
+      locationConfig: company.locationConfig,
+      ...(locationModules && { locationModules }),
+    };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Billing — My Subscription
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMySubscription(companyId: string) {
+    const tenant = await platformPrisma.tenant.findFirst({
+      where: { companyId },
+      select: { id: true },
+    });
+
+    if (!tenant) {
+      throw ApiError.notFound('No tenant found for this company');
+    }
+
+    const subscription = await platformPrisma.subscription.findUnique({
+      where: { tenantId: tenant.id },
+    });
+
+    if (!subscription) {
+      throw ApiError.notFound('No subscription found');
+    }
+
+    // Enrich with tier label
+    const tier = USER_TIERS.find((t) => t.key === subscription.userTier?.toLowerCase());
+
+    return {
+      ...subscription,
+      tierLabel: tier?.label ?? subscription.userTier,
+      tierBasePrice: tier?.basePrice ?? 0,
+      tierPerUserPrice: tier?.perUserPrice ?? 0,
+    };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Billing — My Invoices
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyInvoices(companyId: string, page: number = 1, limit: number = 25) {
+    const tenant = await platformPrisma.tenant.findFirst({
+      where: { companyId },
+      select: { id: true },
+    });
+
+    if (!tenant) {
+      throw ApiError.notFound('No tenant found for this company');
+    }
+
+    const subscription = await platformPrisma.subscription.findUnique({
+      where: { tenantId: tenant.id },
+      select: { id: true },
+    });
+
+    if (!subscription) {
+      throw ApiError.notFound('No subscription found');
+    }
+
+    const offset = (page - 1) * limit;
+    const where = { subscriptionId: subscription.id };
+
+    const [invoices, total] = await Promise.all([
+      platformPrisma.invoice.findMany({
+        where,
+        skip: offset,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          invoiceType: true,
+          amount: true,
+          subtotal: true,
+          totalTax: true,
+          totalAmount: true,
+          status: true,
+          dueDate: true,
+          paidAt: true,
+          billingPeriodStart: true,
+          billingPeriodEnd: true,
+          createdAt: true,
+        },
+      }),
+      platformPrisma.invoice.count({ where }),
+    ]);
+
+    return { invoices, total, page, limit };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Billing — Invoice Detail
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyInvoiceDetail(companyId: string, invoiceId: string) {
+    const tenant = await platformPrisma.tenant.findFirst({
+      where: { companyId },
+      select: { id: true },
+    });
+
+    if (!tenant) {
+      throw ApiError.notFound('No tenant found for this company');
+    }
+
+    const subscription = await platformPrisma.subscription.findUnique({
+      where: { tenantId: tenant.id },
+      select: { id: true },
+    });
+
+    if (!subscription) {
+      throw ApiError.notFound('No subscription found');
+    }
+
+    const invoice = await platformPrisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        payments: {
+          orderBy: { paidAt: 'desc' },
+        },
+      },
+    });
+
+    if (!invoice || invoice.subscriptionId !== subscription.id) {
+      throw ApiError.notFound('Invoice not found');
+    }
+
+    return invoice;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Billing — My Payments
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyPayments(companyId: string, page: number = 1, limit: number = 25) {
+    const tenant = await platformPrisma.tenant.findFirst({
+      where: { companyId },
+      select: { id: true },
+    });
+
+    if (!tenant) {
+      throw ApiError.notFound('No tenant found for this company');
+    }
+
+    const subscription = await platformPrisma.subscription.findUnique({
+      where: { tenantId: tenant.id },
+      select: { id: true },
+    });
+
+    if (!subscription) {
+      throw ApiError.notFound('No subscription found');
+    }
+
+    // Get all invoice IDs for this subscription
+    const invoiceIds = await platformPrisma.invoice.findMany({
+      where: { subscriptionId: subscription.id },
+      select: { id: true },
+    });
+
+    const ids = invoiceIds.map((i) => i.id);
+    const offset = (page - 1) * limit;
+    const where = { invoiceId: { in: ids } };
+
+    const [payments, total] = await Promise.all([
+      platformPrisma.payment.findMany({
+        where,
+        skip: offset,
+        take: limit,
+        orderBy: { paidAt: 'desc' },
+        include: {
+          invoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              amount: true,
+              totalAmount: true,
+              status: true,
+            },
+          },
+        },
+      }),
+      platformPrisma.payment.count({ where }),
+    ]);
+
+    return { payments, total, page, limit };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Billing — Cost Breakdown
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyCostBreakdown(companyId: string) {
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      include: {
+        locations: true,
+      },
+    });
+
+    if (!company) {
+      throw ApiError.notFound('Company not found');
+    }
+
+    const config = await pricingService.getConfig();
+
+    // Parse company-level module data
+    let companyModuleIds: string[] = [];
+    if (company.selectedModuleIds) {
+      const raw = company.selectedModuleIds;
+      companyModuleIds = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : [];
+    }
+
+    let customModulePricing: Record<string, number> = {};
+    if (company.customModulePricing) {
+      const raw = company.customModulePricing;
+      customModulePricing = typeof raw === 'object' && !Array.isArray(raw)
+        ? raw as Record<string, number>
+        : typeof raw === 'string' ? JSON.parse(raw) : {};
+    }
+
+    const companyInput = {
+      selectedModuleIds: companyModuleIds,
+      customModulePricing,
+      userTier: company.userTier,
+      customTierPrice: company.customTierPrice ? parseFloat(company.customTierPrice) : null,
+      oneTimeMultiplier: company.oneTimeMultiplier ?? null,
+      amcPercentage: company.amcPercentage ?? null,
+    };
+
+    // Calculate per-location costs
+    const locationBreakdowns = company.locations.map((loc) => {
+      let locModuleIds: string[] | undefined;
+      if (loc.moduleIds) {
+        const raw = loc.moduleIds;
+        locModuleIds = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : undefined;
+      }
+
+      const locationInput = {
+        moduleIds: locModuleIds ?? companyModuleIds,
+        customModulePricing: (loc.customModulePricing as Record<string, number>) ?? null,
+        oneTimeLicenseFee: loc.oneTimeLicenseFee ?? null,
+        amcAmount: loc.amcAmount ?? null,
+        gstin: loc.gstin ?? null,
+        billingType: loc.billingType ?? null,
+      };
+
+      const summary = pricingService.calculateLocationCostSummary(locationInput, companyInput, config);
+
+      return {
+        locationId: loc.id,
+        locationName: loc.name,
+        facilityType: loc.facilityType,
+        ...summary,
+      };
+    });
+
+    // Module-level breakdown
+    const moduleBreakdown = companyModuleIds.map((modId) => {
+      const catalogueEntry = MODULE_CATALOGUE.find((m) => m.id === modId);
+      const customPrice = customModulePricing[modId];
+      return {
+        moduleId: modId,
+        moduleName: catalogueEntry?.name ?? modId,
+        cataloguePrice: catalogueEntry?.price ?? 0,
+        customPrice: customPrice ?? null,
+        effectivePrice: customPrice ?? catalogueEntry?.price ?? 0,
+      };
+    });
+
+    // Tier info
+    const tier = USER_TIERS.find((t) => t.key === (company.userTier ?? 'starter'));
+
+    // Totals
+    const totalMonthly = locationBreakdowns.reduce((sum, l) => sum + l.monthly, 0);
+    const totalAnnual = locationBreakdowns.reduce((sum, l) => sum + l.annual, 0);
+
+    return {
+      tier: {
+        key: company.userTier ?? 'starter',
+        label: tier?.label ?? company.userTier ?? 'Starter',
+        basePrice: tier?.basePrice ?? 0,
+        perUserPrice: tier?.perUserPrice ?? 0,
+      },
+      modules: moduleBreakdown,
+      locations: locationBreakdowns,
+      totals: {
+        monthly: totalMonthly,
+        annual: totalAnnual,
+        locationCount: company.locations.length,
+        moduleCount: companyModuleIds.length,
+      },
     };
   }
 
