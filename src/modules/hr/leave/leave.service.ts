@@ -457,7 +457,7 @@ export class LeaveService {
 
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
     if (fromDate || toDate) {
       where.fromDate = {};
       if (fromDate) where.fromDate.gte = new Date(fromDate);

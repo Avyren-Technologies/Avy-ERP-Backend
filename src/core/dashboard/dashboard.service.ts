@@ -154,11 +154,29 @@ export class DashboardService {
       platformPrisma.iotReason.count({ where: { companyId } }),
       platformPrisma.company.findUnique({
         where: { id: companyId },
-        select: { selectedModuleIds: true, wizardStatus: true, displayName: true, tenant: { select: { id: true } } },
+        select: { selectedModuleIds: true, locationConfig: true, wizardStatus: true, displayName: true, tenant: { select: { id: true } } },
       }),
     ]);
 
-    const moduleIds = (company?.selectedModuleIds as string[] | null) ?? [];
+    // When locationConfig is 'per-location', modules are stored on each Location
+    // rather than on Company.selectedModuleIds — aggregate from all locations
+    let moduleIds: string[] = [];
+    if (company?.locationConfig === 'per-location') {
+      const locations = await platformPrisma.location.findMany({
+        where: { companyId },
+        select: { moduleIds: true },
+      });
+      const moduleIdSet = new Set<string>();
+      locations.forEach((loc) => {
+        const ids = loc.moduleIds as string[] | null;
+        if (Array.isArray(ids)) {
+          ids.forEach((id) => moduleIdSet.add(id));
+        }
+      });
+      moduleIds = Array.from(moduleIdSet);
+    } else {
+      moduleIds = (company?.selectedModuleIds as string[] | null) ?? [];
+    }
 
     return {
       companyName: company?.displayName ?? '',

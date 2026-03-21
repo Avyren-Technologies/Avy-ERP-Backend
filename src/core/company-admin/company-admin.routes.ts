@@ -60,5 +60,6 @@ router.patch('/users/:id/status', requirePermissions(['user:update']), controlle
 
 // ── Audit Logs ──────────────────────────────────────────────────────
 router.get('/audit-logs', requirePermissions(['audit:read']), controller.listAuditLogs);
+router.get('/audit-logs/filters', requirePermissions(['audit:read']), controller.getAuditFilterOptions);
 
 export { router as companyAdminRoutes };

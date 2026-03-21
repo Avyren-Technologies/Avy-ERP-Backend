@@ -1040,7 +1040,7 @@ export class PayrollConfigService {
 
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [loans, total] = await Promise.all([
       platformPrisma.loanRecord.findMany({

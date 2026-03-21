@@ -231,6 +231,10 @@ model User {
   resetTokens PasswordResetToken[]
   tenantUsers TenantUser[]
 
+  // User ↔ Employee link (ERP industry standard)
+  employeeId  String?   @unique
+  employee    Employee? @relation("UserEmployee", fields: [employeeId], references: [id])
+
   @@map("users")
 }
 
@@ -1140,6 +1144,9 @@ model Employee {
   // Relations
   companyId           String
   company             Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // User ↔ Employee link (ERP industry standard)
+  user                User?           @relation("UserEmployee")
 
   nominees            EmployeeNominee[]
   education           EmployeeEducation[]

@@ -634,6 +634,7 @@ export class CompanyAdminService {
           lastLogin: true,
           createdAt: true,
           updatedAt: true,
+          employeeId: true,
         },
         skip: offset,
         take: limit,
@@ -655,6 +656,24 @@ export class CompanyAdminService {
     const hashed = await hashPassword(data.password);
 
     const result = await platformPrisma.$transaction(async (tx) => {
+      // Check if an Employee with this officialEmail already exists (auto-link)
+      let employeeId: string | null = null;
+      const existingEmployee = await tx.employee.findFirst({
+        where: { companyId, officialEmail: data.email },
+        select: { id: true },
+      });
+
+      if (existingEmployee) {
+        // Only link if this employee isn't already linked to another user
+        const alreadyLinkedUser = await tx.user.findUnique({
+          where: { employeeId: existingEmployee.id },
+          select: { id: true },
+        });
+        if (!alreadyLinkedUser) {
+          employeeId = existingEmployee.id;
+        }
+      }
+
       const user = await tx.user.create({
         data: {
           email: data.email,
@@ -664,6 +683,7 @@ export class CompanyAdminService {
           phone: n(data.phone),
           role: 'COMPANY_ADMIN',
           companyId,
+          employeeId,
         },
       });
 
@@ -713,6 +733,7 @@ export class CompanyAdminService {
         lastLogin: true,
         createdAt: true,
         updatedAt: true,
+        employeeId: true,
         tenantUsers: {
           select: {
             id: true,
@@ -768,6 +789,7 @@ export class CompanyAdminService {
         lastLogin: true,
         createdAt: true,
         updatedAt: true,
+        employeeId: true,
       },
     });
 
@@ -795,6 +817,7 @@ export class CompanyAdminService {
         lastLogin: true,
         createdAt: true,
         updatedAt: true,
+        employeeId: true,
       },
     });
 
@@ -832,6 +855,30 @@ export class CompanyAdminService {
     ]);
 
     return { logs, total, page, limit };
+  }
+
+  async getAuditFilterOptions(tenantId: string) {
+    const where = { tenantId };
+
+    const [actionResults, entityTypeResults] = await Promise.all([
+      platformPrisma.auditLog.findMany({
+        where,
+        distinct: ['action'],
+        select: { action: true },
+        orderBy: { action: 'asc' },
+      }),
+      platformPrisma.auditLog.findMany({
+        where,
+        distinct: ['entityType'],
+        select: { entityType: true },
+        orderBy: { entityType: 'asc' },
+      }),
+    ]);
+
+    return {
+      actionTypes: actionResults.map((r) => r.action),
+      entityTypes: entityTypeResults.map((r) => r.entityType),
+    };
   }
 
   // ────────────────────────────────────────────────────────────────────

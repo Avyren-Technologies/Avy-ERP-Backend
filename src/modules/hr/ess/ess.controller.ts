@@ -382,14 +382,29 @@ export class ESSController {
 
   // ── ESS Self-Service ──────────────────────────────────────────────
 
+  /** Resolve employeeId from authenticated user or optional query param (admin override).
+   *  Returns null when no employee record is linked — callers handle gracefully. */
+  private resolveEmployeeId(req: Request): string | null {
+    return (req.query.employeeId as string) || (req.user as any)?.employeeId || null;
+  }
+
+  /** Resolve managerId from query param or authenticated user's employee link.
+   *  Returns null when no employee record is linked. */
+  private resolveManagerId(req: Request): string | null {
+    return (req.query.managerId as string) || (req.user as any)?.employeeId || null;
+  }
+
+  private static readonly NOT_LINKED_MSG = 'No employee record linked to your account. Please contact HR.';
+
   getMyProfile = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    // Derive employeeId from authenticated user
-    const employeeId = req.query.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('Employee ID is required');
-
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse(null, ESSController.NOT_LINKED_MSG));
+      return;
+    }
     const profile = await essService.getMyProfile(companyId, employeeId);
     res.json(createSuccessResponse(profile, 'Profile retrieved'));
   });
@@ -398,9 +413,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = req.query.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('Employee ID is required');
-
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
     const payslips = await essService.getMyPayslips(companyId, employeeId);
     res.json(createSuccessResponse(payslips, 'Payslips retrieved'));
   });
@@ -409,9 +426,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = req.query.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('Employee ID is required');
-
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
     const balances = await essService.getMyLeaveBalance(companyId, employeeId);
     res.json(createSuccessResponse(balances, 'Leave balances retrieved'));
   });
@@ -420,9 +439,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = req.query.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('Employee ID is required');
-
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
     const month = parseInt(req.query.month as string, 10) || new Date().getMonth() + 1;
     const year = parseInt(req.query.year as string, 10) || new Date().getFullYear();
 
@@ -434,9 +455,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = req.query.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('Employee ID is required');
-
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
     const declarations = await essService.getMyDeclarations(companyId, employeeId);
     res.json(createSuccessResponse(declarations, 'IT declarations retrieved'));
   });
@@ -445,8 +468,8 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = req.body.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('Employee ID is required');
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
 
     const parsed = applyLeaveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -461,8 +484,8 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = req.body.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('Employee ID is required');
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
 
     const parsed = regularizeAttendanceSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -479,8 +502,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = req.query.managerId as string;
-    if (!managerId) throw ApiError.badRequest('Manager ID is required');
+    const managerId = this.resolveManagerId(req);
+    if (!managerId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
 
     const members = await essService.getTeamMembers(companyId, managerId);
     res.json(createSuccessResponse(members, 'Team members retrieved'));
@@ -490,8 +516,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = req.query.managerId as string;
-    if (!managerId) throw ApiError.badRequest('Manager ID is required');
+    const managerId = this.resolveManagerId(req);
+    if (!managerId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
 
     const approvals = await essService.getPendingApprovals(companyId, managerId);
     res.json(createSuccessResponse(approvals, 'Pending approvals retrieved'));
@@ -501,8 +530,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = req.query.managerId as string;
-    if (!managerId) throw ApiError.badRequest('Manager ID is required');
+    const managerId = this.resolveManagerId(req);
+    if (!managerId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
 
     const date: string = (req.query.date as string) || new Date().toISOString().split('T')[0]!;
 
@@ -514,8 +546,11 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = req.query.managerId as string;
-    if (!managerId) throw ApiError.badRequest('Manager ID is required');
+    const managerId = this.resolveManagerId(req);
+    if (!managerId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
 
     const month = parseInt(req.query.month as string, 10) || new Date().getMonth() + 1;
     const year = parseInt(req.query.year as string, 10) || new Date().getFullYear();

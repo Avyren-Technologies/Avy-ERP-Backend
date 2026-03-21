@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
-import { PrismaClient, BillingCycle, CompanySize, SubscriptionStatus, TenantStatus, UserRole, UserTier } from '@prisma/client';
+import { PrismaClient, BillingType, CompanySize, SubscriptionStatus, TenantStatus, UserRole, UserTier } from '@prisma/client';
 import { REFERENCE_ROLE_PERMISSIONS } from '../src/shared/constants/permissions';
 
 dotenv.config();
@@ -214,7 +214,7 @@ async function upsertSubscription(tenantId: string) {
     update: {
       planId: 'trial',
       userTier: UserTier.STARTER,
-      billingCycle: BillingCycle.MONTHLY,
+      billingType: BillingType.MONTHLY,
       modules: {
         hr: true,
         production: true,
@@ -231,7 +231,7 @@ async function upsertSubscription(tenantId: string) {
       tenantId,
       planId: 'trial',
       userTier: UserTier.STARTER,
-      billingCycle: BillingCycle.MONTHLY,
+      billingType: BillingType.MONTHLY,
       modules: {
         hr: true,
         production: true,

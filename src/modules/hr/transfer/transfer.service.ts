@@ -27,7 +27,7 @@ export class TransferPromotionService {
 
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [transfers, total] = await Promise.all([
       platformPrisma.employeeTransfer.findMany({
@@ -333,7 +333,7 @@ export class TransferPromotionService {
 
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [promotions, total] = await Promise.all([
       platformPrisma.employeePromotion.findMany({

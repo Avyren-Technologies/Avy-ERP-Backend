@@ -113,7 +113,7 @@ export class AdvancedHRService {
     const offset = (page - 1) * limit;
 
     const where: any = { companyId };
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
     if (departmentId) where.departmentId = departmentId;
 
     const [requisitions, total] = await Promise.all([
@@ -390,7 +390,7 @@ export class AdvancedHRService {
 
     const where: any = { companyId };
     if (candidateId) where.candidateId = candidateId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [interviews, total] = await Promise.all([
       platformPrisma.interview.findMany({
@@ -681,7 +681,7 @@ export class AdvancedHRService {
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
     if (trainingId) where.trainingId = trainingId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [nominations, total] = await Promise.all([
       platformPrisma.trainingNomination.findMany({
@@ -989,7 +989,7 @@ export class AdvancedHRService {
 
     const where: any = { companyId };
     if (categoryId) where.categoryId = categoryId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [assets, total] = await Promise.all([
       platformPrisma.asset.findMany({
@@ -1223,7 +1223,7 @@ export class AdvancedHRService {
 
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
     if (category) where.category = category;
 
     const [claims, total] = await Promise.all([
@@ -1683,7 +1683,7 @@ export class AdvancedHRService {
 
     const where: any = { companyId };
     if (categoryId) where.categoryId = categoryId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
     if (employeeId) where.employeeId = employeeId;
 
     const [cases, total] = await Promise.all([
@@ -1823,7 +1823,7 @@ export class AdvancedHRService {
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
     if (type) where.type = type;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [actions, total] = await Promise.all([
       platformPrisma.disciplinaryAction.findMany({

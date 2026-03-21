@@ -15,7 +15,7 @@ export class EmployeeService {
 
   private async generateEmployeeId(companyId: string, tx: typeof platformPrisma = platformPrisma): Promise<string> {
     const noSeries = await tx.noSeriesConfig.findFirst({
-      where: { companyId, linkedScreen: 'Employee Onboarding' },
+      where: { companyId, linkedScreen: { in: ['Employee', 'Employee Onboarding'] } },
     });
 
     if (!noSeries) {
@@ -136,6 +136,7 @@ export class EmployeeService {
         previousEmployment: { orderBy: { leaveDate: 'desc' } },
         documents: { orderBy: { createdAt: 'desc' } },
         timeline: { orderBy: { createdAt: 'desc' } },
+        user: { select: { id: true, email: true, firstName: true, lastName: true, isActive: true } },
       },
     });
 
@@ -265,6 +266,25 @@ export class EmployeeService {
               timeline: true,
             },
           });
+
+          // Auto-link to User if officialEmail matches an existing User in the same company
+          if (data.officialEmail) {
+            const matchingUser = await tx.user.findFirst({
+              where: {
+                email: data.officialEmail,
+                companyId,
+                employeeId: null, // not already linked
+              },
+              select: { id: true },
+            });
+            if (matchingUser) {
+              await tx.user.update({
+                where: { id: matchingUser.id },
+                data: { employeeId: employee.id },
+              });
+              logger.info(`Auto-linked employee ${employee.id} to user ${matchingUser.id}`);
+            }
+          }
 
           logger.info(`Employee created: ${employee.id} (${employee.employeeId}) for company ${companyId}`);
           return employee;
@@ -398,6 +418,40 @@ export class EmployeeService {
         employeeType: { select: { id: true, name: true, code: true } },
       },
     });
+
+    // Auto-link/re-link User ↔ Employee when officialEmail changes
+    if (data.officialEmail !== undefined && data.officialEmail !== existing.officialEmail) {
+      // Remove old link (if any user was linked to this employee)
+      const previouslyLinked = await platformPrisma.user.findUnique({
+        where: { employeeId: id },
+        select: { id: true },
+      });
+      if (previouslyLinked) {
+        await platformPrisma.user.update({
+          where: { id: previouslyLinked.id },
+          data: { employeeId: null },
+        });
+      }
+
+      // Link to new matching user (if the new officialEmail matches a user)
+      if (data.officialEmail) {
+        const matchingUser = await platformPrisma.user.findFirst({
+          where: {
+            email: data.officialEmail,
+            companyId,
+            employeeId: null,
+          },
+          select: { id: true },
+        });
+        if (matchingUser) {
+          await platformPrisma.user.update({
+            where: { id: matchingUser.id },
+            data: { employeeId: id },
+          });
+          logger.info(`Re-linked employee ${id} to user ${matchingUser.id} on officialEmail change`);
+        }
+      }
+    }
 
     // Add timeline for significant changes (department, designation, grade)
     const changes: string[] = [];

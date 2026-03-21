@@ -66,6 +66,24 @@ export class AuthService {
       data: { lastLogin: new Date() },
     });
 
+    // Resolve employeeId: use the User.employeeId FK if present,
+    // otherwise try to find an Employee whose officialEmail matches this user's email.
+    let employeeId = user.employeeId ?? undefined;
+    if (!employeeId && user.companyId) {
+      const linkedEmployee = await platformPrisma.employee.findFirst({
+        where: { companyId: user.companyId, officialEmail: user.email },
+        select: { id: true },
+      });
+      if (linkedEmployee) {
+        // Persist the link for future logins
+        await platformPrisma.user.update({
+          where: { id: user.id },
+          data: { employeeId: linkedEmployee.id },
+        });
+        employeeId = linkedEmployee.id;
+      }
+    }
+
     // Fetch permissions once to avoid duplicate DB queries
     const permissions = await this.getUserPermissions(user.id);
 
@@ -75,6 +93,7 @@ export class AuthService {
       email: user.email,
       tenantId: user.company?.tenant?.id ?? undefined,
       companyId: user.companyId ?? undefined,
+      employeeId,
       roleId: user.role,
       permissions,
     });
@@ -87,6 +106,7 @@ export class AuthService {
       lastName: user.lastName,
       tenantId: user.company?.tenant?.id,
       companyId: user.companyId,
+      employeeId,
       roleId: user.role,
       permissions,
       isActive: user.isActive,
@@ -102,6 +122,7 @@ export class AuthService {
       role: user.role,
       ...(user.companyId ? { companyId: user.companyId } : {}),
       ...(user.company?.tenant?.id ? { tenantId: user.company.tenant.id } : {}),
+      ...(employeeId ? { employeeId } : {}),
     };
 
     return {
@@ -246,6 +267,7 @@ export class AuthService {
         email: decoded.email,
         tenantId: decoded.tenantId || undefined,
         companyId: decoded.companyId || undefined,
+        employeeId: decoded.employeeId || undefined,
         roleId: decoded.roleId,
         permissions: decoded.permissions,
       });
@@ -482,6 +504,7 @@ export class AuthService {
         'finance:*',
         'maintenance:*',
         'reports:*',
+        'audit:read',
       ],
     };
 

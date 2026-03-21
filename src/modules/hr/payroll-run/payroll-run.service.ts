@@ -107,7 +107,7 @@ export class PayrollRunService {
     const where: any = { companyId };
     if (year) where.year = year;
     if (month) where.month = month;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [runs, total] = await Promise.all([
       platformPrisma.payrollRun.findMany({
@@ -1136,7 +1136,7 @@ export class PayrollRunService {
 
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [revisions, total] = await Promise.all([
       platformPrisma.salaryRevision.findMany({
@@ -1441,7 +1441,7 @@ export class PayrollRunService {
     const where: any = { companyId };
     if (year) where.year = year;
     if (type) where.type = type;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [filings, total] = await Promise.all([
       platformPrisma.statutoryFiling.findMany({

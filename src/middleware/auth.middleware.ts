@@ -40,6 +40,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         email: string;
         tenantId?: string;
         companyId?: string;
+        employeeId?: string;
         roleId: string;
         permissions?: string[];
       };
@@ -77,6 +78,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           lastName: dbUser.lastName,
           tenantId: dbUser.company?.tenant?.id,
           companyId: dbUser.companyId,
+          employeeId: dbUser.employeeId ?? undefined,
           roleId: dbUser.role,
           permissions: getRolePermissions(dbUser.role),
           isActive: dbUser.isActive,

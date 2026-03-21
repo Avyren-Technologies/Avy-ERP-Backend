@@ -208,7 +208,7 @@ export class ESSService {
     const offset = (page - 1) * limit;
 
     const where: any = { companyId };
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
     if (entityType) where.entityType = entityType;
 
     const [requests, total] = await Promise.all([
@@ -722,7 +722,7 @@ export class ESSService {
     const where: any = { companyId };
     if (employeeId) where.employeeId = employeeId;
     if (financialYear) where.financialYear = financialYear;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [declarations, total] = await Promise.all([
       platformPrisma.iTDeclaration.findMany({

@@ -33,6 +33,7 @@ declare global {
         roleId: string;
         tenantId: string;
         companyId: string;
+        employeeId?: string;
         permissions: string[];
         firstName?: string;
         lastName?: string;

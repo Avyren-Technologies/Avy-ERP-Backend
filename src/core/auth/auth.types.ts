@@ -30,6 +30,7 @@ export interface AuthResponse {
     role: string;
     companyId?: string;
     tenantId?: string;
+    employeeId?: string;
   };
   tokens: {
     accessToken: string;
@@ -43,6 +44,7 @@ export interface JWTPayload {
   email: string;
   tenantId?: string | undefined;
   companyId?: string | undefined;
+  employeeId?: string | undefined;
   roleId: string;
   permissions: string[];
   iat?: number;

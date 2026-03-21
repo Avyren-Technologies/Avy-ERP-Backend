@@ -258,7 +258,7 @@ export class PerformanceService {
     if (employeeId) where.employeeId = employeeId;
     if (departmentId) where.departmentId = departmentId;
     if (level) where.level = level;
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
 
     const [goals, total] = await Promise.all([
       platformPrisma.goal.findMany({
@@ -427,7 +427,7 @@ export class PerformanceService {
     const offset = (page - 1) * limit;
 
     const where: any = { companyId, cycleId };
-    if (status) where.status = status;
+    if (status) where.status = status.toUpperCase();
     if (employeeId) where.employeeId = employeeId;
     if (departmentId) {
       where.employee = { departmentId };

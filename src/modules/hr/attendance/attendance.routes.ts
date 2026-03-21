@@ -4,21 +4,23 @@ import { attendanceController as controller } from './attendance.controller';
 
 const router = Router();
 
+// ── Attendance Rules (must be before :id to avoid "rules" matching as an ID) ──
+router.get('/attendance/rules', requirePermissions(['hr:read']), controller.getRules);
+router.patch('/attendance/rules', requirePermissions(['hr:update']), controller.updateRules);
+
 // ── Attendance Records ────────────────────────────────────────────────
 router.get('/attendance', requirePermissions(['hr:read']), controller.listRecords);
 router.post('/attendance', requirePermissions(['hr:create']), controller.createRecord);
 router.get('/attendance/summary', requirePermissions(['hr:read']), controller.getSummary);
-router.get('/attendance/:id', requirePermissions(['hr:read']), controller.getRecord);
-router.patch('/attendance/:id', requirePermissions(['hr:update']), controller.updateRecord);
 
-// ── Attendance Rules ──────────────────────────────────────────────────
-router.get('/attendance/rules', requirePermissions(['hr:read']), controller.getRules);
-router.patch('/attendance/rules', requirePermissions(['hr:update']), controller.updateRules);
-
-// ── Overrides / Regularization ────────────────────────────────────────
+// ── Overrides / Regularization (must be before :id) ──────────────────
 router.get('/attendance/overrides', requirePermissions(['hr:read']), controller.listOverrides);
 router.post('/attendance/overrides', requirePermissions(['hr:create']), controller.createOverride);
 router.patch('/attendance/overrides/:id', requirePermissions(['hr:update']), controller.processOverride);
+
+// ── Attendance by ID (must be last to avoid catching named routes) ────
+router.get('/attendance/:id', requirePermissions(['hr:read']), controller.getRecord);
+router.patch('/attendance/:id', requirePermissions(['hr:update']), controller.updateRecord);
 
 // ── Holiday Calendar ──────────────────────────────────────────────────
 router.get('/holidays', requirePermissions(['hr:read']), controller.listHolidays);

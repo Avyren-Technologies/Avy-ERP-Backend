@@ -19,6 +19,7 @@ router.patch('/appraisal-cycles/:id/publish-ratings', requirePermissions(['hr:up
 router.patch('/appraisal-cycles/:id/close', requirePermissions(['hr:update']), controller.closeCycle);
 
 // ── Appraisal Entries ──────────────────────────────────────────────
+router.get('/appraisal-entries', requirePermissions(['hr:read']), controller.listAllEntries);
 router.get('/appraisal-cycles/:cycleId/entries', requirePermissions(['hr:read']), controller.listEntries);
 router.get('/appraisal-cycles/:cycleId/calibration', requirePermissions(['hr:read']), controller.getCalibrationView);
 router.post('/appraisal-entries', requirePermissions(['hr:create']), controller.createEntry);
@@ -37,6 +38,7 @@ router.delete('/goals/:id', requirePermissions(['hr:delete']), controller.delete
 
 // ── 360 Feedback ───────────────────────────────────────────────────
 router.get('/appraisal-cycles/:cycleId/feedback', requirePermissions(['hr:read']), controller.listFeedback);
+router.get('/feedback360', requirePermissions(['hr:read']), controller.listAllFeedback);
 router.get('/feedback360/report/:employeeId/:cycleId', requirePermissions(['hr:read']), controller.getAggregatedFeedbackReport);
 router.post('/feedback360', requirePermissions(['hr:create']), controller.createFeedback);
 router.get('/feedback360/:id', requirePermissions(['hr:read']), controller.getFeedback);

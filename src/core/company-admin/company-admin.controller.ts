@@ -428,6 +428,14 @@ export class CompanyAdminController {
     const result = await companyAdminService.listAuditLogs(tenantId, opts);
     res.json(createPaginatedResponse(result.logs, result.page, result.limit, result.total, 'Audit logs retrieved'));
   });
+
+  getAuditFilterOptions = asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) throw ApiError.badRequest('Tenant context is required');
+
+    const filters = await companyAdminService.getAuditFilterOptions(tenantId);
+    res.json(createSuccessResponse(filters, 'Filter options retrieved successfully'));
+  });
 }
 
 export const companyAdminController = new CompanyAdminController();

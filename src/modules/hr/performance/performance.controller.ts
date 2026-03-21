@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { platformPrisma } from '../../../config/database';
 import { performanceService } from './performance.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../../shared/utils';
 import { asyncHandler } from '../../../middleware/error.middleware';
@@ -188,6 +189,34 @@ export class PerformanceController {
 
   // ── Appraisal Entries ──────────────────────────────────────────────
 
+  listAllEntries = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const where: any = {};
+    if (req.query.cycleId) where.cycleId = req.query.cycleId as string;
+    if (req.query.status) where.status = (req.query.status as string).toUpperCase();
+    if (req.query.employeeId) where.employeeId = req.query.employeeId as string;
+
+    const skip = (page - 1) * limit;
+    const [entries, total] = await Promise.all([
+      platformPrisma.appraisalEntry.findMany({
+        where: { ...where, cycle: { companyId } },
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true } },
+          cycle: { select: { id: true, name: true } },
+        },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      platformPrisma.appraisalEntry.count({ where: { ...where, cycle: { companyId } } }),
+    ]);
+
+    res.json(createPaginatedResponse(entries, page, limit, total, 'Appraisal entries retrieved'));
+  });
+
   listEntries = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
@@ -273,6 +302,33 @@ export class PerformanceController {
   });
 
   // ── 360 Feedback ───────────────────────────────────────────────────
+
+  listAllFeedback = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const where: any = {};
+
+    // Build filter from query params
+    if (req.query.cycleId) where.cycleId = req.query.cycleId as string;
+    if (req.query.employeeId) where.employeeId = req.query.employeeId as string;
+    if (req.query.status) where.status = (req.query.status as string).toUpperCase();
+
+    const skip = (page - 1) * limit;
+    const [feedback, total] = await Promise.all([
+      platformPrisma.feedback360.findMany({
+        where: { ...where, cycle: { companyId } },
+        include: { employee: { select: { id: true, firstName: true, lastName: true } }, rater: { select: { id: true, firstName: true, lastName: true } }, cycle: { select: { id: true, name: true } } },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      platformPrisma.feedback360.count({ where: { ...where, cycle: { companyId } } }),
+    ]);
+
+    res.json(createPaginatedResponse(feedback, page, limit, total, 'Feedback retrieved'));
+  });
 
   listFeedback = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;

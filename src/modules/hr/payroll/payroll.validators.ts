@@ -197,21 +197,21 @@ export const updateLoanStatusSchema = z.object({
 // ── Tax Config ────────────────────────────────────────────────────────
 
 const taxSlabSchema = z.object({
-  fromAmount: z.number().min(0),
-  toAmount: z.number().min(0),
-  rate: z.number().min(0).max(100),
+  fromAmount: z.coerce.number().min(0),
+  toAmount: z.coerce.number().min(0),
+  rate: z.coerce.number().min(0).max(100),
 });
 
 const surchargeRateSchema = z.object({
-  threshold: z.number().min(0),
-  rate: z.number().min(0).max(100),
+  threshold: z.coerce.number().min(0),
+  rate: z.coerce.number().min(0).max(100),
 });
 
 export const taxConfigSchema = z.object({
-  defaultRegime: z.enum(['OLD', 'NEW']).optional(),
+  defaultRegime: z.string().transform((v) => v.toUpperCase()).pipe(z.enum(['OLD', 'NEW'])).optional(),
   oldRegimeSlabs: z.array(taxSlabSchema).optional(),
   newRegimeSlabs: z.array(taxSlabSchema).optional(),
   declarationDeadline: z.string().optional(), // ISO date
   surchargeRates: z.array(surchargeRateSchema).optional(),
-  cessRate: z.number().min(0).max(100).optional(),
+  cessRate: z.coerce.number().min(0).max(100).optional(),
 });
