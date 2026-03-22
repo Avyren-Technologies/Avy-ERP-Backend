@@ -65,10 +65,11 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 
 # Use dumb-init to handle PID 1 and signal forwarding (graceful shutdown)
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start the application
-CMD ["node", "dist/src/app/server.js"]
+# rootDir is ./src → compiled entry is dist/app/server.js (not dist/src/...)
+CMD ["node", "dist/app/server.js"]

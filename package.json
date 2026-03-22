@@ -2,10 +2,10 @@
   "name": "avy-erp-backend",
   "version": "1.0.0",
   "description": "Avy ERP Backend - Multi-tenant SaaS ERP Platform",
-  "main": "dist/src/app/server.js",
+  "main": "dist/app/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/src/app/server.js",
+    "start": "node dist/app/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/app/server.ts",
     "test": "jest",
     "lint": "eslint src/**/*.ts",
