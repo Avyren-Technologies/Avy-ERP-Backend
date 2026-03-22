@@ -19,6 +19,28 @@ log() { echo -e "${GREEN}[AVY-ERP]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
+# Host port published by docker-compose (${APP_PORT}:3000). Not always exported in shell.
+host_app_port() {
+  if [ -n "${APP_PORT:-}" ]; then
+    echo "$APP_PORT"
+    return
+  fi
+  if [ -f "$ENV_FILE" ]; then
+    local v
+    v=$(grep -E '^[[:space:]]*APP_PORT[[:space:]]*=' "$ENV_FILE" | tail -1 | sed 's/^[[:space:]]*APP_PORT[[:space:]]*=[[:space:]]*//')
+    v="${v%$'\r'}"
+    v="${v#\"}"
+    v="${v%\"}"
+    v="${v#\'}"
+    v="${v%\'}"
+    if [ -n "$v" ]; then
+      echo "$v"
+      return
+    fi
+  fi
+  echo "3000"
+}
+
 # Check prerequisites
 check_prereqs() {
   command -v docker >/dev/null 2>&1 || error "Docker is not installed"
@@ -46,10 +68,11 @@ cmd_up() {
   cmd_migrate
   log "Deployment complete!"
   echo ""
-  log "Backend is running at http://localhost:${APP_PORT:-3000}"
-  log "Health check: http://localhost:${APP_PORT:-3000}/health"
+  HP="$(host_app_port)"
+  log "Backend (on this host): http://localhost:${HP}  (container listens on port 3000)"
+  log "Health check: http://localhost:${HP}/health"
   echo ""
-  warn "Make sure your Cloudflared tunnel points to http://localhost:${APP_PORT:-3000}"
+  warn "Point Cloudflared at the host port, e.g. http://localhost:${HP} (not 3000 unless APP_PORT=3000)"
 }
 
 # Stop all services
