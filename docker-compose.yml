@@ -14,8 +14,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-avy_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    # Postgres 18+ images expect a single mount at /var/lib/postgresql (not .../data).
+    # See: https://github.com/docker-library/postgres/pull/1259
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:

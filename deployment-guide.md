@@ -9,7 +9,7 @@
 ### 2. `docker-compose.yml` — Full production stack
 | Service | Image | Notes |
 |---------|-------|-------|
-| **postgres** | `postgres:18` | Persistent volume, health check, scram-sha-256 auth |
+| **postgres** | `postgres:18` | Volume mounted at `/var/lib/postgresql` (required for 18+), health check, scram-sha-256 auth |
 | **redis** | `redis:latest` | Password-protected, AOF persistence, 256MB limit with LRU eviction |
 | **app** | Built from Dockerfile | Depends on both being healthy before starting |
 
