@@ -52,6 +52,8 @@ RUN npx prisma generate
 
 # Copy compiled JavaScript from builder
 COPY --from=builder /app/dist ./dist
+# Keep source for runtime seed script imports (prisma/seed.ts imports src constants)
+COPY src ./src
 
 # Create necessary directories with proper ownership
 RUN mkdir -p logs uploads && \
@@ -65,7 +67,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
 # Use dumb-init to handle PID 1 and signal forwarding (graceful shutdown)
 ENTRYPOINT ["dumb-init", "--"]

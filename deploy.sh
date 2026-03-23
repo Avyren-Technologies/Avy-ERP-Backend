@@ -106,7 +106,7 @@ cmd_migrate() {
 cmd_seed() {
   log "Seeding database..."
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec app \
-    npx ts-node prisma/seed.ts
+    npx -y ts-node --transpile-only prisma/seed.ts
   log "Seed complete."
 }
 
