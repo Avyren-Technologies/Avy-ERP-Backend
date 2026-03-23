@@ -672,8 +672,12 @@ export class ESSController {
         punchIn: now,
         status: 'PRESENT',
         source: 'MOBILE_GPS',
-        shiftId: shiftId || undefined,
-        locationId: locationId || undefined,
+        ...(shiftId
+          ? { shift: { connect: { id: shiftId } } }
+          : { shift: { disconnect: true } }),
+        ...(locationId
+          ? { location: { connect: { id: locationId } } }
+          : { location: { disconnect: true } }),
         checkInLatitude: latitude ?? null,
         checkInLongitude: longitude ?? null,
         checkInPhotoUrl: photoUrl ?? null,

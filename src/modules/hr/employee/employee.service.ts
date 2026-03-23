@@ -320,18 +320,19 @@ export class EmployeeService {
               // Create TenantUser bridge record
               const company = await tx.company.findUnique({
                 where: { id: companyId },
-                select: { tenantId: true },
+                select: { tenant: { select: { id: true } } },
               });
-              if (company?.tenantId) {
+              const tenantId = company?.tenant?.id;
+              if (tenantId) {
                 // Find a default role for this tenant
                 const defaultRole = await tx.role.findFirst({
-                  where: { tenantId: company.tenantId, isSystem: true },
+                  where: { tenantId, isSystem: true },
                 });
                 if (defaultRole) {
                   await tx.tenantUser.create({
                     data: {
                       userId: newUser.id,
-                      tenantId: company.tenantId,
+                      tenantId,
                       roleId: defaultRole.id,
                     },
                   });
