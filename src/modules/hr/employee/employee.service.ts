@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
+import { hashPassword } from '../../../shared/utils';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -283,6 +284,61 @@ export class EmployeeService {
                 data: { employeeId: employee.id },
               });
               logger.info(`Auto-linked employee ${employee.id} to user ${matchingUser.id}`);
+            }
+          }
+
+          // Optionally create a User (login) account for this employee
+          if (data.createUserAccount && data.officialEmail && data.userPassword) {
+            // Check if a user with this email already exists
+            const existingUser = await tx.user.findUnique({
+              where: { email: data.officialEmail },
+              select: { id: true },
+            });
+
+            if (existingUser) {
+              // Link the existing user to this employee if not already linked
+              await tx.user.update({
+                where: { id: existingUser.id },
+                data: { employeeId: employee.id },
+              });
+              logger.info(`Linked existing user ${existingUser.id} to new employee ${employee.id}`);
+            } else {
+              const hashedPassword = await hashPassword(data.userPassword);
+              const newUser = await tx.user.create({
+                data: {
+                  email: data.officialEmail,
+                  password: hashedPassword,
+                  firstName: data.firstName,
+                  lastName: data.lastName,
+                  role: data.userRole || 'EMPLOYEE',
+                  companyId,
+                  employeeId: employee.id,
+                  isActive: true,
+                },
+              });
+
+              // Create TenantUser bridge record
+              const company = await tx.company.findUnique({
+                where: { id: companyId },
+                select: { tenantId: true },
+              });
+              if (company?.tenantId) {
+                // Find a default role for this tenant
+                const defaultRole = await tx.role.findFirst({
+                  where: { tenantId: company.tenantId, isSystem: true },
+                });
+                if (defaultRole) {
+                  await tx.tenantUser.create({
+                    data: {
+                      userId: newUser.id,
+                      tenantId: company.tenantId,
+                      roleId: defaultRole.id,
+                    },
+                  });
+                }
+              }
+
+              logger.info(`Created user account ${newUser.id} (${newUser.email}) for employee ${employee.id}`);
             }
           }
 

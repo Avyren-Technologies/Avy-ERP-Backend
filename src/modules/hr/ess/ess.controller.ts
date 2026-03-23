@@ -3,6 +3,7 @@ import { essService } from './ess.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../../shared/utils';
 import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError } from '../../../shared/errors';
+import { platformPrisma } from '../../../config/database';
 import {
   essConfigSchema,
   createWorkflowSchema,
@@ -17,7 +18,24 @@ import {
   applyLeaveSchema,
   regularizeAttendanceSchema,
   createDelegateSchema,
+  checkInSchema,
+  checkOutSchema,
 } from './ess.validators';
+
+/** Haversine distance in metres between two lat/lng points. */
+function calculateDistance(
+  lat1: number, lng1: number,
+  lat2: number, lng2: number,
+): number {
+  const R = 6_371_000; // Earth radius in metres
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 export class ESSController {
   // ── ESS Config ────────────────────────────────────────────────────
@@ -557,6 +575,178 @@ export class ESSController {
 
     const calendar = await essService.getTeamLeaveCalendar(companyId, managerId, month, year);
     res.json(createSuccessResponse(calendar, 'Team leave calendar retrieved'));
+  });
+
+  // ── Shift Check-In / Check-Out ──────────────────────────────────────
+
+  getMyAttendanceStatus = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse({ status: 'NOT_LINKED', record: null }, ESSController.NOT_LINKED_MSG));
+      return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const record = await platformPrisma.attendanceRecord.findUnique({
+      where: { employeeId_date: { employeeId, date: today } },
+      include: { shift: true, location: true },
+    });
+
+    if (!record) {
+      res.json(createSuccessResponse({ status: 'NOT_CHECKED_IN', record: null }, 'Not checked in today'));
+      return;
+    }
+
+    let elapsedSeconds = 0;
+    if (record.punchIn && !record.punchOut) {
+      elapsedSeconds = Math.floor((Date.now() - new Date(record.punchIn).getTime()) / 1000);
+    }
+
+    const status = record.punchOut ? 'CHECKED_OUT' : 'CHECKED_IN';
+    res.json(createSuccessResponse({ status, record, elapsedSeconds }, `Attendance status: ${status}`));
+  });
+
+  checkIn = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
+
+    const parsed = checkInSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const { shiftId, locationId, latitude, longitude, photoUrl } = parsed.data;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Prevent double check-in
+    const existing = await platformPrisma.attendanceRecord.findUnique({
+      where: { employeeId_date: { employeeId, date: today } },
+    });
+    if (existing?.punchIn) {
+      throw ApiError.badRequest('Already checked in today. Use check-out instead.');
+    }
+
+    // Geofence validation
+    let geoStatus = 'NO_LOCATION';
+    if (latitude != null && longitude != null && locationId) {
+      const location = await platformPrisma.location.findUnique({ where: { id: locationId } });
+      if (location?.geoEnabled && location.geoLat && location.geoLng) {
+        const dist = calculateDistance(
+          latitude, longitude,
+          parseFloat(location.geoLat), parseFloat(location.geoLng),
+        );
+        geoStatus = dist <= location.geoRadius ? 'INSIDE_GEOFENCE' : 'OUTSIDE_GEOFENCE';
+      }
+    } else if (latitude != null && longitude != null) {
+      geoStatus = 'NO_LOCATION';
+    }
+
+    const now = new Date();
+    const record = await platformPrisma.attendanceRecord.upsert({
+      where: { employeeId_date: { employeeId, date: today } },
+      create: {
+        employeeId,
+        date: today,
+        punchIn: now,
+        status: 'PRESENT',
+        source: 'MOBILE_GPS',
+        companyId,
+        shiftId: shiftId || null,
+        locationId: locationId || null,
+        checkInLatitude: latitude ?? null,
+        checkInLongitude: longitude ?? null,
+        checkInPhotoUrl: photoUrl ?? null,
+        geoStatus,
+      },
+      update: {
+        punchIn: now,
+        status: 'PRESENT',
+        source: 'MOBILE_GPS',
+        shiftId: shiftId || undefined,
+        locationId: locationId || undefined,
+        checkInLatitude: latitude ?? null,
+        checkInLongitude: longitude ?? null,
+        checkInPhotoUrl: photoUrl ?? null,
+        geoStatus,
+      },
+      include: { shift: true, location: true },
+    });
+
+    res.status(201).json(createSuccessResponse(record, 'Checked in successfully'));
+  });
+
+  checkOut = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = this.resolveEmployeeId(req);
+    if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
+
+    const parsed = checkOutSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const { latitude, longitude, photoUrl } = parsed.data;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const existing = await platformPrisma.attendanceRecord.findUnique({
+      where: { employeeId_date: { employeeId, date: today } },
+    });
+
+    if (!existing || !existing.punchIn) {
+      throw ApiError.badRequest('You must check in before checking out.');
+    }
+    if (existing.punchOut) {
+      throw ApiError.badRequest('Already checked out today.');
+    }
+
+    const now = new Date();
+    const diffMs = now.getTime() - new Date(existing.punchIn).getTime();
+    const workedHours = parseFloat((diffMs / 3_600_000).toFixed(2));
+
+    // Geofence validation for checkout
+    let geoStatus = existing.geoStatus || 'NO_LOCATION';
+    if (latitude != null && longitude != null && existing.locationId) {
+      const location = await platformPrisma.location.findUnique({ where: { id: existing.locationId } });
+      if (location?.geoEnabled && location.geoLat && location.geoLng) {
+        const dist = calculateDistance(
+          latitude, longitude,
+          parseFloat(location.geoLat), parseFloat(location.geoLng),
+        );
+        // If they were inside on check-in but outside on check-out, mark as outside
+        if (dist > location.geoRadius) {
+          geoStatus = 'OUTSIDE_GEOFENCE';
+        }
+      }
+    }
+
+    const record = await platformPrisma.attendanceRecord.update({
+      where: { id: existing.id },
+      data: {
+        punchOut: now,
+        workedHours,
+        checkOutLatitude: latitude ?? null,
+        checkOutLongitude: longitude ?? null,
+        checkOutPhotoUrl: photoUrl ?? null,
+        geoStatus,
+      },
+      include: { shift: true, location: true },
+    });
+
+    res.json(createSuccessResponse(record, 'Checked out successfully'));
   });
 }
 

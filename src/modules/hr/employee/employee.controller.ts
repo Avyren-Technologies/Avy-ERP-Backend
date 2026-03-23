@@ -4,7 +4,7 @@ import { createSuccessResponse, createPaginatedResponse, getPaginationParams } f
 import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError } from '../../../shared/errors';
 import {
-  createEmployeeSchema,
+  createEmployeeWithUserSchema,
   updateEmployeeSchema,
   updateEmployeeStatusSchema,
   createNomineeSchema,
@@ -40,7 +40,7 @@ export class EmployeeController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const parsed = createEmployeeSchema.safeParse(req.body);
+    const parsed = createEmployeeWithUserSchema.safeParse(req.body);
     if (!parsed.success) {
       throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
     }

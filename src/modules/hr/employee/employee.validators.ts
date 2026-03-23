@@ -75,7 +75,27 @@ export const createEmployeeSchema = z.object({
   drivingLicence: z.string().optional(),
   voterId: z.string().optional(),
   pran: z.string().optional(),
+
+  // Optional: Create a User (login) account simultaneously
+  createUserAccount: z.boolean().optional(),
+  userPassword: z.string().min(6, 'Password must be at least 6 characters').optional(),
+  userRole: z.string().optional(),
 });
+
+// Refined version for create — validates user account fields
+export const createEmployeeWithUserSchema = createEmployeeSchema.refine(
+  (data) => {
+    if (data.createUserAccount && !data.userPassword) return false;
+    return true;
+  },
+  { message: 'Password is required when creating a user account', path: ['userPassword'] },
+).refine(
+  (data) => {
+    if (data.createUserAccount && !data.officialEmail) return false;
+    return true;
+  },
+  { message: 'Official email is required when creating a user account', path: ['officialEmail'] },
+);
 
 // ── Update Employee (all fields optional) ─────────────────────────────
 export const updateEmployeeSchema = createEmployeeSchema.partial();

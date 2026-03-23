@@ -158,10 +158,14 @@ export class DashboardService {
       }),
     ]);
 
-    // When locationConfig is 'per-location', modules are stored on each Location
-    // rather than on Company.selectedModuleIds — aggregate from all locations
+    // Resolve active module IDs — check company-level first, then fall back to locations
     let moduleIds: string[] = [];
-    if (company?.locationConfig === 'per-location') {
+    const companyModuleIds = (company?.selectedModuleIds as string[] | null) ?? [];
+
+    if (companyModuleIds.length > 0) {
+      moduleIds = companyModuleIds;
+    } else {
+      // Fallback: aggregate from locations (modules may be stored there from onboarding)
       const locations = await platformPrisma.location.findMany({
         where: { companyId },
         select: { moduleIds: true },
@@ -174,8 +178,6 @@ export class DashboardService {
         }
       });
       moduleIds = Array.from(moduleIdSet);
-    } else {
-      moduleIds = (company?.selectedModuleIds as string[] | null) ?? [];
     }
 
     return {

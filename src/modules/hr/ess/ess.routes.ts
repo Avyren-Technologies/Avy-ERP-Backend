@@ -36,6 +36,11 @@ router.get('/notification-rules/:id', requirePermissions(['hr:read']), controlle
 router.patch('/notification-rules/:id', requirePermissions(['hr:update']), controller.updateRule);
 router.delete('/notification-rules/:id', requirePermissions(['hr:delete']), controller.deleteRule);
 
+// ── Shift Check-In / Check-Out ──────────────────────────────────────
+router.get('/attendance/my-status', requirePermissions(['hr:read']), controller.getMyAttendanceStatus);
+router.post('/attendance/check-in', requirePermissions(['hr:create']), controller.checkIn);
+router.post('/attendance/check-out', requirePermissions(['hr:create']), controller.checkOut);
+
 // ── Manager Delegates ───────────────────────────────────────────────
 router.get('/delegates', requirePermissions(['hr:read']), controller.listDelegates);
 router.post('/delegates', requirePermissions(['hr:create']), controller.createDelegate);

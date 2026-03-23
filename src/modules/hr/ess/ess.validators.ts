@@ -142,3 +142,19 @@ export const regularizeAttendanceSchema = z.object({
   correctedPunchOut: z.string().optional(),
   reason: z.string().min(1, 'Reason is required'),
 });
+
+// ── Shift Check-In / Check-Out ──────────────────────────────────────
+
+export const checkInSchema = z.object({
+  shiftId: z.string().optional(),
+  locationId: z.string().optional(),
+  latitude: z.coerce.number().optional(),
+  longitude: z.coerce.number().optional(),
+  photoUrl: z.string().optional(),
+});
+
+export const checkOutSchema = z.object({
+  latitude: z.coerce.number().optional(),
+  longitude: z.coerce.number().optional(),
+  photoUrl: z.string().optional(),
+});

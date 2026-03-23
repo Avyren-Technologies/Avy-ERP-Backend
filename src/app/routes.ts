@@ -84,6 +84,28 @@ router.use(
   validateTenantAccess()
 );
 
+// Module catalogue (accessible by BOTH super-admin and company-admin, no tenant required)
+router.get('/modules/catalogue', authMiddleware({ requireTenant: false }), async (req, res) => {
+  const { MODULE_CATALOGUE } = await import('../core/billing/pricing.service');
+  const companyId = req.user?.companyId;
+
+  if (companyId) {
+    // Company admin — show with active/inactive status
+    const { companyAdminService } = await import('../core/company-admin/company-admin.service');
+    const result = await companyAdminService.getModuleCatalogue(companyId);
+    return res.json({ success: true, data: result, message: 'Module catalogue retrieved' });
+  }
+
+  // Super admin — show full catalogue, all modules
+  const catalogue = MODULE_CATALOGUE.map((mod: any) => ({
+    id: mod.id,
+    name: mod.name,
+    pricePerMonth: mod.price,
+    isActive: true, // super admin sees all as available
+  }));
+  return res.json({ success: true, data: { catalogue }, message: 'Module catalogue retrieved' });
+});
+
 // Apply authentication and tenant validation to business routes
 router.use(
   authMiddleware({ requireTenant: true }),

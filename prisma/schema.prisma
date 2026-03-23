@@ -1314,6 +1314,14 @@ model AttendanceRecord {
   remarks       String?
   locationId    String?
   location      Location?        @relation("AttendanceLocation", fields: [locationId], references: [id])
+  // Geo-tagging for check-in/check-out
+  checkInLatitude   Float?
+  checkInLongitude  Float?
+  checkOutLatitude  Float?
+  checkOutLongitude Float?
+  checkInPhotoUrl   String?        @db.Text
+  checkOutPhotoUrl  String?        @db.Text
+  geoStatus         String?        // NO_LOCATION, INSIDE_GEOFENCE, OUTSIDE_GEOFENCE
   companyId     String
   company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt     DateTime         @default(now())

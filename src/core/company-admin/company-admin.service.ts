@@ -909,36 +909,47 @@ export class CompanyAdminService {
       companyModuleIds = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : [];
     }
 
+    // If company-level moduleIds is empty, aggregate from locations (fallback)
+    // This handles the case where modules were assigned per-location during onboarding
+    if (companyModuleIds.length === 0 && company.locations?.length > 0) {
+      const allLocationModules = new Set<string>();
+      company.locations.forEach((loc) => {
+        if (loc.moduleIds) {
+          const raw = loc.moduleIds;
+          const locIds: string[] = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : [];
+          locIds.forEach((id) => allLocationModules.add(id));
+        }
+      });
+      companyModuleIds = Array.from(allLocationModules);
+    }
+
     // Build catalogue with active status
     const catalogue = MODULE_CATALOGUE.map((mod) => ({
       id: mod.id,
       name: mod.name,
-      pricePerMonth: mod.price, // already in rupees
+      pricePerMonth: mod.price,
       isActive: companyModuleIds.includes(mod.id),
     }));
 
-    // Per-location module breakdown (if per-location config)
-    let locationModules: { locationId: string; locationName: string; activeModuleIds: string[] }[] | undefined;
-    if (company.locationConfig === 'per-location') {
-      locationModules = company.locations.map((loc) => {
-        let locModuleIds: string[] = [];
-        if (loc.moduleIds) {
-          const raw = loc.moduleIds;
-          locModuleIds = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : [];
-        }
-        return {
-          locationId: loc.id,
-          locationName: loc.name,
-          activeModuleIds: locModuleIds,
-        };
-      });
-    }
+    // Per-location module breakdown
+    const locationModules = company.locations.map((loc) => {
+      let locModuleIds: string[] = [];
+      if (loc.moduleIds) {
+        const raw = loc.moduleIds;
+        locModuleIds = Array.isArray(raw) ? raw as string[] : typeof raw === 'string' ? JSON.parse(raw) : [];
+      }
+      return {
+        locationId: loc.id,
+        locationName: loc.name,
+        activeModuleIds: locModuleIds,
+      };
+    });
 
     return {
       catalogue,
       companyActiveModuleIds: companyModuleIds,
       locationConfig: company.locationConfig,
-      ...(locationModules && { locationModules }),
+      locationModules,
     };
   }
 
