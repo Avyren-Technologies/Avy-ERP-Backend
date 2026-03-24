@@ -75,8 +75,12 @@ function extractTenantFromRequest(req: Request): string | null {
     const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host === 'localhost';
     if (!isIP) {
       const subdomain = host.split('.')[0];
-      // Skip 'www' and other common subdomains
-      if (subdomain && !['www', 'api', 'app'].includes(subdomain)) {
+      // Skip service subdomains (www, api, app, and compound names like avy-erp-api)
+      const SERVICE_SUBDOMAINS = ['www', 'api', 'app', 'admin', 'staging', 'dev'];
+      const isServiceSubdomain = subdomain && SERVICE_SUBDOMAINS.some(
+        svc => subdomain === svc || subdomain.endsWith(`-${svc}`)
+      );
+      if (subdomain && !isServiceSubdomain) {
         return subdomain;
       }
     }
