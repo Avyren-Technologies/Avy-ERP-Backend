@@ -310,30 +310,43 @@ export class EmployeeService {
                   password: hashedPassword,
                   firstName: data.firstName,
                   lastName: data.lastName,
-                  role: data.userRole || 'EMPLOYEE',
+                  role: 'COMPANY_ADMIN',
                   companyId,
                   employeeId: employee.id,
                   isActive: true,
                 },
               });
 
-              // Create TenantUser bridge record
+              // Create TenantUser bridge record with dynamic RBAC role
               const company = await tx.company.findUnique({
                 where: { id: companyId },
                 select: { tenant: { select: { id: true } } },
               });
               const tenantId = company?.tenant?.id;
               if (tenantId) {
-                // Find a default role for this tenant
-                const defaultRole = await tx.role.findFirst({
-                  where: { tenantId, isSystem: true },
-                });
-                if (defaultRole) {
+                // Use the selected dynamic role, or fall back to default system role
+                let roleId = data.userRole || null;
+                if (roleId) {
+                  // Validate the provided role exists in this tenant
+                  const role = await tx.role.findFirst({
+                    where: { id: roleId, tenantId },
+                  });
+                  if (!role) {
+                    roleId = null; // Invalid role, fall back to default
+                  }
+                }
+                if (!roleId) {
+                  const defaultRole = await tx.role.findFirst({
+                    where: { tenantId, isSystem: true },
+                  });
+                  roleId = defaultRole?.id || null;
+                }
+                if (roleId) {
                   await tx.tenantUser.create({
                     data: {
                       userId: newUser.id,
                       tenantId,
-                      roleId: defaultRole.id,
+                      roleId,
                     },
                   });
                 }

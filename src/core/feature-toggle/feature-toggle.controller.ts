@@ -3,8 +3,15 @@ import { featureToggleService } from './feature-toggle.service';
 import { createSuccessResponse } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { AuthError } from '../../shared/errors';
+import { getFeatureToggleCatalogue } from '../../shared/constants/feature-toggles';
 
 export class FeatureToggleController {
+  // Get the feature toggle catalogue
+  getCatalogue = asyncHandler(async (_req: Request, res: Response) => {
+    const catalogue = getFeatureToggleCatalogue();
+    res.json(createSuccessResponse(catalogue, 'Feature toggle catalogue retrieved'));
+  });
+
   // Get toggles for a user
   getToggles = asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user?.tenantId;

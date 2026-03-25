@@ -48,6 +48,11 @@ export function errorMiddleware(
     statusCode = HttpStatus.NOT_FOUND;
     message = 'Record not found';
     code = 'NOT_FOUND';
+  } else if (error.constructor?.name === 'PrismaClientValidationError') {
+    // Prisma client validation error (invalid enum values, missing fields, type mismatches)
+    statusCode = HttpStatus.BAD_REQUEST;
+    message = 'Invalid data: ' + error.message.split('\n').pop()?.trim();
+    code = 'VALIDATION_ERROR';
   }
 
   // Log error

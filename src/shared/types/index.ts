@@ -35,6 +35,7 @@ declare global {
         companyId: string;
         employeeId?: string;
         permissions: string[];
+        featureToggles?: string[];
         firstName?: string;
         lastName?: string;
       };

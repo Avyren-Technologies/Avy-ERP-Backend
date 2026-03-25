@@ -5,6 +5,7 @@ import { createSuccessResponse } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { AuthError } from '../../shared/errors';
 import type { CreateRoleRequest, UpdateRoleRequest } from './rbac.types';
+import { getPermissionCatalogue } from '../../shared/constants/permissions';
 
 export class RbacController {
   // List roles for the current tenant
@@ -64,10 +65,11 @@ export class RbacController {
     res.json(createSuccessResponse(null, 'Role assigned successfully'));
   });
 
-  // Get the permission catalogue
+  // Get the permission catalogue (flat list + structured modules)
   getPermissions = asyncHandler(async (_req: Request, res: Response) => {
-    const permissions = rbacService.getPermissionCatalogue();
-    res.json(createSuccessResponse(permissions, 'Permissions retrieved successfully'));
+    const flat = rbacService.getPermissionCatalogue();
+    const modules = getPermissionCatalogue();
+    res.json(createSuccessResponse({ permissions: flat, modules }, 'Permissions retrieved successfully'));
   });
 
   // Get reference role templates

@@ -25,6 +25,7 @@ import {
   TokenPair
 } from './auth.types';
 import { sendPasswordResetCode } from '../../infrastructure/email/email.service';
+import { rbacService } from '../rbac/rbac.service';
 
 const JWT_ALGORITHM: jwt.Algorithm = 'HS256';
 
@@ -84,14 +85,30 @@ export class AuthService {
       }
     }
 
-    // Fetch permissions once to avoid duplicate DB queries
-    const permissions = await this.getUserPermissions(user.id);
+    const tenantId = user.company?.tenant?.id;
+
+    // Fetch permissions dynamically from RBAC system
+    const permissions = await this.getUserPermissions(user.id, tenantId);
+
+    // Load enabled feature toggles
+    let featureToggles: string[] = [];
+    if (tenantId) {
+      try {
+        const toggles = await platformPrisma.featureToggle.findMany({
+          where: { tenantId, userId: user.id, enabled: true },
+          select: { feature: true },
+        });
+        featureToggles = toggles.map(t => t.feature);
+      } catch {
+        // Feature toggles are optional
+      }
+    }
 
     // Generate tokens
     const tokens = await this.generateTokens({
       userId: user.id,
       email: user.email,
-      tenantId: user.company?.tenant?.id ?? undefined,
+      tenantId: tenantId ?? undefined,
       companyId: user.companyId ?? undefined,
       employeeId,
       roleId: user.role,
@@ -104,29 +121,30 @@ export class AuthService {
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
-      tenantId: user.company?.tenant?.id,
+      tenantId,
       companyId: user.companyId,
       employeeId,
       roleId: user.role,
       permissions,
+      featureToggles,
       isActive: user.isActive,
     });
 
     logger.info(`User logged in: ${user.email}`);
 
-    const responseUser: AuthResponse['user'] = {
-      id: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: user.role,
-      ...(user.companyId ? { companyId: user.companyId } : {}),
-      ...(user.company?.tenant?.id ? { tenantId: user.company.tenant.id } : {}),
-      ...(employeeId ? { employeeId } : {}),
-    };
-
     return {
-      user: responseUser,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        permissions,
+        featureToggles,
+        ...(user.companyId ? { companyId: user.companyId } : {}),
+        ...(tenantId ? { tenantId } : {}),
+        ...(employeeId ? { employeeId } : {}),
+      },
       tokens,
     };
   }
@@ -200,11 +218,52 @@ export class AuthService {
         },
       });
 
+      // Seed default RBAC roles for the new tenant
+      const defaultRoleNames = ['General Manager', 'HR Personnel', 'Finance Team', 'Production Manager', 'Security Personnel'];
+      const { REFERENCE_ROLE_PERMISSIONS } = await import('../../shared/constants/permissions');
+      for (const roleName of defaultRoleNames) {
+        const ref = REFERENCE_ROLE_PERMISSIONS[roleName];
+        if (!ref) continue;
+        await tx.role.create({
+          data: {
+            tenantId: tenant.id,
+            name: roleName,
+            description: ref.description,
+            permissions: ref.permissions,
+            isSystem: true,
+          },
+        });
+      }
+
+      // Create "Company Admin" system role with full access
+      const companyAdminRole = await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          name: 'Company Admin',
+          description: 'Full company access — all modules and actions',
+          permissions: [
+            'company:*', 'hr:*', 'production:*', 'inventory:*', 'sales:*',
+            'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
+            'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
+          ],
+          isSystem: true,
+        },
+      });
+
+      // Create TenantUser bridge record for the registering user
+      await tx.tenantUser.create({
+        data: {
+          userId: user.id,
+          tenantId: tenant.id,
+          roleId: companyAdminRole.id,
+        },
+      });
+
       return { user, tenant, company };
     });
 
-    // Fetch permissions once to avoid duplicate DB queries
-    const permissions = await this.getUserPermissions(result.user.id);
+    // Fetch permissions dynamically from the new TenantUser→Role
+    const permissions = await this.getUserPermissions(result.user.id, result.tenant.id);
 
     // Generate tokens
     const tokens = await this.generateTokens({
@@ -226,6 +285,7 @@ export class AuthService {
       companyId: result.company.id,
       roleId: result.user.role,
       permissions,
+      featureToggles: [],
       isActive: result.user.isActive,
     });
 
@@ -238,6 +298,8 @@ export class AuthService {
         firstName: result.user.firstName,
         lastName: result.user.lastName,
         role: result.user.role,
+        permissions,
+        featureToggles: [],
         companyId: result.company.id,
         tenantId: result.tenant.id,
       },
@@ -480,35 +542,24 @@ export class AuthService {
     };
   }
 
-  // Get user permissions
-  private async getUserPermissions(userId: string): Promise<string[]> {
-    // For now, return default permissions based on role
-    // TODO: Implement proper RBAC system
+  // Get user permissions from dynamic RBAC system
+  private async getUserPermissions(userId: string, tenantId?: string): Promise<string[]> {
     const user = await platformPrisma.user.findUnique({
       where: { id: userId },
+      include: { company: { include: { tenant: true } } },
     });
 
     if (!user) return [];
 
-    // Default permissions for different roles
-    const rolePermissions: Record<string, string[]> = {
-      SUPER_ADMIN: ['*'], // All permissions
-      COMPANY_ADMIN: [
-        'user:*',
-        'role:*',
-        'company:*',
-        'hr:*',
-        'production:*',
-        'inventory:*',
-        'sales:*',
-        'finance:*',
-        'maintenance:*',
-        'reports:*',
-        'audit:read',
-      ],
-    };
+    // SUPER_ADMIN always gets wildcard — platform-level, not tenant-scoped
+    if (user.role === 'SUPER_ADMIN') return ['*'];
 
-    return rolePermissions[user.role] || [];
+    // Resolve tenantId if not provided
+    const resolvedTenantId = tenantId || user.company?.tenant?.id;
+    if (!resolvedTenantId) return [];
+
+    // Fetch permissions from TenantUser→Role (with Redis caching inside rbacService)
+    return rbacService.getUserPermissions(userId, resolvedTenantId);
   }
 
   // Cache user data

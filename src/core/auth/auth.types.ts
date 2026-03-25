@@ -28,6 +28,8 @@ export interface AuthResponse {
     firstName: string;
     lastName: string;
     role: string;
+    permissions?: string[];
+    featureToggles?: string[];
     companyId?: string;
     tenantId?: string;
     employeeId?: string;

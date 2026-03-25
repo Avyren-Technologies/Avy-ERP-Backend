@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { platformPrisma } from '../config/database';
 import { cacheRedis } from '../config/redis';
-import { AuthError } from '../shared/errors';
+import { AuthError, ApiError } from '../shared/errors';
 import {
   createAccessTokenBlacklistKey,
   createUserCacheKey,
@@ -11,6 +11,7 @@ import {
 import { logger } from '../config/logger';
 import { RequestWithUser } from '../shared/types';
 import { hasPermission } from '../shared/constants/permissions';
+import { rbacService } from '../core/rbac/rbac.service';
 
 export interface AuthMiddlewareOptions {
   optional?: boolean;
@@ -71,16 +72,42 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           throw AuthError.invalidToken();
         }
 
+        const tenantId = dbUser.company?.tenant?.id;
+
+        // Resolve permissions dynamically from RBAC system
+        // SUPER_ADMIN always gets wildcard; others get permissions from their TenantUser→Role
+        let permissions: string[] = [];
+        if (dbUser.role === 'SUPER_ADMIN') {
+          permissions = ['*'];
+        } else if (tenantId) {
+          permissions = await rbacService.getUserPermissions(dbUser.id, tenantId);
+        }
+
+        // Load enabled feature toggles for this user
+        let featureToggles: string[] = [];
+        if (tenantId) {
+          try {
+            const toggles = await platformPrisma.featureToggle.findMany({
+              where: { tenantId, userId: dbUser.id, enabled: true },
+              select: { feature: true },
+            });
+            featureToggles = toggles.map(t => t.feature);
+          } catch {
+            // Feature toggles are optional — don't block auth if table doesn't exist
+          }
+        }
+
         userData = JSON.stringify({
           id: dbUser.id,
           email: dbUser.email,
           firstName: dbUser.firstName,
           lastName: dbUser.lastName,
-          tenantId: dbUser.company?.tenant?.id,
+          tenantId,
           companyId: dbUser.companyId,
           employeeId: dbUser.employeeId ?? undefined,
           roleId: dbUser.role,
-          permissions: getRolePermissions(dbUser.role),
+          permissions,
+          featureToggles,
           isActive: dbUser.isActive,
         });
 
@@ -186,25 +213,19 @@ function extractTokenFromRequest(req: RequestWithUser): string | null {
   return null;
 }
 
-function getRolePermissions(role: string): string[] {
-  const rolePermissions: Record<string, string[]> = {
-    SUPER_ADMIN: ['*'],
-    COMPANY_ADMIN: [
-      'user:*',
-      'role:*',
-      'company:*',
-      'hr:*',
-      'production:*',
-      'inventory:*',
-      'sales:*',
-      'finance:*',
-      'maintenance:*',
-      'reports:*',
-      'audit:read',
-    ],
-  };
+export function requireFeature(featureKey: string) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      throw AuthError.missingToken();
+    }
 
-  return rolePermissions[role] || [];
+    const userFeatures: string[] = req.user.featureToggles || [];
+    if (!userFeatures.includes(featureKey)) {
+      throw new ApiError('Feature is disabled for this user', 403, true, 'FEATURE_DISABLED');
+    }
+
+    next();
+  };
 }
 
 export async function blacklistToken(token: string, expirySeconds?: number): Promise<void> {
