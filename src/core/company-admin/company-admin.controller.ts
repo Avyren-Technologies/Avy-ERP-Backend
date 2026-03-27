@@ -19,6 +19,7 @@ import {
   updateUserSchema,
   updateUserStatusSchema,
   profileSectionSchemas,
+  addModulesSchema,
 } from './company-admin.validators';
 
 export class CompanyAdminController {
@@ -489,6 +490,37 @@ export class CompanyAdminController {
 
     const filters = await companyAdminService.getAuditFilterOptions(tenantId);
     res.json(createSuccessResponse(filters, 'Filter options retrieved successfully'));
+  });
+
+  // ── Module CRUD ──────────────────────────────────────────────────────
+
+  addModulesToLocation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = addModulesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await companyAdminService.addModulesToLocation(
+      companyId,
+      req.params.locationId!,
+      parsed.data.moduleIds
+    );
+    res.json(createSuccessResponse(result, 'Modules added to location'));
+  });
+
+  removeModuleFromLocation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const location = await companyAdminService.removeModuleFromLocation(
+      companyId,
+      req.params.locationId!,
+      req.params.moduleId!
+    );
+    res.json(createSuccessResponse(location, 'Module removed from location'));
   });
 }
 

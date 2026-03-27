@@ -15,6 +15,7 @@ import { dashboardPlatformRoutes, dashboardTenantRoutes } from '../core/dashboar
 import { auditRoutes } from '../core/audit/audit.routes';
 import { featureToggleRoutes } from '../core/feature-toggle/feature-toggle.routes';
 import { companyAdminRoutes } from '../core/company-admin/company-admin.routes';
+import { supportCompanyRoutes, supportPlatformRoutes } from '../core/support/support.routes';
 
 // Import business module routes
 import { hrRoutes } from '../modules/hr/routes';
@@ -76,6 +77,7 @@ router.use('/platform/companies', companyRoutes);
 router.use('/platform/billing', billingRoutes);
 router.use('/platform/dashboard', dashboardPlatformRoutes);
 router.use('/platform/audit-logs', auditRoutes);
+router.use('/platform/support', supportPlatformRoutes);
 
 // Tenant-scoped routes (require tenant context)
 router.use(
@@ -127,6 +129,7 @@ router.use('/dashboard', dashboardTenantRoutes);
 router.use('/rbac', rbacRoutes);
 router.use('/feature-toggles', featureToggleRoutes);
 router.use('/company', companyAdminRoutes);
+router.use('/company/support', supportCompanyRoutes);
 
 // Export router
 export { router as routes };

@@ -5,6 +5,68 @@ import { hashPassword } from '../../shared/utils';
 import { logger } from '../../config/logger';
 import { MODULE_CATALOGUE, USER_TIERS, pricingService } from '../billing/pricing.service';
 
+// ── Module dependency graph + pricing ────────────────────────────────
+
+const MODULE_DEPS: Record<string, string[]> = {
+  masters: [],
+  security: ['masters'],
+  hr: ['security'],
+  production: ['machine-maintenance', 'masters'],
+  'machine-maintenance': ['masters'],
+  inventory: ['masters'],
+  vendor: ['inventory', 'masters'],
+  sales: ['finance', 'masters'],
+  finance: ['masters'],
+  visitor: ['security'],
+};
+
+const MODULE_NAMES: Record<string, string> = {
+  masters: 'Masters',
+  security: 'Security',
+  hr: 'HR Management',
+  production: 'Production',
+  'machine-maintenance': 'Machine Maintenance',
+  inventory: 'Inventory',
+  vendor: 'Vendor Management',
+  sales: 'Sales & Invoicing',
+  finance: 'Finance',
+  visitor: 'Visitor Management',
+};
+
+const MODULE_PRICES: Record<string, number> = {
+  masters: 0,
+  security: 1499,
+  hr: 2999,
+  production: 2499,
+  'machine-maintenance': 1999,
+  inventory: 1999,
+  vendor: 1499,
+  sales: 1999,
+  finance: 2499,
+  visitor: 999,
+};
+
+function resolveDeps(moduleIds: string[]): string[] {
+  const resolved = new Set(moduleIds);
+  const queue = [...moduleIds];
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const dep of MODULE_DEPS[id] ?? []) {
+      if (!resolved.has(dep)) {
+        resolved.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+  return Array.from(resolved);
+}
+
+function getDependents(moduleId: string): string[] {
+  return Object.entries(MODULE_DEPS)
+    .filter(([, deps]) => deps.includes(moduleId))
+    .map(([id]) => id);
+}
+
 /** Convert undefined → null so Prisma nullable fields are happy. */
 function n<T>(value: T | undefined): T | null {
   return value === undefined ? null : value;
@@ -1241,6 +1303,198 @@ export class CompanyAdminService {
         moduleCount: companyModuleIds.length,
       },
     };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Module CRUD
+  // ────────────────────────────────────────────────────────────────────
+
+  async addModulesToLocation(companyId: string, locationId: string, moduleIds: string[]) {
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      include: { locations: true },
+    });
+    if (!company) throw ApiError.notFound('Company not found');
+
+    const location = company.locations.find((l) => l.id === locationId);
+    if (!location) throw ApiError.notFound('Location not found');
+
+    // Check billing type — block one-time
+    const effectiveBillingType =
+      company.locationConfig === 'common' ? company.billingType : location.billingType;
+    if (effectiveBillingType === 'one-time') {
+      throw ApiError.forbidden(
+        'Module changes are not available for one-time billing plans. Contact support.',
+        'BILLING_ONE_TIME'
+      );
+    }
+
+    // Validate moduleIds exist
+    for (const id of moduleIds) {
+      if (!(id in MODULE_DEPS)) {
+        throw ApiError.badRequest(`Unknown module: ${id}`);
+      }
+    }
+
+    // Resolve deps
+    const resolved = resolveDeps(moduleIds);
+
+    // Parse current modules
+    let currentModules: string[] = [];
+    if (location.moduleIds) {
+      const raw = location.moduleIds;
+      currentModules = Array.isArray(raw) ? (raw as string[]) : typeof raw === 'string' ? JSON.parse(raw) : [];
+    }
+
+    const mergedModules = Array.from(new Set([...currentModules, ...resolved]));
+    const autoAddedDeps = resolved.filter((m) => !moduleIds.includes(m) && !currentModules.includes(m));
+    const addedModules = mergedModules.filter((m) => !currentModules.includes(m));
+
+    // Calculate billing impact
+    const monthlyDelta = addedModules.reduce((sum, m) => sum + (MODULE_PRICES[m] ?? 0), 0);
+
+    const result = await platformPrisma.$transaction(async (tx) => {
+      if (company.locationConfig === 'common') {
+        // Update ALL locations
+        await tx.location.updateMany({
+          where: { companyId },
+          data: { moduleIds: mergedModules },
+        });
+      } else {
+        await tx.location.update({
+          where: { id: locationId },
+          data: { moduleIds: mergedModules },
+        });
+      }
+
+      // Re-aggregate company selectedModuleIds
+      const allLocations = await tx.location.findMany({
+        where: { companyId },
+        select: { id: true, moduleIds: true },
+      });
+
+      const allModules = new Set<string>();
+      for (const loc of allLocations) {
+        const locModules: string[] = loc.id === locationId || company.locationConfig === 'common'
+          ? mergedModules
+          : (() => {
+              if (!loc.moduleIds) return [];
+              const raw = loc.moduleIds;
+              return Array.isArray(raw) ? (raw as string[]) : typeof raw === 'string' ? JSON.parse(raw) : [];
+            })();
+        locModules.forEach((m) => allModules.add(m));
+      }
+
+      await tx.company.update({
+        where: { id: companyId },
+        data: { selectedModuleIds: Array.from(allModules) },
+      });
+
+      const updatedLocation = await tx.location.findUnique({ where: { id: locationId } });
+      return updatedLocation;
+    });
+
+    return {
+      location: result,
+      autoAddedDeps: autoAddedDeps.map((id) => ({ id, name: MODULE_NAMES[id] ?? id })),
+      billingImpact: {
+        addedModules: addedModules.map((id) => ({ id, name: MODULE_NAMES[id] ?? id, price: MODULE_PRICES[id] ?? 0 })),
+        monthlyDelta,
+      },
+    };
+  }
+
+  async removeModuleFromLocation(companyId: string, locationId: string, moduleId: string) {
+    if (moduleId === 'masters') {
+      throw ApiError.badRequest('The Masters module cannot be removed');
+    }
+
+    if (!(moduleId in MODULE_DEPS)) {
+      throw ApiError.badRequest(`Unknown module: ${moduleId}`);
+    }
+
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      include: { locations: true },
+    });
+    if (!company) throw ApiError.notFound('Company not found');
+
+    const location = company.locations.find((l) => l.id === locationId);
+    if (!location) throw ApiError.notFound('Location not found');
+
+    // Check billing type
+    const effectiveBillingType =
+      company.locationConfig === 'common' ? company.billingType : location.billingType;
+    if (effectiveBillingType === 'one-time') {
+      throw ApiError.forbidden(
+        'Module changes are not available for one-time billing plans. Contact support.',
+        'BILLING_ONE_TIME'
+      );
+    }
+
+    // Parse current modules
+    let currentModules: string[] = [];
+    if (location.moduleIds) {
+      const raw = location.moduleIds;
+      currentModules = Array.isArray(raw) ? (raw as string[]) : typeof raw === 'string' ? JSON.parse(raw) : [];
+    }
+
+    if (!currentModules.includes(moduleId)) {
+      throw ApiError.notFound(`Module "${moduleId}" is not active on this location`);
+    }
+
+    // Check dependents
+    const dependents = getDependents(moduleId).filter((dep) => currentModules.includes(dep));
+    if (dependents.length > 0) {
+      const depNames = dependents.map((d) => MODULE_NAMES[d] ?? d).join(', ');
+      throw ApiError.conflict(
+        `Cannot remove "${MODULE_NAMES[moduleId] ?? moduleId}" — it is required by: ${depNames}. Remove those modules first.`,
+        'MODULE_DEPENDENCY_BLOCK'
+      );
+    }
+
+    const updatedModules = currentModules.filter((m) => m !== moduleId);
+
+    const result = await platformPrisma.$transaction(async (tx) => {
+      if (company.locationConfig === 'common') {
+        await tx.location.updateMany({
+          where: { companyId },
+          data: { moduleIds: updatedModules },
+        });
+      } else {
+        await tx.location.update({
+          where: { id: locationId },
+          data: { moduleIds: updatedModules },
+        });
+      }
+
+      // Re-aggregate company selectedModuleIds
+      const allLocations = await tx.location.findMany({
+        where: { companyId },
+        select: { id: true, moduleIds: true },
+      });
+
+      const allModules = new Set<string>();
+      for (const loc of allLocations) {
+        const locModules: string[] = loc.id === locationId || company.locationConfig === 'common'
+          ? updatedModules
+          : (() => {
+              if (!loc.moduleIds) return [];
+              const raw = loc.moduleIds;
+              return Array.isArray(raw) ? (raw as string[]) : typeof raw === 'string' ? JSON.parse(raw) : [];
+            })();
+        locModules.forEach((m) => allModules.add(m));
+      }
+
+      await tx.company.update({
+        where: { id: companyId },
+        data: { selectedModuleIds: Array.from(allModules) },
+      });
+
+      return tx.location.findUnique({ where: { id: locationId } });
+    });
+
+    return result;
   }
 
   // ────────────────────────────────────────────────────────────────────

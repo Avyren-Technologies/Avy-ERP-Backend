@@ -46,6 +46,10 @@ router.delete('/iot-reasons/:id', requirePermissions(['company:delete']), contro
 // ── Module Catalogue ────────────────────────────────────────────────
 router.get('/modules/catalogue', requirePermissions(['company:read']), controller.getModuleCatalogue);
 
+// ── Module CRUD (add/remove on locations) ──────────────────────────
+router.post('/locations/:locationId/modules', requirePermissions(['company:update']), controller.addModulesToLocation);
+router.delete('/locations/:locationId/modules/:moduleId', requirePermissions(['company:update']), controller.removeModuleFromLocation);
+
 // ── Billing ────────────────────────────────────────────────────────
 router.get('/billing/subscription', requirePermissions(['company:read']), controller.getMySubscription);
 router.get('/billing/invoices', requirePermissions(['company:read']), controller.getMyInvoices);

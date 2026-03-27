@@ -144,6 +144,12 @@ export const updateUserStatusSchema = z.object({
   isActive: z.boolean(),
 });
 
+// ── Module CRUD ────────────────────────────────────────────────────
+
+export const addModulesSchema = z.object({
+  moduleIds: z.array(z.string().min(1)).min(1).max(10),
+});
+
 // ── Profile Section (company-admin limited) ─────────────────────────
 
 export const profileSectionSchemas: Record<string, z.ZodType<any>> = {
