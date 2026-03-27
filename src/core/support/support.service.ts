@@ -2,6 +2,7 @@ import { TicketStatus, TicketCategory, TicketPriority } from '@prisma/client';
 import { platformPrisma } from '../../config/database';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../config/logger';
+import { emitTicketMessage, emitTicketStatusChange, emitNewTicket, emitTicketResolved } from '../../lib/socket';
 
 // ── Status Transition Map ──────────────────────────────────────────
 
@@ -103,10 +104,15 @@ export class SupportService {
     });
 
     // Return with messages
-    return platformPrisma.supportTicket.findUnique({
+    const result = await platformPrisma.supportTicket.findUnique({
       where: { id: ticket.id },
       include: { messages: { orderBy: { createdAt: 'asc' } } },
     });
+
+    // Emit real-time event
+    emitNewTicket(result);
+
+    return result;
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -236,6 +242,9 @@ export class SupportService {
       return msg;
     });
 
+    // Emit real-time event
+    emitTicketMessage(ticketId, message);
+
     return message;
   }
 
@@ -271,6 +280,9 @@ export class SupportService {
       where: { id: ticketId },
       data,
     });
+
+    // Emit real-time event
+    emitTicketStatusChange(ticketId, ticket.companyId, newStatus as string, updated);
 
     return updated;
   }
@@ -372,6 +384,9 @@ export class SupportService {
       return { updatedModules, companyModules: Array.from(allModules) };
     });
 
+    // Emit real-time event
+    emitTicketResolved(ticketId, ticket.companyId, result);
+
     return result;
   }
 
@@ -413,7 +428,12 @@ export class SupportService {
       });
     });
 
-    return { ticketId, status: 'RESOLVED', rejectedBy: approverName, reason };
+    const rejectResult = { ticketId, status: 'RESOLVED', rejectedBy: approverName, reason };
+
+    // Emit real-time event
+    emitTicketResolved(ticketId, ticket.companyId, rejectResult);
+
+    return rejectResult;
   }
 
   // ────────────────────────────────────────────────────────────────────

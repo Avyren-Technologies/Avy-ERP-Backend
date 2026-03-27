@@ -1,9 +1,11 @@
+import { createServer } from 'http';
 import { app } from './app';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { checkDatabaseConnection, disconnectDatabase } from '../config/database';
 import { checkAllRedisConnections, disconnectRedis } from '../config/redis';
 import { startSLACron } from '../workers/sla-cron';
+import { initSocket } from '../lib/socket';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -22,8 +24,12 @@ async function startServer(): Promise<void> {
       throw new Error('Redis connection failed');
     }
 
+    // Create HTTP server and attach Socket.io
+    const httpServer = createServer(app);
+    initSocket(httpServer);
+
     // Start HTTP server
-    const server = app.listen(env.PORT, '0.0.0.0', () => {
+    const server = httpServer.listen(env.PORT, '0.0.0.0', () => {
       logger.info(`🚀 Avy ERP Backend Server started successfully!`);
       logger.info(`📡 Server bound to host: 0.0.0.0`);
       logger.info(`📍 Server running on: http://localhost:${env.PORT}`);
