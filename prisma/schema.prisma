@@ -208,6 +208,9 @@ model Company {
   employeeTransfers  EmployeeTransfer[]
   employeePromotions EmployeePromotion[]
 
+  // Support Ticket Relations
+  supportTickets SupportTicket[]
+
   @@map("companies")
 }
 
@@ -2865,4 +2868,78 @@ model EmployeePromotion {
   updatedAt          DateTime        @updatedAt
 
   @@map("employee_promotions")
+}
+
+// ── Support Ticket System ──
+
+enum TicketCategory {
+  MODULE_CHANGE
+  BILLING
+  TECHNICAL
+  GENERAL
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum SenderRole {
+  COMPANY_ADMIN
+  SUPER_ADMIN
+  SYSTEM
+}
+
+model SupportTicket {
+  id               String         @id @default(cuid())
+  tenantId         String
+  companyId        String
+  companyName      String
+  createdByUserId  String
+  createdByName    String
+  subject          String
+  category         TicketCategory @default(GENERAL)
+  priority         TicketPriority @default(NORMAL)
+  status           TicketStatus   @default(OPEN)
+  assignedToUserId String?
+  metadata         Json?
+  resolvedAt       DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  messages SupportMessage[]
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([status])
+  @@index([category])
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id              String     @id @default(cuid())
+  ticketId        String
+  senderUserId    String?
+  senderName      String
+  senderRole      SenderRole @default(COMPANY_ADMIN)
+  body            String
+  isSystemMessage Boolean    @default(false)
+  createdAt       DateTime   @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("support_messages")
 }
