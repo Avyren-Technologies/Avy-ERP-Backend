@@ -106,11 +106,16 @@ router.patch('/letter-templates/:id', requirePermissions(['hr:update']), control
 router.delete('/letter-templates/:id', requirePermissions(['hr:delete']), controller.deleteLetterTemplate);
 
 // ═══════════════════════════════════════════════════════════════════
-// HR LETTERS
+// HR LETTERS + E-SIGN INTEGRATION
 // ═══════════════════════════════════════════════════════════════════
 router.get('/hr-letters', requirePermissions(['hr:read']), controller.listLetters);
 router.post('/hr-letters', requirePermissions(['hr:create']), controller.createLetter);
+// E-Sign routes MUST come before :id to avoid "pending-esign" being captured as an ID
+router.get('/hr-letters/pending-esign', requirePermissions(['hr:read']), controller.listPendingESignLetters);
+router.post('/hr-letters/esign-callback', controller.processESignCallback);
 router.get('/hr-letters/:id', requirePermissions(['hr:read']), controller.getLetter);
+router.post('/hr-letters/:id/dispatch-esign', requirePermissions(['hr:update']), controller.dispatchESign);
+router.get('/hr-letters/:id/esign-status', requirePermissions(['hr:read']), controller.getESignStatus);
 router.delete('/hr-letters/:id', requirePermissions(['hr:delete']), controller.deleteLetter);
 
 // ═══════════════════════════════════════════════════════════════════
@@ -149,14 +154,6 @@ router.post('/bonus-batches', requirePermissions(['hr:create']), controller.crea
 router.get('/bonus-batches/:id', requirePermissions(['hr:read']), controller.getBonusBatch);
 router.patch('/bonus-batches/:id/approve', requirePermissions(['hr:update']), controller.approveBonusBatch);
 router.post('/bonus-batches/:id/merge', requirePermissions(['hr:update']), controller.mergeBonusBatch);
-
-// ═══════════════════════════════════════════════════════════════════
-// E-SIGN INTEGRATION (ORA-7)
-// ═══════════════════════════════════════════════════════════════════
-router.get('/hr-letters/pending-esign', requirePermissions(['hr:read']), controller.listPendingESignLetters);
-router.post('/hr-letters/esign-callback', controller.processESignCallback);
-router.post('/hr-letters/:id/dispatch-esign', requirePermissions(['hr:update']), controller.dispatchESign);
-router.get('/hr-letters/:id/esign-status', requirePermissions(['hr:read']), controller.getESignStatus);
 
 // ═══════════════════════════════════════════════════════════════════
 // PRODUCTION INCENTIVE (ORA-9)

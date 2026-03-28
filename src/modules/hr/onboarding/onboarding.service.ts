@@ -197,6 +197,22 @@ export class OnboardingService {
     });
   }
 
+  async listAllTasks(companyId: string, options?: { department?: string; status?: string }) {
+    const where: any = { companyId };
+    if (options?.department) where.department = options.department;
+    if (options?.status) where.status = options.status;
+
+    return platformPrisma.onboardingTask.findMany({
+      where,
+      include: {
+        employee: {
+          select: { id: true, employeeId: true, firstName: true, lastName: true },
+        },
+      },
+      orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
+    });
+  }
+
   async updateTask(companyId: string, taskId: string, data: { status: string; notes?: string }, completedBy?: string) {
     const task = await platformPrisma.onboardingTask.findUnique({ where: { id: taskId } });
     if (!task || task.companyId !== companyId) {

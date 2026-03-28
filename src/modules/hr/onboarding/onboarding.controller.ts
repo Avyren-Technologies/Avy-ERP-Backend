@@ -86,15 +86,20 @@ export class OnboardingController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = req.query.employeeId as string;
-    if (!employeeId) throw ApiError.badRequest('employeeId query parameter is required');
+    const employeeId = req.query.employeeId as string | undefined;
 
     const options: { department?: string; status?: string } = {};
     if (req.query.department) options.department = req.query.department as string;
     if (req.query.status) options.status = req.query.status as string;
 
-    const tasks = await onboardingService.listTasksForEmployee(companyId, employeeId, options);
-    res.json(createSuccessResponse(tasks, 'Onboarding tasks retrieved'));
+    if (employeeId) {
+      const tasks = await onboardingService.listTasksForEmployee(companyId, employeeId, options);
+      res.json(createSuccessResponse(tasks, 'Onboarding tasks retrieved'));
+    } else {
+      // No employeeId — list all tasks for the company (for admin overview)
+      const allTasks = await onboardingService.listAllTasks(companyId, options);
+      res.json(createSuccessResponse(allTasks, 'All onboarding tasks retrieved'));
+    }
   });
 
   updateTask = asyncHandler(async (req: Request, res: Response) => {

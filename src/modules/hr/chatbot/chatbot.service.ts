@@ -93,7 +93,26 @@ class ChatbotService {
 
   // ── Public Methods ─────────────────────────────────────────────────
 
-  async startConversation(companyId: string, employeeId: string, channel: string = 'WEB') {
+  async startConversation(companyId: string, userId: string, channel: string = 'WEB') {
+    // Resolve employee ID from user — userId might be a User ID or an Employee ID
+    let employeeId = userId;
+    const employee = await platformPrisma.employee.findFirst({
+      where: { id: userId, companyId },
+      select: { id: true },
+    });
+    if (!employee) {
+      // Try finding employee linked to this user
+      const user = await platformPrisma.user.findUnique({
+        where: { id: userId },
+        select: { employeeId: true },
+      });
+      if (user?.employeeId) {
+        employeeId = user.employeeId;
+      } else {
+        throw ApiError.badRequest('No employee record found for this user. Chatbot requires an employee profile.');
+      }
+    }
+
     const conversation = await platformPrisma.chatConversation.create({
       data: {
         employeeId,
