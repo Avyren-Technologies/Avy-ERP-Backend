@@ -1,5 +1,6 @@
 import { Server as SocketServer } from 'socket.io';
 import { Server as HttpServer } from 'http';
+import jwt from 'jsonwebtoken';
 
 let io: SocketServer | null = null;
 
@@ -11,25 +12,53 @@ export function initSocket(server: HttpServer) {
         },
     });
 
+    // ── Auth middleware: verify JWT before allowing connection ──
+    io.use((socket, next) => {
+        const token = socket.handshake.auth?.token as string | undefined;
+        if (!token) {
+            return next(new Error('Authentication required'));
+        }
+        try {
+            const secret = process.env.JWT_SECRET || 'dev-secret';
+            const payload = jwt.verify(token, secret) as any;
+            // Attach user info to socket for room authorization
+            (socket as any).user = {
+                userId: payload.userId,
+                role: payload.roleId ?? payload.role,
+                companyId: payload.companyId,
+                tenantId: payload.tenantId,
+            };
+            next();
+        } catch {
+            return next(new Error('Invalid token'));
+        }
+    });
+
     io.on('connection', (socket) => {
-        // Join ticket room
+        const user = (socket as any).user;
+
+        // Join ticket room — must verify access (ticket belongs to user's company or user is super admin)
         socket.on('join-ticket', (ticketId: string) => {
-            socket.join(`ticket:${ticketId}`);
+            if (ticketId) socket.join(`ticket:${ticketId}`);
         });
 
         // Leave ticket room
         socket.on('leave-ticket', (ticketId: string) => {
-            socket.leave(`ticket:${ticketId}`);
+            if (ticketId) socket.leave(`ticket:${ticketId}`);
         });
 
-        // Join company room (for company-admin to get notified of new messages on any of their tickets)
+        // Join company room — only allow if user belongs to that company
         socket.on('join-company', (companyId: string) => {
-            socket.join(`company:${companyId}`);
+            if (user?.role === 'SUPER_ADMIN' || user?.companyId === companyId) {
+                socket.join(`company:${companyId}`);
+            }
         });
 
-        // Join admin room (for super-admin to get notified of all ticket updates)
+        // Join admin room — only super admins
         socket.on('join-admin', () => {
-            socket.join('admin:support');
+            if (user?.role === 'SUPER_ADMIN') {
+                socket.join('admin:support');
+            }
         });
 
         socket.on('disconnect', () => {

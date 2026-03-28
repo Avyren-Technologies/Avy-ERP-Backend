@@ -954,6 +954,7 @@ export class CompanyAdminService {
       select: {
         selectedModuleIds: true,
         locationConfig: true,
+        billingType: true,
         locations: {
           select: { id: true, name: true, moduleIds: true },
         },
@@ -1011,6 +1012,7 @@ export class CompanyAdminService {
       catalogue,
       companyActiveModuleIds: companyModuleIds,
       locationConfig: company.locationConfig,
+      billingType: company.billingType ?? 'monthly',
       locationModules,
     };
   }
