@@ -25,6 +25,8 @@ import {
   updateLoanRecordSchema,
   updateLoanStatusSchema,
   taxConfigSchema,
+  createTravelAdvanceSchema,
+  settleTravelAdvanceSchema,
 } from './payroll.validators';
 
 export class PayrollController {
@@ -533,6 +535,52 @@ export class PayrollController {
       parsed.data.approvedBy
     );
     res.json(createSuccessResponse(loan, `Loan status updated to ${parsed.data.status}`));
+  });
+
+  // ── Travel Advance ──────────────────────────────────────────────────
+
+  createTravelAdvance = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createTravelAdvanceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const advance = await payrollConfigService.createTravelAdvance(companyId, parsed.data);
+    res.status(201).json(createSuccessResponse(advance, 'Travel advance created'));
+  });
+
+  listTravelAdvances = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const opts: any = { page, limit };
+    if (req.query.employeeId) opts.employeeId = req.query.employeeId as string;
+    if (req.query.status) opts.status = req.query.status as string;
+    if (req.query.isSettled !== undefined) opts.isSettled = req.query.isSettled === 'true';
+
+    const result = await payrollConfigService.listTravelAdvances(companyId, opts);
+    res.json(createPaginatedResponse(result.advances, result.page, result.limit, result.total, 'Travel advances retrieved'));
+  });
+
+  settleTravelAdvance = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = settleTravelAdvanceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const settlement = await payrollConfigService.settleTravelAdvance(
+      companyId,
+      req.params.id!,
+      parsed.data.expenseClaimId
+    );
+    res.json(createSuccessResponse(settlement, 'Travel advance settled'));
   });
 }
 

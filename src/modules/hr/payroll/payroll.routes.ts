@@ -60,11 +60,16 @@ router.get('/loan-policies/:id', requirePermissions(['hr:read']), controller.get
 router.patch('/loan-policies/:id', requirePermissions(['hr:update']), controller.updateLoanPolicy);
 router.delete('/loan-policies/:id', requirePermissions(['hr:delete']), controller.deleteLoanPolicy);
 
+// ── Travel Advance (must be before /loans/:id to avoid param capture) ─
+router.post('/loans/travel-advance', requirePermissions(['hr:create']), controller.createTravelAdvance);
+router.get('/loans/travel-advances', requirePermissions(['hr:read']), controller.listTravelAdvances);
+
 // ── Loans ─────────────────────────────────────────────────────────────
 router.get('/loans', requirePermissions(['hr:read']), controller.listLoans);
 router.post('/loans', requirePermissions(['hr:create']), controller.createLoan);
 router.get('/loans/:id', requirePermissions(['hr:read']), controller.getLoan);
 router.patch('/loans/:id', requirePermissions(['hr:update']), controller.updateLoan);
 router.patch('/loans/:id/status', requirePermissions(['hr:update']), controller.updateLoanStatus);
+router.post('/loans/:id/settle-travel', requirePermissions(['hr:update']), controller.settleTravelAdvance);
 
 export { router as payrollRoutes };

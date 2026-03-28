@@ -242,3 +242,56 @@ export const updateDisciplinaryActionSchema = z.object({
   status: z.string().optional(),
   issuedBy: z.string().optional(),
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// BONUS BATCHES
+// ═══════════════════════════════════════════════════════════════════
+
+export const createBonusBatchSchema = z.object({
+  name: z.string().min(1).max(200),
+  bonusType: z.enum(['PERFORMANCE', 'FESTIVE', 'SPOT', 'REFERRAL', 'RETENTION', 'STATUTORY']),
+  items: z.array(z.object({
+    employeeId: z.string().min(1),
+    amount: z.number().positive(),
+    remarks: z.string().optional(),
+  })).min(1),
+});
+
+export const mergeBonusBatchSchema = z.object({
+  payrollRunId: z.string().min(1),
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// E-SIGN (ORA-7)
+// ═══════════════════════════════════════════════════════════════════
+
+export const eSignCallbackSchema = z.object({
+  signingToken: z.string().min(1, 'Signing token is required'),
+  status: z.enum(['SIGNED', 'DECLINED']),
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// PRODUCTION INCENTIVE (ORA-9)
+// ═══════════════════════════════════════════════════════════════════
+
+export const createIncentiveConfigSchema = z.object({
+  name: z.string().min(1),
+  incentiveBasis: z.enum(['COMPONENT_WISE', 'MODEL_WISE', 'FINISH_PART_WISE']),
+  calculationCycle: z.enum(['DAILY', 'WEEKLY', 'MONTHLY']).optional(),
+  slabs: z.array(z.object({ minOutput: z.number(), maxOutput: z.number(), amount: z.number() })).min(1),
+  machineId: z.string().optional(),
+  departmentId: z.string().optional(),
+});
+
+export const updateIncentiveConfigSchema = createIncentiveConfigSchema.partial();
+
+export const computeIncentivesSchema = z.object({
+  period: z.string().min(1),
+  records: z.array(z.object({ employeeId: z.string().min(1), outputUnits: z.number().min(0) })).min(1),
+});
+
+export const mergeIncentivesSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2020).max(2099),
+  payrollRunId: z.string().min(1),
+});

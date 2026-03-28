@@ -511,9 +511,30 @@ export class OffboardingService {
         where: { companyId },
       });
       if (bonusConfig) {
-        const bonusPercentage = Number(bonusConfig.minBonusPercent); // minimum bonus %
-        const monthsWorkedInYear = Math.min(12, Math.max(0, lastWorkingDate.getMonth() + 1));
-        bonusProRata = (basicMonthly * bonusPercentage / 100) * monthsWorkedInYear;
+        // ── Eligibility check per Payment of Bonus Act ──
+        // 1. Salary threshold: monthly basic must be ≤ wageCeiling (default ₹7,000)
+        const wageCeiling = Number(bonusConfig.wageCeiling) || 7000;
+        const salaryEligible = basicMonthly <= wageCeiling;
+
+        // 2. Minimum working days: employee must have worked ≥ eligibilityDays (default 30) in the year
+        const eligibilityDays = Number(bonusConfig.eligibilityDays) || 30;
+        const yearStart = new Date(lastWorkingDate.getFullYear(), 0, 1);
+        const attendanceCount = await platformPrisma.attendanceRecord.count({
+          where: {
+            employeeId,
+            companyId,
+            date: { gte: yearStart, lte: lastWorkingDate },
+            status: { in: ['PRESENT', 'LATE', 'HALF_DAY'] },
+          },
+        });
+        const workingDaysEligible = attendanceCount >= eligibilityDays;
+
+        // Only compute bonus if BOTH conditions are met
+        if (salaryEligible && workingDaysEligible) {
+          const bonusPercentage = Number(bonusConfig.minBonusPercent); // minimum bonus %
+          const monthsWorkedInYear = Math.min(12, Math.max(0, lastWorkingDate.getMonth() + 1));
+          bonusProRata = (basicMonthly * bonusPercentage / 100) * monthsWorkedInYear;
+        }
       }
     }
 

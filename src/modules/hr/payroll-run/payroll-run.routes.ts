@@ -38,6 +38,7 @@ router.patch('/salary-holds/:id/release', requirePermissions(['hr:update']), con
 // ── Salary Revisions ─────────────────────────────────────────────────
 router.get('/salary-revisions', requirePermissions(['hr:read']), controller.listRevisions);
 router.post('/salary-revisions', requirePermissions(['hr:create']), controller.createRevision);
+router.post('/salary-revisions/bulk', requirePermissions(['hr:create']), controller.bulkCreateRevisions);
 router.get('/salary-revisions/:id', requirePermissions(['hr:read']), controller.getRevision);
 router.patch('/salary-revisions/:id/approve', requirePermissions(['hr:update']), controller.approveRevision);
 router.patch('/salary-revisions/:id/apply', requirePermissions(['hr:update']), controller.applyRevision);
@@ -52,11 +53,17 @@ router.patch('/statutory-filings/:id', requirePermissions(['hr:update']), contro
 router.get('/statutory/dashboard', requirePermissions(['hr:read']), controller.getStatutoryDashboard);
 
 // ── Reports ──────────────────────────────────────────────────────────
+router.get('/payroll-reports/gl-journal', requirePermissions(['hr:read']), controller.getGLJournalExport);
 router.get('/payroll-reports/salary-register', requirePermissions(['hr:read']), controller.getSalaryRegister);
 router.get('/payroll-reports/bank-file', requirePermissions(['hr:read']), controller.getBankFile);
 router.get('/payroll-reports/pf-ecr', requirePermissions(['hr:read']), controller.getPFECR);
 router.get('/payroll-reports/esi-challan', requirePermissions(['hr:read']), controller.getESIChallan);
 router.get('/payroll-reports/pt-challan', requirePermissions(['hr:read']), controller.getPTChallan);
 router.get('/payroll-reports/variance', requirePermissions(['hr:read']), controller.getVarianceReport);
+
+// ── RED-4: Form 16 & 24Q ────────────────────────────────────────
+router.post('/payroll-reports/form-16', requirePermissions(['hr:create']), controller.generateForm16);
+router.post('/payroll-reports/form-24q', requirePermissions(['hr:create']), controller.generateForm24Q);
+router.post('/payroll-reports/form-16/bulk-email', requirePermissions(['hr:update']), controller.bulkEmailForm16);
 
 export { router as payrollRunRoutes };

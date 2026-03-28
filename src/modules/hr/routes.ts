@@ -10,6 +10,9 @@ import { performanceRoutes } from './performance/performance.routes';
 import { offboardingRoutes } from './offboarding/offboarding.routes';
 import { advancedRoutes } from './advanced/advanced.routes';
 import { transferRoutes } from './transfer/transfer.routes';
+import { onboardingRoutes } from './onboarding/onboarding.routes';
+import { chatbotRoutes } from './chatbot/chatbot.routes';
+import { retentionRoutes } from './retention/retention.routes';
 
 const router = Router();
 
@@ -45,5 +48,14 @@ router.use('/', advancedRoutes);
 
 // Transfer & Promotion (with approval workflow integration)
 router.use('/', transferRoutes);
+
+// Onboarding checklist (templates, tasks, progress)
+router.use('/', onboardingRoutes);
+
+// AI HR Chatbot (conversations, messages, escalation)
+router.use('/', chatbotRoutes);
+
+// Data Retention & GDPR Controls (ORA-11)
+router.use('/', retentionRoutes);
 
 export { router as hrRoutes };

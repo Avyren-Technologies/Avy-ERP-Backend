@@ -14,6 +14,9 @@ router.post('/attendance', requirePermissions(['hr:create']), controller.createR
 router.get('/attendance/summary', requirePermissions(['hr:read']), controller.getSummary);
 router.post('/attendance/populate-month', requirePermissions(['hr:create']), controller.populateMonth);
 
+// ── Comp-Off Accrual (must be before :id) ────────────────────────────
+router.post('/attendance/process-comp-off', requirePermissions(['hr:create']), controller.processCompOff);
+
 // ── Overrides / Regularization (must be before :id) ──────────────────
 router.get('/attendance/overrides', requirePermissions(['hr:read']), controller.listOverrides);
 router.post('/attendance/overrides', requirePermissions(['hr:create']), controller.createOverride);
@@ -39,5 +42,22 @@ router.delete('/rosters/:id', requirePermissions(['hr:delete']), controller.dele
 // ── Overtime Rules ────────────────────────────────────────────────────
 router.get('/overtime-rules', requirePermissions(['hr:read']), controller.getOvertimeRules);
 router.patch('/overtime-rules', requirePermissions(['hr:update']), controller.updateOvertimeRules);
+
+// ── Biometric Devices ────────────────────────────────────────────────
+router.get('/biometric-devices', requirePermissions(['hr:read']), controller.listDevices);
+router.post('/biometric-devices', requirePermissions(['hr:create']), controller.createDevice);
+router.patch('/biometric-devices/:id', requirePermissions(['hr:update']), controller.updateDevice);
+router.delete('/biometric-devices/:id', requirePermissions(['hr:delete']), controller.deleteDevice);
+router.post('/biometric-devices/:id/test', requirePermissions(['hr:update']), controller.testDeviceConnection);
+router.post('/biometric-devices/:id/sync', requirePermissions(['hr:create']), controller.syncDeviceAttendance);
+
+// ── Shift Rotation ───────────────────────────────────────────────────
+router.get('/shift-rotations', requirePermissions(['hr:read']), controller.listRotationSchedules);
+router.post('/shift-rotations', requirePermissions(['hr:create']), controller.createRotationSchedule);
+router.post('/shift-rotations/execute', requirePermissions(['hr:update']), controller.executeShiftRotation);
+router.patch('/shift-rotations/:id', requirePermissions(['hr:update']), controller.updateRotationSchedule);
+router.delete('/shift-rotations/:id', requirePermissions(['hr:delete']), controller.deleteRotationSchedule);
+router.post('/shift-rotations/:id/assign', requirePermissions(['hr:update']), controller.assignEmployeesToRotation);
+router.delete('/shift-rotations/:id/assign/:employeeId', requirePermissions(['hr:update']), controller.removeEmployeeFromRotation);
 
 export { router as attendanceRoutes };

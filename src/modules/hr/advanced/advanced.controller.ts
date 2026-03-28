@@ -37,6 +37,13 @@ import {
   resolveGrievanceCaseSchema,
   createDisciplinaryActionSchema,
   updateDisciplinaryActionSchema,
+  createBonusBatchSchema,
+  mergeBonusBatchSchema,
+  eSignCallbackSchema,
+  createIncentiveConfigSchema,
+  updateIncentiveConfigSchema,
+  computeIncentivesSchema,
+  mergeIncentivesSchema,
 } from './advanced.validators';
 
 export class AdvancedHRController {
@@ -940,6 +947,202 @@ export class AdvancedHRController {
 
     const result = await advancedHRService.deleteDisciplinaryAction(companyId, req.params.id!);
     res.json(createSuccessResponse(result, 'Disciplinary action deleted'));
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // BONUS BATCHES
+  // ════════════════════════════════════════════════════════════════
+
+  listBonusBatches = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const opts: any = { page, limit };
+    if (req.query.status) opts.status = req.query.status as string;
+
+    const result = await advancedHRService.listBonusBatches(companyId, opts);
+    res.json(createPaginatedResponse(result.batches, result.page, result.limit, result.total, 'Bonus batches retrieved'));
+  });
+
+  getBonusBatch = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const batch = await advancedHRService.getBonusBatch(companyId, req.params.id!);
+    res.json(createSuccessResponse(batch, 'Bonus batch retrieved'));
+  });
+
+  createBonusBatch = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createBonusBatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const batch = await advancedHRService.createBonusBatch(companyId, parsed.data as any);
+    res.status(201).json(createSuccessResponse(batch, 'Bonus batch created'));
+  });
+
+  approveBonusBatch = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const batch = await advancedHRService.approveBonusBatch(companyId, req.params.id!, userId);
+    res.json(createSuccessResponse(batch, 'Bonus batch approved'));
+  });
+
+  mergeBonusBatch = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = mergeBonusBatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const batch = await advancedHRService.mergeBonusBatchToPayroll(companyId, req.params.id!, parsed.data.payrollRunId);
+    res.json(createSuccessResponse(batch, 'Bonus batch merged to payroll'));
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // E-SIGN INTEGRATION (ORA-7)
+  // ════════════════════════════════════════════════════════════════
+
+  dispatchESign = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await advancedHRService.dispatchESign(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'E-sign dispatched'));
+  });
+
+  processESignCallback = asyncHandler(async (req: Request, res: Response) => {
+    const parsed = eSignCallbackSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const letter = await advancedHRService.processESignCallback(parsed.data.signingToken, parsed.data.status);
+    res.json(createSuccessResponse(letter, `E-sign ${parsed.data.status.toLowerCase()}`));
+  });
+
+  getESignStatus = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const status = await advancedHRService.getESignStatus(companyId, req.params.id!);
+    res.json(createSuccessResponse(status, 'E-sign status retrieved'));
+  });
+
+  listPendingESignLetters = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const letters = await advancedHRService.listPendingESignLetters(companyId);
+    res.json(createSuccessResponse(letters, 'Pending e-sign letters retrieved'));
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // PRODUCTION INCENTIVE (ORA-9)
+  // ════════════════════════════════════════════════════════════════
+
+  listIncentiveConfigs = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const configs = await advancedHRService.listIncentiveConfigs(companyId);
+    res.json(createSuccessResponse(configs, 'Production incentive configs retrieved'));
+  });
+
+  getIncentiveConfig = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const config = await advancedHRService.getIncentiveConfig(companyId, req.params.id!);
+    res.json(createSuccessResponse(config, 'Production incentive config retrieved'));
+  });
+
+  createIncentiveConfig = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createIncentiveConfigSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const config = await advancedHRService.createIncentiveConfig(companyId, parsed.data);
+    res.status(201).json(createSuccessResponse(config, 'Production incentive config created'));
+  });
+
+  updateIncentiveConfig = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateIncentiveConfigSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const config = await advancedHRService.updateIncentiveConfig(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(config, 'Production incentive config updated'));
+  });
+
+  deleteIncentiveConfig = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await advancedHRService.deleteIncentiveConfig(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Production incentive config deleted'));
+  });
+
+  computeIncentives = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = computeIncentivesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await advancedHRService.computeIncentives(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(result, 'Incentives computed'));
+  });
+
+  mergeIncentivesToPayroll = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = mergeIncentivesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await advancedHRService.mergeIncentivesToPayroll(
+      companyId, req.params.id!, parsed.data.month, parsed.data.year, parsed.data.payrollRunId,
+    );
+    res.json(createSuccessResponse(result, 'Incentives merged to payroll'));
+  });
+
+  listIncentiveRecords = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const opts: any = {};
+    if (req.query.configId) opts.configId = req.query.configId as string;
+    if (req.query.employeeId) opts.employeeId = req.query.employeeId as string;
+    if (req.query.status) opts.status = req.query.status as string;
+    if (req.query.month) opts.month = Number(req.query.month);
+    if (req.query.year) opts.year = Number(req.query.year);
+
+    const records = await advancedHRService.listIncentiveRecords(companyId, opts);
+    res.json(createSuccessResponse(records, 'Production incentive records retrieved'));
   });
 }
 

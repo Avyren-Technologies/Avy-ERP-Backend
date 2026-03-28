@@ -10,6 +10,9 @@ import {
   createSalaryRevisionSchema,
   createStatutoryFilingSchema,
   updateStatutoryFilingSchema,
+  bulkCreateSalaryRevisionsSchema,
+  generateForm16Schema,
+  generateForm24QSchema,
 } from './payroll-run.validators';
 
 export class PayrollRunController {
@@ -375,8 +378,38 @@ export class PayrollRunController {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
+  // ORA-5: Bulk Salary Revisions
+  // ══════════════════════════════════════════════════════════════════════════
+
+  bulkCreateRevisions = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = bulkCreateSalaryRevisionsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await payrollRunService.bulkCreateRevisions(companyId, parsed.data.revisions);
+    res.status(201).json(createSuccessResponse(result, 'Bulk salary revisions processed'));
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Reports
   // ══════════════════════════════════════════════════════════════════════════
+
+  // ORA-12: GL Journal Export
+  getGLJournalExport = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const month = Number(req.query.month);
+    const year = Number(req.query.year);
+    if (!month || !year) throw ApiError.badRequest('month and year query params are required');
+
+    const result = await payrollRunService.getGLJournalExport(companyId, month, year);
+    res.json(createSuccessResponse(result, 'GL journal export retrieved'));
+  });
 
   getSalaryRegister = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
@@ -447,6 +480,49 @@ export class PayrollRunController {
 
     const result = await payrollRunService.getVarianceReport(companyId, month, year);
     res.json(createSuccessResponse(result, 'Variance report retrieved'));
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RED-4: Form 16 & 24Q
+  // ══════════════════════════════════════════════════════════════════════════
+
+  generateForm16 = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = generateForm16Schema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await payrollRunService.generateForm16(companyId, parsed.data.financialYear);
+    res.status(201).json(createSuccessResponse(result, 'Form 16 generated'));
+  });
+
+  generateForm24Q = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = generateForm24QSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await payrollRunService.generateForm24Q(companyId, parsed.data.quarter, parsed.data.financialYear);
+    res.status(201).json(createSuccessResponse(result, 'Form 24Q generated'));
+  });
+
+  bulkEmailForm16 = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = generateForm16Schema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await payrollRunService.bulkEmailForm16(companyId, parsed.data.financialYear);
+    res.json(createSuccessResponse(result, 'Form 16 bulk email dispatched'));
   });
 }
 

@@ -63,3 +63,28 @@ export const updateStatutoryFilingSchema = z.object({
   filedBy: z.string().optional(),
   details: z.record(z.any()).optional(),
 });
+
+// ── RED-4: Form 16 & 24Q ───────────────────────────────────────────
+
+export const generateForm16Schema = z.object({
+  financialYear: z.string().regex(/^\d{4}-\d{2}$/, 'Format: YYYY-YY (e.g., 2025-26)'),
+});
+
+export const generateForm24QSchema = z.object({
+  quarter: z.number().int().min(1).max(4),
+  financialYear: z.string().regex(/^\d{4}-\d{2}$/, 'Format: YYYY-YY'),
+});
+
+// ── ORA-5: Bulk Salary Revisions ───────────────────────────────────
+
+export const bulkCreateSalaryRevisionsSchema = z.object({
+  revisions: z.array(
+    z.object({
+      employeeId: z.string().min(1, 'Employee ID is required'),
+      newCtc: z.number().positive('New CTC must be positive'),
+      effectiveDate: z.string().min(1, 'Effective date is required'),
+      incrementPercent: z.number().min(0).max(1000).optional(),
+      newComponents: z.record(z.number()).optional(),
+    })
+  ).min(1, 'At least one revision is required'),
+});

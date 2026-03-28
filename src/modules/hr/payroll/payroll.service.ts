@@ -24,6 +24,12 @@ interface LoanListOptions extends ListOptions {
   status?: string;
 }
 
+interface TravelAdvanceListOptions extends ListOptions {
+  employeeId?: string;
+  status?: string;
+  isSettled?: boolean;
+}
+
 // Default India FY 2025-26 tax slabs
 const DEFAULT_OLD_REGIME_SLABS = [
   { fromAmount: 0, toAmount: 250000, rate: 0 },
@@ -1245,6 +1251,198 @@ export class PayrollConfigService {
         },
       },
     });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Travel Advance
+  // ────────────────────────────────────────────────────────────────────
+
+  async createTravelAdvance(companyId: string, data: any) {
+    // Validate employee belongs to company
+    const employee = await platformPrisma.employee.findUnique({
+      where: { id: data.employeeId },
+      select: { id: true, companyId: true },
+    });
+    if (!employee || employee.companyId !== companyId) {
+      throw ApiError.badRequest('Employee not found in this company');
+    }
+
+    // Find active TRAVEL_ADVANCE loan policy (required by schema — create a default if none)
+    let policy = await platformPrisma.loanPolicy.findFirst({
+      where: { companyId, loanType: 'TRAVEL_ADVANCE', isActive: true },
+    });
+
+    if (!policy) {
+      // Auto-create a default travel advance policy
+      policy = await platformPrisma.loanPolicy.create({
+        data: {
+          companyId,
+          name: 'Travel Advance',
+          code: 'TRAVEL_ADV',
+          loanType: 'TRAVEL_ADVANCE',
+          interestRate: 0,
+          isActive: true,
+        },
+      });
+    }
+
+    const amount = Number(data.amount);
+
+    const loan = await platformPrisma.loanRecord.create({
+      data: {
+        companyId,
+        employeeId: data.employeeId,
+        policyId: policy.id,
+        loanType: 'TRAVEL_ADVANCE',
+        amount,
+        tenure: 1,
+        emiAmount: 0,
+        interestRate: 0,
+        outstanding: Math.round(amount * 100) / 100,
+        status: 'PENDING',
+      },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+            department: { select: { id: true, name: true } },
+          },
+        },
+        policy: {
+          select: { id: true, name: true, code: true },
+        },
+      },
+    });
+
+    // Wire approval workflow
+    await essService.createRequest(companyId, {
+      requesterId: data.employeeId,
+      entityType: 'LoanRecord',
+      entityId: loan.id,
+      triggerEvent: 'LOAN_APPLICATION',
+      data: { amount, loanType: 'TRAVEL_ADVANCE', tripPurpose: data.tripPurpose },
+    });
+
+    return loan;
+  }
+
+  async settleTravelAdvance(companyId: string, loanId: string, expenseClaimId: string) {
+    // Validate the loan exists, is TRAVEL_ADVANCE, belongs to company
+    const loan = await platformPrisma.loanRecord.findUnique({ where: { id: loanId } });
+    if (!loan || loan.companyId !== companyId) {
+      throw ApiError.notFound('Loan record not found');
+    }
+    if (loan.loanType !== 'TRAVEL_ADVANCE') {
+      throw ApiError.badRequest('Loan is not a travel advance');
+    }
+    if (loan.isSettled) {
+      throw ApiError.badRequest('Travel advance is already settled');
+    }
+
+    // Validate the expense claim exists, is APPROVED, belongs to company
+    const claim = await platformPrisma.expenseClaim.findUnique({ where: { id: expenseClaimId } });
+    if (!claim || claim.companyId !== companyId) {
+      throw ApiError.notFound('Expense claim not found');
+    }
+    if (claim.status !== 'APPROVED') {
+      throw ApiError.badRequest('Expense claim must be APPROVED before settlement');
+    }
+
+    const advanceAmount = Math.round(Number(loan.amount) * 100) / 100;
+    const claimAmount = Math.round(Number(claim.amount) * 100) / 100;
+    const difference = Math.round((advanceAmount - claimAmount) * 100) / 100;
+
+    let outcome: 'EMPLOYEE_OWES' | 'COMPANY_OWES' | 'EXACT';
+    let remainingOutstanding: number;
+
+    if (difference > 0) {
+      outcome = 'EMPLOYEE_OWES';
+      remainingOutstanding = difference;
+    } else if (difference < 0) {
+      outcome = 'COMPANY_OWES';
+      remainingOutstanding = 0;
+    } else {
+      outcome = 'EXACT';
+      remainingOutstanding = 0;
+    }
+
+    await platformPrisma.$transaction(async (tx) => {
+      // Update the loan record
+      await tx.loanRecord.update({
+        where: { id: loanId },
+        data: {
+          isSettled: outcome !== 'EMPLOYEE_OWES',
+          settlementClaimId: expenseClaimId,
+          outstanding: remainingOutstanding,
+          status: remainingOutstanding > 0 ? 'ACTIVE' : 'CLOSED',
+        },
+      });
+
+      if (outcome === 'COMPANY_OWES') {
+        // Company owes employee the remaining amount on the claim
+        await tx.expenseClaim.update({
+          where: { id: expenseClaimId },
+          data: {
+            amount: Math.abs(difference),
+          },
+        });
+      } else {
+        // Employee owes or exact — mark claim as paid
+        await tx.expenseClaim.update({
+          where: { id: expenseClaimId },
+          data: {
+            paidAt: new Date(),
+          },
+        });
+      }
+    });
+
+    return {
+      advanceAmount,
+      claimAmount,
+      difference,
+      outcome,
+      remainingOutstanding,
+    };
+  }
+
+  async listTravelAdvances(companyId: string, options: TravelAdvanceListOptions = {}) {
+    const { page = 1, limit = 25, employeeId, status, isSettled } = options;
+    const offset = (page - 1) * limit;
+
+    const where: any = { companyId, loanType: 'TRAVEL_ADVANCE' };
+    if (employeeId) where.employeeId = employeeId;
+    if (status) where.status = status.toUpperCase();
+    if (isSettled !== undefined) where.isSettled = isSettled;
+
+    const [advances, total] = await Promise.all([
+      platformPrisma.loanRecord.findMany({
+        where,
+        include: {
+          employee: {
+            select: {
+              id: true,
+              employeeId: true,
+              firstName: true,
+              lastName: true,
+              department: { select: { id: true, name: true } },
+            },
+          },
+          policy: {
+            select: { id: true, name: true, code: true },
+          },
+        },
+        skip: offset,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      platformPrisma.loanRecord.count({ where }),
+    ]);
+
+    return { advances, total, page, limit };
   }
 
   // ────────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ import {
   createDocumentSchema,
   updateDocumentSchema,
 } from './employee.validators';
+import { probationReviewSchema } from '../onboarding/onboarding.validators';
 
 export class EmployeeController {
   // ── Employee CRUD ─────────────────────────────────────────────────────
@@ -310,6 +311,44 @@ export class EmployeeController {
 
     const timeline = await employeeService.getTimeline(req.params.id!);
     res.json(createSuccessResponse(timeline, 'Timeline retrieved'));
+  });
+
+  // ── Probation (RED-7) ──────────────────────────────────────────────
+
+  listProbationDue = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employees = await employeeService.listProbationDue(companyId);
+    res.json(createSuccessResponse(employees, 'Probation-due employees retrieved'));
+  });
+
+  submitProbationReview = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = probationReviewSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    const review = await employeeService.submitProbationReview(
+      companyId,
+      req.params.id!,
+      parsed.data as any,
+      req.user?.id,
+    );
+    res.status(201).json(createSuccessResponse(review, 'Probation review submitted'));
+  });
+
+  // ── Org Chart (ORA-10) ─────────────────────────────────────────────
+
+  getOrgChart = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const orgChart = await employeeService.getOrgChart(companyId);
+    res.json(createSuccessResponse(orgChart, 'Org chart retrieved'));
   });
 }
 

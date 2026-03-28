@@ -1105,7 +1105,7 @@ export class PerformanceService {
       throw ApiError.notFound('Skill mapping not found');
     }
 
-    return platformPrisma.skillMapping.update({
+    const updated = await platformPrisma.skillMapping.update({
       where: { id },
       data: {
         ...(data.currentLevel !== undefined && { currentLevel: data.currentLevel }),
@@ -1116,6 +1116,56 @@ export class PerformanceService {
       include: {
         employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
         skill: { select: { id: true, name: true, category: true } },
+      },
+    });
+
+    // Auto-nominate training if skill gap detected
+    const newLevel = data.currentLevel ?? mapping.currentLevel;
+    await this.checkAndAutoNominateTraining(companyId, mapping.employeeId, mapping.skillId, newLevel);
+
+    return updated;
+  }
+
+  async checkAndAutoNominateTraining(companyId: string, employeeId: string, skillId: string, currentLevel: number) {
+    // 1. Find the skill mapping for this employee + skill
+    const mapping = await platformPrisma.skillMapping.findFirst({
+      where: { employeeId, skillId },
+    });
+    if (!mapping) return null;
+
+    const requiredLevel = (mapping as any).requiredLevel ?? 3;
+    if (currentLevel >= requiredLevel) return null; // No gap
+
+    // 2. Find training linked to this skill
+    // TrainingCatalogue has linkedSkills (Json array of skill IDs)
+    const trainings = await platformPrisma.trainingCatalogue.findMany({
+      where: { companyId, isActive: true },
+    });
+
+    const matchingTraining = trainings.find(t => {
+      const linked = t.linkedSkillIds as string[];
+      return Array.isArray(linked) && linked.includes(skillId);
+    });
+
+    if (!matchingTraining) return null;
+
+    // 3. Check if already nominated
+    const existing = await platformPrisma.trainingNomination.findFirst({
+      where: {
+        employeeId,
+        trainingId: matchingTraining.id,
+        status: { in: ['NOMINATED', 'ENROLLED'] },
+      },
+    });
+    if (existing) return null;
+
+    // 4. Auto-create nomination
+    return platformPrisma.trainingNomination.create({
+      data: {
+        companyId,
+        employeeId,
+        trainingId: matchingTraining.id,
+        status: 'NOMINATED',
       },
     });
   }

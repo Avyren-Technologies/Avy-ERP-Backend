@@ -397,7 +397,7 @@ export class ESSService {
           await platformPrisma.salaryRevision.update({
             where: { id: entityId },
             data: {
-              status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+              status: decision === 'APPROVED' ? 'APPROVED' : 'DRAFT',
               ...(decision === 'APPROVED' && { approvedAt: new Date() }),
             },
           });
@@ -407,7 +407,7 @@ export class ESSService {
           if (decision === 'APPROVED') {
             await platformPrisma.exitRequest.update({
               where: { id: entityId },
-              data: { status: 'APPROVED' },
+              data: { status: 'NOTICE_PERIOD' },
             });
           } else {
             // On rejection, revert employee status
@@ -423,7 +423,7 @@ export class ESSService {
             }
             await platformPrisma.exitRequest.update({
               where: { id: entityId },
-              data: { status: 'REJECTED' },
+              data: { status: 'INITIATED' },
             });
           }
           break;
@@ -1208,7 +1208,7 @@ export class ESSService {
   }
 
   async regularizeAttendance(companyId: string, employeeId: string, data: any) {
-    // Verify employee
+    // 1. Verify employee belongs to company
     const employee = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
       select: { id: true, companyId: true, employeeId: true },
@@ -1217,7 +1217,13 @@ export class ESSService {
       throw ApiError.notFound('Employee not found');
     }
 
-    // Verify attendance record belongs to this employee
+    // 2. Check ESSConfig.attendanceRegularization is enabled
+    const essConfig = await this.getESSConfig(companyId);
+    if (!essConfig.attendanceRegularization) {
+      throw ApiError.badRequest('Attendance regularization is not enabled for your company');
+    }
+
+    // 3. Find attendance record for the date (must belong to this employee)
     const record = await platformPrisma.attendanceRecord.findUnique({
       where: { id: data.attendanceRecordId },
     });
@@ -1225,7 +1231,22 @@ export class ESSService {
       throw ApiError.badRequest('Attendance record not found or does not belong to this employee');
     }
 
-    // Create override
+    // 4. Check payroll lock (payrollRun for that month must be DRAFT or not exist)
+    const recordDate = new Date(record.date);
+    const recordMonth = recordDate.getMonth() + 1;
+    const recordYear = recordDate.getFullYear();
+
+    const payrollRun = await platformPrisma.payrollRun.findUnique({
+      where: { companyId_month_year: { companyId, month: recordMonth, year: recordYear } },
+    });
+
+    if (payrollRun && payrollRun.status !== 'DRAFT') {
+      throw ApiError.badRequest(
+        `Cannot regularize: attendance for ${recordMonth}/${recordYear} is locked for payroll processing (status: ${payrollRun.status})`
+      );
+    }
+
+    // 5. Create AttendanceOverride with requestedBy = employeeId, status = PENDING
     const override = await platformPrisma.attendanceOverride.create({
       data: {
         companyId,
@@ -1239,7 +1260,7 @@ export class ESSService {
       },
     });
 
-    // Create approval request if workflow exists
+    // 6. Wire into approval workflow via createRequest (Employee -> Manager)
     await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'AttendanceOverride',
@@ -1252,6 +1273,7 @@ export class ESSService {
       },
     });
 
+    // 7. Return the override
     return override;
   }
 

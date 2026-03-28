@@ -9,6 +9,7 @@ import {
   attendanceRulesSchema,
   createOverrideSchema,
   approveOverrideSchema,
+  processCompOffSchema,
   createHolidaySchema,
   updateHolidaySchema,
   cloneHolidaysSchema,
@@ -16,6 +17,12 @@ import {
   updateRosterSchema,
   overtimeRulesSchema,
   populateMonthSchema,
+  createDeviceSchema,
+  updateDeviceSchema,
+  syncDeviceSchema,
+  createRotationScheduleSchema,
+  updateRotationScheduleSchema,
+  assignRotationSchema,
 } from './attendance.validators';
 
 export class AttendanceController {
@@ -116,6 +123,21 @@ export class AttendanceController {
 
     const rules = await attendanceService.updateRules(companyId, parsed.data);
     res.json(createSuccessResponse(rules, 'Attendance rules updated'));
+  });
+
+  // ── Comp-Off Accrual ───────────────────────────────────────────────
+
+  processCompOff = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = processCompOffSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await attendanceService.processCompOffAccrual(companyId, parsed.data.month, parsed.data.year);
+    res.json(createSuccessResponse(result, result.message));
   });
 
   // ── Overrides / Regularization ──────────────────────────────────────
@@ -291,6 +313,144 @@ export class AttendanceController {
 
     const rules = await attendanceService.updateOvertimeRules(companyId, parsed.data);
     res.json(createSuccessResponse(rules, 'Overtime rules updated'));
+  });
+
+  // ── Biometric Devices ────────────────────────────────────────────────
+
+  listDevices = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const devices = await attendanceService.listDevices(companyId);
+    res.json(createSuccessResponse(devices, 'Biometric devices retrieved'));
+  });
+
+  createDevice = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createDeviceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const device = await attendanceService.createDevice(companyId, parsed.data);
+    res.status(201).json(createSuccessResponse(device, 'Biometric device created'));
+  });
+
+  updateDevice = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateDeviceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const device = await attendanceService.updateDevice(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(device, 'Biometric device updated'));
+  });
+
+  deleteDevice = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await attendanceService.deleteDevice(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Biometric device deleted'));
+  });
+
+  testDeviceConnection = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await attendanceService.testDeviceConnection(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, result.message));
+  });
+
+  syncDeviceAttendance = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = syncDeviceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await attendanceService.syncDeviceAttendance(companyId, req.params.id!, parsed.data.records);
+    res.status(201).json(createSuccessResponse(result, `Synced ${result.synced}/${result.total} records`));
+  });
+
+  // ── Shift Rotation ───────────────────────────────────────────────────
+
+  listRotationSchedules = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const schedules = await attendanceService.listRotationSchedules(companyId);
+    res.json(createSuccessResponse(schedules, 'Shift rotation schedules retrieved'));
+  });
+
+  createRotationSchedule = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createRotationScheduleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const schedule = await attendanceService.createRotationSchedule(companyId, parsed.data);
+    res.status(201).json(createSuccessResponse(schedule, 'Shift rotation schedule created'));
+  });
+
+  updateRotationSchedule = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateRotationScheduleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const schedule = await attendanceService.updateRotationSchedule(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(schedule, 'Shift rotation schedule updated'));
+  });
+
+  deleteRotationSchedule = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await attendanceService.deleteRotationSchedule(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Shift rotation schedule deleted'));
+  });
+
+  assignEmployeesToRotation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = assignRotationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await attendanceService.assignEmployeesToRotation(companyId, req.params.id!, parsed.data.employeeIds);
+    res.json(createSuccessResponse(result, `${result.assigned} employee(s) assigned to rotation`));
+  });
+
+  removeEmployeeFromRotation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await attendanceService.removeEmployeeFromRotation(companyId, req.params.id!, req.params.employeeId!);
+    res.json(createSuccessResponse(result, 'Employee removed from rotation'));
+  });
+
+  executeShiftRotation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await attendanceService.executeShiftRotation(companyId);
+    res.json(createSuccessResponse(result, `Rotation executed: ${result.schedulesProcessed} schedules, ${result.employeesRotated} employees rotated`));
   });
 }
 

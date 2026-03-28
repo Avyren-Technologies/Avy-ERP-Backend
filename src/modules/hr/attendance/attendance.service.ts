@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, AttendanceStatus, AttendanceSource } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 
@@ -291,7 +291,7 @@ export class AttendanceService {
       where: {
         companyId,
         date: { gte: dayStart, lte: dayEnd },
-        employee: { departmentId: { not: null } },
+        // departmentId is required on Employee, so all employees have a department
       },
       select: {
         status: true,
@@ -384,8 +384,8 @@ export class AttendanceService {
       companyId: string;
       employeeId: string;
       date: Date;
-      status: string;
-      source: string;
+      status: AttendanceStatus;
+      source: AttendanceSource;
     }> = [];
 
     for (let day = 1; day <= daysInMonth; day++) {
@@ -397,7 +397,7 @@ export class AttendanceService {
 
       if (!isHoliday && !isWeekOff) continue;
 
-      const status = isHoliday ? 'HOLIDAY' : 'WEEK_OFF';
+      const status: AttendanceStatus = isHoliday ? 'HOLIDAY' : 'WEEK_OFF';
 
       for (const emp of employees) {
         const key = `${emp.id}_${dateStr}`;
@@ -408,7 +408,7 @@ export class AttendanceService {
           employeeId: emp.id,
           date,
           status,
-          source: 'MANUAL',
+          source: 'MANUAL' as AttendanceSource,
         });
       }
     }
@@ -949,6 +949,467 @@ export class AttendanceService {
         ...(data.approvalRequired !== undefined && { approvalRequired: data.approvalRequired }),
       },
     });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Comp-Off Auto-Accrual
+  // ────────────────────────────────────────────────────────────────────
+
+  async processCompOffAccrual(companyId: string, month: number, year: number) {
+    // 1. Find the COMPENSATORY leave type
+    const compOffType = await platformPrisma.leaveType.findFirst({
+      where: { companyId, category: 'COMPENSATORY', isActive: true },
+    });
+
+    if (!compOffType) {
+      return { accrued: 0, message: 'No active COMPENSATORY leave type found for this company' };
+    }
+
+    // 2. Get all holiday dates for the month
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 0); // last day of month
+
+    const holidays = await platformPrisma.holidayCalendar.findMany({
+      where: {
+        companyId,
+        date: { gte: monthStart, lte: monthEnd },
+      },
+      select: { date: true },
+    });
+
+    const holidayDates = new Set(
+      holidays.map((h) => h.date.toISOString().split('T')[0])
+    );
+
+    // 3. Get the company's default roster to identify week-off days
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+    });
+    const weekOff1 = roster?.weekOff1 ?? null;
+    const weekOff2 = roster?.weekOff2 ?? null;
+
+    // 4. Build a Set of all off-day dates (holidays + week-offs) for the month
+    const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const offDayDates = new Set<string>();
+
+    const daysInMonth = monthEnd.getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month - 1, day);
+      const dateStr = date.toISOString().split('T')[0]!;
+      const dow = dayOfWeek[date.getDay()];
+
+      if (holidayDates.has(dateStr) || dow === weekOff1 || dow === weekOff2) {
+        offDayDates.add(dateStr);
+      }
+    }
+
+    if (offDayDates.size === 0) {
+      return { accrued: 0, message: 'No off-days (holidays or week-offs) found for this month' };
+    }
+
+    // 5. Find attendance records where employees were PRESENT or LATE on off-day dates
+    const offDayDateArray = Array.from(offDayDates).map((d) => new Date(d));
+
+    const presentOnOffDays = await platformPrisma.attendanceRecord.findMany({
+      where: {
+        companyId,
+        date: { in: offDayDateArray },
+        status: { in: ['PRESENT', 'LATE'] },
+      },
+      select: {
+        id: true,
+        employeeId: true,
+        workedHours: true,
+      },
+    });
+
+    if (presentOnOffDays.length === 0) {
+      return { accrued: 0, message: 'No employees found working on off-days this month' };
+    }
+
+    // 6. Get attendance rules for half-day threshold
+    const rules = await this.getRules(companyId);
+    const fullDayThreshold = rules.fullDayThresholdHours ? Number(rules.fullDayThresholdHours) : 8;
+
+    // 7. For each record, credit comp-off leave balance
+    let accruedCount = 0;
+
+    for (const record of presentOnOffDays) {
+      const workedHours = record.workedHours ? Number(record.workedHours) : 0;
+      const credit = workedHours >= fullDayThreshold ? 1 : 0.5;
+
+      // Find or create leave balance for this employee + comp-off type + year
+      const existingBalance = await platformPrisma.leaveBalance.findUnique({
+        where: {
+          employeeId_leaveTypeId_year: {
+            employeeId: record.employeeId,
+            leaveTypeId: compOffType.id,
+            year,
+          },
+        },
+      });
+
+      if (existingBalance) {
+        await platformPrisma.leaveBalance.update({
+          where: { id: existingBalance.id },
+          data: {
+            accrued: { increment: credit },
+            balance: { increment: credit },
+          },
+        });
+      } else {
+        await platformPrisma.leaveBalance.create({
+          data: {
+            companyId,
+            employeeId: record.employeeId,
+            leaveTypeId: compOffType.id,
+            year,
+            accrued: credit,
+            taken: 0,
+            balance: credit,
+          },
+        });
+      }
+
+      accruedCount++;
+    }
+
+    return {
+      accrued: accruedCount,
+      message: `Comp-off accrual processed: ${accruedCount} record(s) credited for ${month}/${year}`,
+    };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Biometric Devices (YEL-7)
+  // ────────────────────────────────────────────────────────────────────
+
+  async listDevices(companyId: string) {
+    return platformPrisma.biometricDevice.findMany({
+      where: { companyId },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createDevice(companyId: string, data: any) {
+    // Validate unique deviceId per company
+    const existing = await platformPrisma.biometricDevice.findUnique({
+      where: { companyId_deviceId: { companyId, deviceId: data.deviceId } },
+    });
+    if (existing) {
+      throw ApiError.conflict(`Device with ID "${data.deviceId}" already exists`);
+    }
+
+    return platformPrisma.biometricDevice.create({
+      data: {
+        companyId,
+        name: data.name,
+        brand: data.brand,
+        deviceId: data.deviceId,
+        ipAddress: n(data.ipAddress),
+        port: n(data.port),
+        syncMode: data.syncMode ?? 'MANUAL',
+        syncIntervalMin: n(data.syncIntervalMin),
+        locationId: n(data.locationId),
+        status: 'ACTIVE',
+      },
+    });
+  }
+
+  async updateDevice(companyId: string, id: string, data: any) {
+    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
+    if (!device || device.companyId !== companyId) {
+      throw ApiError.notFound('Biometric device not found');
+    }
+
+    // If deviceId is changing, check uniqueness
+    if (data.deviceId && data.deviceId !== device.deviceId) {
+      const existing = await platformPrisma.biometricDevice.findUnique({
+        where: { companyId_deviceId: { companyId, deviceId: data.deviceId } },
+      });
+      if (existing) {
+        throw ApiError.conflict(`Device with ID "${data.deviceId}" already exists`);
+      }
+    }
+
+    return platformPrisma.biometricDevice.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.brand !== undefined && { brand: data.brand }),
+        ...(data.deviceId !== undefined && { deviceId: data.deviceId }),
+        ...(data.ipAddress !== undefined && { ipAddress: n(data.ipAddress) }),
+        ...(data.port !== undefined && { port: n(data.port) }),
+        ...(data.syncMode !== undefined && { syncMode: data.syncMode }),
+        ...(data.syncIntervalMin !== undefined && { syncIntervalMin: n(data.syncIntervalMin) }),
+        ...(data.locationId !== undefined && { locationId: n(data.locationId) }),
+      },
+    });
+  }
+
+  async deleteDevice(companyId: string, id: string) {
+    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
+    if (!device || device.companyId !== companyId) {
+      throw ApiError.notFound('Biometric device not found');
+    }
+
+    await platformPrisma.biometricDevice.delete({ where: { id } });
+    return { message: 'Biometric device deleted' };
+  }
+
+  async testDeviceConnection(companyId: string, id: string) {
+    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
+    if (!device || device.companyId !== companyId) {
+      throw ApiError.notFound('Biometric device not found');
+    }
+
+    // Ping placeholder — mark ACTIVE if ipAddress exists, OFFLINE otherwise
+    const newStatus = device.ipAddress ? 'ACTIVE' : 'OFFLINE';
+
+    const updated = await platformPrisma.biometricDevice.update({
+      where: { id },
+      data: { status: newStatus },
+    });
+
+    return { device: updated, status: newStatus, message: `Device is ${newStatus}` };
+  }
+
+  async syncDeviceAttendance(companyId: string, id: string, records: any[]) {
+    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
+    if (!device || device.companyId !== companyId) {
+      throw ApiError.notFound('Biometric device not found');
+    }
+
+    let synced = 0;
+    let errors = 0;
+    const errorDetails: Array<{ index: number; employeeId: string; error: string }> = [];
+
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i];
+      try {
+        await this.createRecord(companyId, {
+          employeeId: rec.employeeId,
+          date: rec.date,
+          punchIn: rec.punchIn,
+          punchOut: rec.punchOut,
+          status: 'PRESENT',
+          source: 'BIOMETRIC',
+          locationId: device.locationId,
+        });
+        synced++;
+      } catch (err: any) {
+        errors++;
+        errorDetails.push({
+          index: i,
+          employeeId: rec.employeeId,
+          error: err.message ?? 'Unknown error',
+        });
+      }
+    }
+
+    // Update device sync metadata
+    await platformPrisma.biometricDevice.update({
+      where: { id },
+      data: {
+        lastSyncAt: new Date(),
+        lastSyncStatus: errors === 0 ? 'SUCCESS' : synced > 0 ? 'PARTIAL' : 'FAILED',
+      },
+    });
+
+    return { synced, errors, total: records.length, errorDetails };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Shift Rotation (YEL-6)
+  // ────────────────────────────────────────────────────────────────────
+
+  async listRotationSchedules(companyId: string) {
+    const schedules = await platformPrisma.shiftRotationSchedule.findMany({
+      where: { companyId },
+      include: {
+        _count: { select: { assignments: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return schedules.map((s) => ({
+      ...s,
+      assignmentCount: s._count.assignments,
+      _count: undefined,
+    }));
+  }
+
+  async createRotationSchedule(companyId: string, data: any) {
+    // Validate unique name per company
+    const existing = await platformPrisma.shiftRotationSchedule.findUnique({
+      where: { companyId_name: { companyId, name: data.name } },
+    });
+    if (existing) {
+      throw ApiError.conflict(`Rotation schedule "${data.name}" already exists`);
+    }
+
+    return platformPrisma.shiftRotationSchedule.create({
+      data: {
+        companyId,
+        name: data.name,
+        rotationPattern: data.rotationPattern,
+        shifts: data.shifts,
+        effectiveFrom: new Date(data.effectiveFrom),
+        effectiveTo: data.effectiveTo ? new Date(data.effectiveTo) : null,
+        isActive: true,
+      },
+    });
+  }
+
+  async updateRotationSchedule(companyId: string, id: string, data: any) {
+    const schedule = await platformPrisma.shiftRotationSchedule.findUnique({ where: { id } });
+    if (!schedule || schedule.companyId !== companyId) {
+      throw ApiError.notFound('Shift rotation schedule not found');
+    }
+
+    // If name is changing, check uniqueness
+    if (data.name && data.name !== schedule.name) {
+      const existing = await platformPrisma.shiftRotationSchedule.findUnique({
+        where: { companyId_name: { companyId, name: data.name } },
+      });
+      if (existing) {
+        throw ApiError.conflict(`Rotation schedule "${data.name}" already exists`);
+      }
+    }
+
+    return platformPrisma.shiftRotationSchedule.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.rotationPattern !== undefined && { rotationPattern: data.rotationPattern }),
+        ...(data.shifts !== undefined && { shifts: data.shifts }),
+        ...(data.effectiveFrom !== undefined && { effectiveFrom: new Date(data.effectiveFrom) }),
+        ...(data.effectiveTo !== undefined && { effectiveTo: data.effectiveTo ? new Date(data.effectiveTo) : null }),
+        ...(data.isActive !== undefined && { isActive: data.isActive }),
+      },
+    });
+  }
+
+  async deleteRotationSchedule(companyId: string, id: string) {
+    const schedule = await platformPrisma.shiftRotationSchedule.findUnique({ where: { id } });
+    if (!schedule || schedule.companyId !== companyId) {
+      throw ApiError.notFound('Shift rotation schedule not found');
+    }
+
+    // Cascade delete assignments then the schedule
+    await platformPrisma.shiftRotationAssignment.deleteMany({ where: { scheduleId: id } });
+    await platformPrisma.shiftRotationSchedule.delete({ where: { id } });
+    return { message: 'Shift rotation schedule deleted' };
+  }
+
+  async assignEmployeesToRotation(companyId: string, scheduleId: string, employeeIds: string[]) {
+    const schedule = await platformPrisma.shiftRotationSchedule.findUnique({ where: { id: scheduleId } });
+    if (!schedule || schedule.companyId !== companyId) {
+      throw ApiError.notFound('Shift rotation schedule not found');
+    }
+
+    const result = await platformPrisma.shiftRotationAssignment.createMany({
+      data: employeeIds.map((employeeId) => ({
+        companyId,
+        scheduleId,
+        employeeId,
+      })),
+      skipDuplicates: true,
+    });
+
+    return { assigned: result.count };
+  }
+
+  async removeEmployeeFromRotation(companyId: string, scheduleId: string, employeeId: string) {
+    const schedule = await platformPrisma.shiftRotationSchedule.findUnique({ where: { id: scheduleId } });
+    if (!schedule || schedule.companyId !== companyId) {
+      throw ApiError.notFound('Shift rotation schedule not found');
+    }
+
+    const assignment = await platformPrisma.shiftRotationAssignment.findUnique({
+      where: { scheduleId_employeeId: { scheduleId, employeeId } },
+    });
+    if (!assignment) {
+      throw ApiError.notFound('Assignment not found');
+    }
+
+    await platformPrisma.shiftRotationAssignment.delete({
+      where: { scheduleId_employeeId: { scheduleId, employeeId } },
+    });
+    return { message: 'Employee removed from rotation' };
+  }
+
+  async executeShiftRotation(companyId: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Fetch all active schedules where effectiveFrom <= today
+    const schedules = await platformPrisma.shiftRotationSchedule.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        effectiveFrom: { lte: today },
+        OR: [
+          { effectiveTo: null },
+          { effectiveTo: { gte: today } },
+        ],
+      },
+      include: {
+        assignments: { select: { employeeId: true } },
+      },
+    });
+
+    let schedulesProcessed = 0;
+    let employeesRotated = 0;
+
+    for (const schedule of schedules) {
+      const shifts = schedule.shifts as Array<{ shiftId: string; weekNumber: number }>;
+      if (!shifts || shifts.length < 2) continue;
+
+      const effectiveFrom = new Date(schedule.effectiveFrom);
+      effectiveFrom.setHours(0, 0, 0, 0);
+
+      const msSinceStart = today.getTime() - effectiveFrom.getTime();
+      const weeksSinceStart = Math.floor(msSinceStart / (7 * 24 * 60 * 60 * 1000));
+
+      let shiftIndex: number;
+      switch (schedule.rotationPattern) {
+        case 'WEEKLY':
+          shiftIndex = weeksSinceStart % shifts.length;
+          break;
+        case 'FORTNIGHTLY':
+          shiftIndex = Math.floor(weeksSinceStart / 2) % shifts.length;
+          break;
+        case 'MONTHLY': {
+          const monthsSinceStart =
+            (today.getFullYear() - effectiveFrom.getFullYear()) * 12 +
+            (today.getMonth() - effectiveFrom.getMonth());
+          shiftIndex = monthsSinceStart % shifts.length;
+          break;
+        }
+        case 'CUSTOM':
+        default:
+          shiftIndex = weeksSinceStart % shifts.length;
+          break;
+      }
+
+      const targetShift = shifts[shiftIndex];
+      if (!targetShift) continue;
+
+      const employeeIds = schedule.assignments.map((a) => a.employeeId);
+      if (employeeIds.length === 0) continue;
+
+      // Update all assigned employees to the target shift
+      await platformPrisma.employee.updateMany({
+        where: { id: { in: employeeIds }, companyId },
+        data: { shiftId: targetShift.shiftId },
+      });
+
+      schedulesProcessed++;
+      employeesRotated += employeeIds.length;
+    }
+
+    return { schedulesProcessed, employeesRotated };
   }
 
   // ────────────────────────────────────────────────────────────────────

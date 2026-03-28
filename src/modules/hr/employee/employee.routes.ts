@@ -7,10 +7,18 @@ const router = Router();
 // ── Employee CRUD ─────────────────────────────────────────────────────
 router.get('/employees', requirePermissions(['hr:read']), employeeController.listEmployees);
 router.post('/employees', requirePermissions(['hr:create']), employeeController.createEmployee);
+
+// ── Probation (RED-7) — MUST be before /:id catch-all ────────────────
+router.get('/employees/probation-due', requirePermissions(['hr:read']), employeeController.listProbationDue);
+
+// ── Org Chart (ORA-10) — MUST be before /:id catch-all ───────────────
+router.get('/employees/org-chart', requirePermissions(['hr:read']), employeeController.getOrgChart);
+
 router.get('/employees/:id', requirePermissions(['hr:read']), employeeController.getEmployee);
 router.patch('/employees/:id', requirePermissions(['hr:update']), employeeController.updateEmployee);
 router.patch('/employees/:id/status', requirePermissions(['hr:update']), employeeController.updateEmployeeStatus);
 router.delete('/employees/:id', requirePermissions(['hr:delete']), employeeController.deleteEmployee);
+router.post('/employees/:id/probation-review', requirePermissions(['hr:update']), employeeController.submitProbationReview);
 
 // ── Nominees ──────────────────────────────────────────────────────────
 router.get('/employees/:id/nominees', requirePermissions(['hr:read']), employeeController.listNominees);

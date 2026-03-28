@@ -194,6 +194,19 @@ export const updateLoanStatusSchema = z.object({
   approvedBy: z.string().optional(),
 });
 
+// ── Travel Advance ────────────────────────────────────────────────────
+
+export const createTravelAdvanceSchema = z.object({
+  employeeId: z.string().min(1),
+  amount: z.number().positive('Amount must be positive'),
+  tripPurpose: z.string().min(1).max(500),
+  estimatedTripDate: z.string().optional(),
+});
+
+export const settleTravelAdvanceSchema = z.object({
+  expenseClaimId: z.string().min(1, 'Expense claim ID is required'),
+});
+
 // ── Tax Config ────────────────────────────────────────────────────────
 
 const taxSlabSchema = z.object({

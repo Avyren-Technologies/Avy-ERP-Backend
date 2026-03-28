@@ -92,6 +92,58 @@ export const populateMonthSchema = z.object({
   year: z.number().int().min(2020).max(2099),
 });
 
+// ── Comp-Off Accrual ─────────────────────────────────────────────────
+
+export const processCompOffSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2020).max(2099),
+});
+
+// ── Overtime Rules ────────────────────────────────────────────────────
+
+// ── Biometric Devices ────────────────────────────────────────────────
+
+export const createDeviceSchema = z.object({
+  name: z.string().min(1).max(100),
+  brand: z.string().min(1),
+  deviceId: z.string().min(1),
+  ipAddress: z.string().optional(),
+  port: z.number().int().optional(),
+  syncMode: z.enum(['PUSH', 'PULL', 'MANUAL']).optional(),
+  syncIntervalMin: z.number().int().min(1).optional(),
+  locationId: z.string().optional(),
+});
+
+export const updateDeviceSchema = createDeviceSchema.partial();
+
+export const syncDeviceSchema = z.object({
+  records: z.array(z.object({
+    employeeId: z.string().min(1),
+    date: z.string().min(1),
+    punchIn: z.string().optional(),
+    punchOut: z.string().optional(),
+  })).min(1),
+});
+
+// ── Shift Rotation ───────────────────────────────────────────────────
+
+export const createRotationScheduleSchema = z.object({
+  name: z.string().min(1).max(100),
+  rotationPattern: z.enum(['WEEKLY', 'FORTNIGHTLY', 'MONTHLY', 'CUSTOM']),
+  shifts: z.array(z.object({
+    shiftId: z.string().min(1),
+    weekNumber: z.number().int().min(1),
+  })).min(2, 'At least 2 shifts required for rotation'),
+  effectiveFrom: z.string().min(1),
+  effectiveTo: z.string().optional(),
+});
+
+export const updateRotationScheduleSchema = createRotationScheduleSchema.partial();
+
+export const assignRotationSchema = z.object({
+  employeeIds: z.array(z.string().min(1)).min(1),
+});
+
 // ── Overtime Rules ────────────────────────────────────────────────────
 
 export const overtimeRulesSchema = z.object({

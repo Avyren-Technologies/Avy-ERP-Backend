@@ -141,4 +141,33 @@ router.get('/disciplinary-actions/:id', requirePermissions(['hr:read']), control
 router.patch('/disciplinary-actions/:id', requirePermissions(['hr:update']), controller.updateDisciplinaryAction);
 router.delete('/disciplinary-actions/:id', requirePermissions(['hr:delete']), controller.deleteDisciplinaryAction);
 
+// ═══════════════════════════════════════════════════════════════════
+// BONUS BATCHES
+// ═══════════════════════════════════════════════════════════════════
+router.get('/bonus-batches', requirePermissions(['hr:read']), controller.listBonusBatches);
+router.post('/bonus-batches', requirePermissions(['hr:create']), controller.createBonusBatch);
+router.get('/bonus-batches/:id', requirePermissions(['hr:read']), controller.getBonusBatch);
+router.patch('/bonus-batches/:id/approve', requirePermissions(['hr:update']), controller.approveBonusBatch);
+router.post('/bonus-batches/:id/merge', requirePermissions(['hr:update']), controller.mergeBonusBatch);
+
+// ═══════════════════════════════════════════════════════════════════
+// E-SIGN INTEGRATION (ORA-7)
+// ═══════════════════════════════════════════════════════════════════
+router.get('/hr-letters/pending-esign', requirePermissions(['hr:read']), controller.listPendingESignLetters);
+router.post('/hr-letters/esign-callback', controller.processESignCallback);
+router.post('/hr-letters/:id/dispatch-esign', requirePermissions(['hr:update']), controller.dispatchESign);
+router.get('/hr-letters/:id/esign-status', requirePermissions(['hr:read']), controller.getESignStatus);
+
+// ═══════════════════════════════════════════════════════════════════
+// PRODUCTION INCENTIVE (ORA-9)
+// ═══════════════════════════════════════════════════════════════════
+router.get('/production-incentives/configs', requirePermissions(['hr:read']), controller.listIncentiveConfigs);
+router.post('/production-incentives/configs', requirePermissions(['hr:create']), controller.createIncentiveConfig);
+router.get('/production-incentives/configs/:id', requirePermissions(['hr:read']), controller.getIncentiveConfig);
+router.patch('/production-incentives/configs/:id', requirePermissions(['hr:update']), controller.updateIncentiveConfig);
+router.delete('/production-incentives/configs/:id', requirePermissions(['hr:delete']), controller.deleteIncentiveConfig);
+router.post('/production-incentives/configs/:id/compute', requirePermissions(['hr:create']), controller.computeIncentives);
+router.post('/production-incentives/configs/:id/merge', requirePermissions(['hr:update']), controller.mergeIncentivesToPayroll);
+router.get('/production-incentives/records', requirePermissions(['hr:read']), controller.listIncentiveRecords);
+
 export { router as advancedRoutes };

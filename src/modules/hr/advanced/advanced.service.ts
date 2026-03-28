@@ -1943,6 +1943,583 @@ export class AdvancedHRService {
     await platformPrisma.disciplinaryAction.delete({ where: { id } });
     return { message: 'Disciplinary action deleted' };
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // BONUS BATCHES
+  // ════════════════════════════════════════════════════════════════
+
+  async listBonusBatches(companyId: string, options: { page?: number; limit?: number; status?: string } = {}) {
+    const { page = 1, limit = 25, status } = options;
+    const offset = (page - 1) * limit;
+
+    const where: any = { companyId };
+    if (status) where.status = status.toUpperCase();
+
+    const [batches, total] = await Promise.all([
+      platformPrisma.bonusBatch.findMany({
+        where,
+        include: {
+          _count: { select: { items: true } },
+        },
+        skip: offset,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      platformPrisma.bonusBatch.count({ where }),
+    ]);
+
+    return { batches, total, page, limit };
+  }
+
+  async getBonusBatch(companyId: string, id: string) {
+    const batch = await platformPrisma.bonusBatch.findUnique({
+      where: { id },
+      include: {
+        items: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                employeeId: true,
+                firstName: true,
+                lastName: true,
+                department: { select: { id: true, name: true } },
+                designation: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!batch || batch.companyId !== companyId) {
+      throw ApiError.notFound('Bonus batch not found');
+    }
+
+    return batch;
+  }
+
+  async createBonusBatch(
+    companyId: string,
+    data: {
+      name: string;
+      bonusType: string;
+      items: Array<{ employeeId: string; amount: number; remarks?: string }>;
+    },
+  ) {
+    // Validate all employee IDs belong to company
+    const employeeIds = data.items.map((i) => i.employeeId);
+    const employees = await platformPrisma.employee.findMany({
+      where: { id: { in: employeeIds }, companyId },
+      select: { id: true },
+    });
+    const foundIds = new Set(employees.map((e) => e.id));
+    const missing = employeeIds.filter((eid) => !foundIds.has(eid));
+    if (missing.length > 0) {
+      throw ApiError.badRequest(`Employees not found in this company: ${missing.join(', ')}`);
+    }
+
+    // Calculate TDS per item (simplified: 10% flat rate for new regime)
+    const itemsWithTds = data.items.map((item) => {
+      const tdsAmount = round2(item.amount * 0.10);
+      const netAmount = round2(item.amount - tdsAmount);
+      return { ...item, tdsAmount, netAmount };
+    });
+
+    const totalAmount = round2(itemsWithTds.reduce((sum, i) => sum + i.amount, 0));
+
+    // Create batch + items in transaction
+    return platformPrisma.$transaction(async (tx) => {
+      const batch = await tx.bonusBatch.create({
+        data: {
+          companyId,
+          name: data.name,
+          bonusType: data.bonusType,
+          totalAmount: new Prisma.Decimal(totalAmount),
+          status: 'DRAFT',
+        },
+      });
+
+      await tx.bonusBatchItem.createMany({
+        data: itemsWithTds.map((item) => ({
+          batchId: batch.id,
+          employeeId: item.employeeId,
+          amount: new Prisma.Decimal(item.amount),
+          tdsAmount: new Prisma.Decimal(item.tdsAmount),
+          netAmount: new Prisma.Decimal(item.netAmount),
+          remarks: n(item.remarks),
+          companyId,
+        })),
+      });
+
+      return this.getBonusBatch(companyId, batch.id);
+    });
+  }
+
+  async approveBonusBatch(companyId: string, id: string, userId: string) {
+    const batch = await platformPrisma.bonusBatch.findUnique({ where: { id } });
+    if (!batch || batch.companyId !== companyId) {
+      throw ApiError.notFound('Bonus batch not found');
+    }
+
+    if (batch.status !== 'DRAFT' && batch.status !== 'SUBMITTED') {
+      throw ApiError.badRequest(`Cannot approve batch in ${batch.status} status. Must be DRAFT or SUBMITTED.`);
+    }
+
+    return platformPrisma.bonusBatch.update({
+      where: { id },
+      data: {
+        status: 'APPROVED',
+        approvedBy: userId,
+        approvedAt: new Date(),
+      },
+    });
+  }
+
+  async mergeBonusBatchToPayroll(companyId: string, batchId: string, payrollRunId: string) {
+    const batch = await platformPrisma.bonusBatch.findUnique({
+      where: { id: batchId },
+      include: { items: true },
+    });
+    if (!batch || batch.companyId !== companyId) {
+      throw ApiError.notFound('Bonus batch not found');
+    }
+
+    if (batch.status !== 'APPROVED') {
+      throw ApiError.badRequest(`Cannot merge batch in ${batch.status} status. Must be APPROVED.`);
+    }
+
+    // Validate payroll run exists and is in mergeable status
+    const payrollRun = await platformPrisma.payrollRun.findUnique({ where: { id: payrollRunId } });
+    if (!payrollRun || payrollRun.companyId !== companyId) {
+      throw ApiError.notFound('Payroll run not found');
+    }
+
+    if (payrollRun.status !== 'COMPUTED' && payrollRun.status !== 'STATUTORY_DONE') {
+      throw ApiError.badRequest(`Cannot merge into payroll run in ${payrollRun.status} status. Must be COMPUTED or STATUTORY_DONE.`);
+    }
+
+    return platformPrisma.$transaction(async (tx) => {
+      // For each item, find the PayrollEntry for that employee and add bonus
+      for (const item of batch.items) {
+        const entry = await tx.payrollEntry.findFirst({
+          where: { payrollRunId, employeeId: item.employeeId },
+        });
+
+        if (entry) {
+          const currentEarnings = (entry.earnings as Record<string, number>) ?? {};
+          const updatedEarnings = {
+            ...currentEarnings,
+            bonus: round2((currentEarnings['bonus'] ?? 0) + Number(item.amount)),
+          };
+
+          const newGross = round2(Number(entry.grossEarnings) + Number(item.amount));
+          const newNet = round2(Number(entry.netPay) + Number(item.netAmount));
+
+          await tx.payrollEntry.update({
+            where: { id: entry.id },
+            data: {
+              earnings: updatedEarnings,
+              grossEarnings: new Prisma.Decimal(newGross),
+              netPay: new Prisma.Decimal(newNet),
+            },
+          });
+        }
+      }
+
+      // Update batch status to MERGED
+      return tx.bonusBatch.update({
+        where: { id: batchId },
+        data: {
+          status: 'MERGED',
+          mergedToRunId: payrollRunId,
+        },
+      });
+    });
+  }
+  // ════════════════════════════════════════════════════════════════
+  // E-SIGN INTEGRATION (ORA-7)
+  // ════════════════════════════════════════════════════════════════
+
+  async dispatchESign(companyId: string, letterId: string) {
+    const letter = await platformPrisma.hRLetter.findUnique({
+      where: { id: letterId },
+      include: {
+        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true, officialEmail: true } },
+        template: { select: { id: true, type: true, name: true } },
+      },
+    });
+
+    if (!letter || letter.companyId !== companyId) {
+      throw ApiError.notFound('HR letter not found');
+    }
+
+    if (letter.eSignStatus === 'SIGNED') {
+      throw ApiError.badRequest('Letter is already signed');
+    }
+
+    const eSignToken = `esign_${letterId}_${Date.now()}`;
+    const signingUrl = `https://esign.placeholder.com/sign?token=${eSignToken}`;
+
+    const updated = await platformPrisma.hRLetter.update({
+      where: { id: letterId },
+      data: {
+        eSignStatus: 'PENDING',
+        eSignToken,
+        eSignDispatchedAt: new Date(),
+      },
+      include: {
+        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+        template: { select: { id: true, type: true, name: true } },
+      },
+    });
+
+    return {
+      letter: updated,
+      signingUrl,
+      dispatchedAt: updated.eSignDispatchedAt,
+    };
+  }
+
+  async processESignCallback(signingToken: string, status: 'SIGNED' | 'DECLINED') {
+    const letter = await platformPrisma.hRLetter.findFirst({
+      where: { eSignToken: signingToken },
+    });
+
+    if (!letter) {
+      throw ApiError.notFound('Letter not found for the provided signing token');
+    }
+
+    const updateData: any = {
+      eSignStatus: status,
+    };
+
+    if (status === 'SIGNED') {
+      updateData.eSignedAt = new Date();
+    }
+
+    return platformPrisma.hRLetter.update({
+      where: { id: letter.id },
+      data: updateData,
+      include: {
+        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+        template: { select: { id: true, type: true, name: true } },
+      },
+    });
+  }
+
+  async getESignStatus(companyId: string, letterId: string) {
+    const letter = await platformPrisma.hRLetter.findUnique({
+      where: { id: letterId },
+      select: {
+        id: true,
+        eSignStatus: true,
+        eSignedAt: true,
+        eSignDispatchedAt: true,
+      },
+    });
+
+    if (!letter) {
+      throw ApiError.notFound('HR letter not found');
+    }
+
+    return letter;
+  }
+
+  async listPendingESignLetters(companyId: string) {
+    const letters = await platformPrisma.hRLetter.findMany({
+      where: {
+        companyId,
+        eSignStatus: 'PENDING',
+      },
+      include: {
+        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+        template: { select: { id: true, type: true, name: true } },
+      },
+      orderBy: { eSignDispatchedAt: 'desc' },
+    });
+
+    return letters;
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // PRODUCTION INCENTIVE (ORA-9)
+  // ════════════════════════════════════════════════════════════════
+
+  async listIncentiveConfigs(companyId: string) {
+    const configs = await platformPrisma.productionIncentiveConfig.findMany({
+      where: { companyId },
+      include: {
+        department: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return configs;
+  }
+
+  async getIncentiveConfig(companyId: string, id: string) {
+    const config = await platformPrisma.productionIncentiveConfig.findUnique({
+      where: { id },
+      include: {
+        department: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!config || config.companyId !== companyId) {
+      throw ApiError.notFound('Production incentive config not found');
+    }
+
+    return config;
+  }
+
+  async createIncentiveConfig(companyId: string, data: any) {
+    // Validate department if provided
+    if (data.departmentId) {
+      const department = await platformPrisma.department.findUnique({ where: { id: data.departmentId } });
+      if (!department || department.companyId !== companyId) {
+        throw ApiError.badRequest('Department not found in this company');
+      }
+    }
+
+    return platformPrisma.productionIncentiveConfig.create({
+      data: {
+        companyId,
+        name: data.name,
+        incentiveBasis: data.incentiveBasis,
+        calculationCycle: n(data.calculationCycle),
+        slabs: data.slabs,
+        machineId: n(data.machineId),
+        departmentId: n(data.departmentId),
+      },
+      include: {
+        department: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async updateIncentiveConfig(companyId: string, id: string, data: any) {
+    const config = await platformPrisma.productionIncentiveConfig.findUnique({ where: { id } });
+    if (!config || config.companyId !== companyId) {
+      throw ApiError.notFound('Production incentive config not found');
+    }
+
+    // Validate department if being updated
+    if (data.departmentId) {
+      const department = await platformPrisma.department.findUnique({ where: { id: data.departmentId } });
+      if (!department || department.companyId !== companyId) {
+        throw ApiError.badRequest('Department not found in this company');
+      }
+    }
+
+    return platformPrisma.productionIncentiveConfig.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.incentiveBasis !== undefined && { incentiveBasis: data.incentiveBasis }),
+        ...(data.calculationCycle !== undefined && { calculationCycle: n(data.calculationCycle) }),
+        ...(data.slabs !== undefined && { slabs: data.slabs }),
+        ...(data.machineId !== undefined && { machineId: n(data.machineId) }),
+        ...(data.departmentId !== undefined && { departmentId: n(data.departmentId) }),
+      },
+      include: {
+        department: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async deleteIncentiveConfig(companyId: string, id: string) {
+    const config = await platformPrisma.productionIncentiveConfig.findUnique({ where: { id } });
+    if (!config || config.companyId !== companyId) {
+      throw ApiError.notFound('Production incentive config not found');
+    }
+
+    // Check no active records reference it
+    const activeRecords = await platformPrisma.productionIncentiveRecord.count({
+      where: { configId: id, status: { in: ['COMPUTED', 'MERGED'] } },
+    });
+    if (activeRecords > 0) {
+      throw ApiError.badRequest(`Cannot delete: ${activeRecords} active incentive record(s) reference this config`);
+    }
+
+    await platformPrisma.productionIncentiveConfig.delete({ where: { id } });
+    return { message: 'Production incentive config deleted' };
+  }
+
+  async computeIncentives(
+    companyId: string,
+    configId: string,
+    data: { period: string; records: Array<{ employeeId: string; outputUnits: number }> },
+  ) {
+    const config = await platformPrisma.productionIncentiveConfig.findUnique({ where: { id: configId } });
+    if (!config || config.companyId !== companyId) {
+      throw ApiError.notFound('Production incentive config not found');
+    }
+
+    const slabs = config.slabs as Array<{ minOutput: number; maxOutput: number; amount: number }>;
+
+    // Calculate incentive for each record
+    const computedRecords = data.records.map((rec) => {
+      const matchingSlab = slabs.find((s) => rec.outputUnits >= s.minOutput && rec.outputUnits <= s.maxOutput);
+      const incentiveAmount = matchingSlab ? matchingSlab.amount : 0;
+      return {
+        configId,
+        companyId,
+        employeeId: rec.employeeId,
+        periodDate: new Date(data.period),
+        outputUnits: rec.outputUnits,
+        incentiveAmount,
+        status: 'COMPUTED',
+      };
+    });
+
+    // Delete existing records for this config+period, create new ones
+    await platformPrisma.$transaction(async (tx) => {
+      await tx.productionIncentiveRecord.deleteMany({
+        where: { configId, periodDate: new Date(data.period), companyId },
+      });
+
+      await tx.productionIncentiveRecord.createMany({
+        data: computedRecords.map((r) => ({
+          configId: r.configId,
+          companyId: r.companyId,
+          employeeId: r.employeeId,
+          periodDate: r.periodDate,
+          outputUnits: r.outputUnits,
+          incentiveAmount: new Prisma.Decimal(r.incentiveAmount),
+          status: r.status,
+        })),
+      });
+    });
+
+    const totalIncentive = round2(computedRecords.reduce((sum, r) => sum + r.incentiveAmount, 0));
+
+    return {
+      configId,
+      period: data.period,
+      recordsProcessed: computedRecords.length,
+      totalIncentive,
+    };
+  }
+
+  async mergeIncentivesToPayroll(
+    companyId: string,
+    configId: string,
+    month: number,
+    year: number,
+    payrollRunId: string,
+  ) {
+    const config = await platformPrisma.productionIncentiveConfig.findUnique({ where: { id: configId } });
+    if (!config || config.companyId !== companyId) {
+      throw ApiError.notFound('Production incentive config not found');
+    }
+
+    // Find COMPUTED records for the config in the given period
+    const periodStart = new Date(year, month - 1, 1);
+    const periodEnd = new Date(year, month, 0, 23, 59, 59, 999);
+
+    const records = await platformPrisma.productionIncentiveRecord.findMany({
+      where: {
+        configId,
+        companyId,
+        status: 'COMPUTED',
+        periodDate: { gte: periodStart, lte: periodEnd },
+      },
+    });
+
+    if (records.length === 0) {
+      throw ApiError.badRequest('No computed incentive records found for this config and period');
+    }
+
+    // Validate payroll run
+    const payrollRun = await platformPrisma.payrollRun.findUnique({ where: { id: payrollRunId } });
+    if (!payrollRun || payrollRun.companyId !== companyId) {
+      throw ApiError.notFound('Payroll run not found');
+    }
+
+    if (payrollRun.status !== 'COMPUTED' && payrollRun.status !== 'STATUTORY_DONE') {
+      throw ApiError.badRequest(`Cannot merge into payroll run in ${payrollRun.status} status. Must be COMPUTED or STATUTORY_DONE.`);
+    }
+
+    return platformPrisma.$transaction(async (tx) => {
+      for (const record of records) {
+        const entry = await tx.payrollEntry.findFirst({
+          where: { payrollRunId, employeeId: record.employeeId },
+        });
+
+        if (entry) {
+          const currentEarnings = (entry.earnings as Record<string, number>) ?? {};
+          const incentiveAmt = Number(record.incentiveAmount);
+          const updatedEarnings = {
+            ...currentEarnings,
+            PROD_INCENTIVE: round2((currentEarnings['PROD_INCENTIVE'] ?? 0) + incentiveAmt),
+          };
+
+          const newGross = round2(Number(entry.grossEarnings) + incentiveAmt);
+          const newNet = round2(Number(entry.netPay) + incentiveAmt);
+
+          await tx.payrollEntry.update({
+            where: { id: entry.id },
+            data: {
+              earnings: updatedEarnings,
+              grossEarnings: new Prisma.Decimal(newGross),
+              netPay: new Prisma.Decimal(newNet),
+            },
+          });
+        }
+
+        // Update record to MERGED status
+        await tx.productionIncentiveRecord.update({
+          where: { id: record.id },
+          data: {
+            status: 'MERGED',
+            payrollRunId,
+          },
+        });
+      }
+
+      return {
+        configId,
+        month,
+        year,
+        payrollRunId,
+        recordsMerged: records.length,
+        totalMerged: round2(records.reduce((sum, r) => sum + Number(r.incentiveAmount), 0)),
+      };
+    });
+  }
+
+  async listIncentiveRecords(
+    companyId: string,
+    options: { configId?: string; employeeId?: string; status?: string; month?: number; year?: number } = {},
+  ) {
+    const { configId, employeeId, status, month, year } = options;
+
+    const where: any = { companyId };
+    if (configId) where.configId = configId;
+    if (employeeId) where.employeeId = employeeId;
+    if (status) where.status = status.toUpperCase();
+    if (month && year) {
+      const periodStart = new Date(year, month - 1, 1);
+      const periodEnd = new Date(year, month, 0, 23, 59, 59, 999);
+      where.periodDate = { gte: periodStart, lte: periodEnd };
+    }
+
+    const records = await platformPrisma.productionIncentiveRecord.findMany({
+      where,
+      include: {
+        config: { select: { id: true, name: true, incentiveBasis: true } },
+        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+      },
+      orderBy: { periodDate: 'desc' },
+    });
+
+    return records;
+  }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 export const advancedHRService = new AdvancedHRService();

@@ -374,6 +374,30 @@ export class EmployeeService {
             }
           }
 
+          // Auto-generate onboarding tasks from default template
+          const defaultTemplate = await tx.onboardingTemplate.findFirst({
+            where: { companyId, isDefault: true },
+          });
+          if (defaultTemplate) {
+            const items = defaultTemplate.items as any[];
+            const joiningDate = new Date(data.joiningDate);
+            const tasks = items.map((item: any) => ({
+              employeeId: employee.id,
+              templateId: defaultTemplate.id,
+              title: item.title,
+              department: item.department,
+              description: item.description ?? null,
+              dueDate: item.dueInDays ? new Date(joiningDate.getTime() + item.dueInDays * 86400000) : null,
+              isMandatory: item.isMandatory ?? true,
+              status: 'PENDING',
+              companyId,
+            }));
+            if (tasks.length > 0) {
+              await tx.onboardingTask.createMany({ data: tasks });
+            }
+            logger.info(`Auto-generated ${tasks.length} onboarding tasks for employee ${employee.id}`);
+          }
+
           logger.info(`Employee created: ${employee.id} (${employee.employeeId}) for company ${companyId}`);
           return employee;
         });
@@ -949,6 +973,248 @@ export class EmployeeService {
         performedBy: performedBy ?? null,
       },
     });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Probation Management (RED-7)
+  // ────────────────────────────────────────────────────────────────────
+
+  async listProbationDue(companyId: string) {
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+    return platformPrisma.employee.findMany({
+      where: {
+        companyId,
+        status: 'PROBATION',
+        probationEndDate: {
+          lte: thirtyDaysFromNow,
+        },
+      },
+      include: {
+        department: { select: { id: true, name: true, code: true } },
+        designation: { select: { id: true, name: true, code: true } },
+        reportingManager: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
+      },
+      orderBy: { probationEndDate: 'asc' },
+    });
+  }
+
+  async submitProbationReview(
+    companyId: string,
+    employeeId: string,
+    data: { performanceRating: number; managerFeedback: string; decision: string; extensionMonths?: number },
+    decidedBy?: string,
+  ) {
+    const employee = await platformPrisma.employee.findUnique({ where: { id: employeeId } });
+    if (!employee || employee.companyId !== companyId) {
+      throw ApiError.notFound('Employee not found');
+    }
+    if (employee.status !== 'PROBATION') {
+      throw ApiError.badRequest('Employee is not on probation');
+    }
+    if (!employee.probationEndDate) {
+      throw ApiError.badRequest('Employee does not have a probation end date set');
+    }
+
+    // Validate extension months when decision is EXTENDED
+    if (data.decision === 'EXTENDED' && !data.extensionMonths) {
+      throw ApiError.badRequest('Extension months is required when decision is EXTENDED');
+    }
+
+    return platformPrisma.$transaction(async (tx) => {
+      // Calculate new probation end date for extension
+      let newProbationEnd: Date | null = null;
+      if (data.decision === 'EXTENDED' && data.extensionMonths) {
+        newProbationEnd = new Date(employee.probationEndDate!);
+        newProbationEnd.setMonth(newProbationEnd.getMonth() + data.extensionMonths);
+      }
+
+      // Create the review record
+      const review = await tx.probationReview.create({
+        data: {
+          employeeId,
+          reviewDate: new Date(),
+          probationEndDate: employee.probationEndDate!,
+          managerFeedback: data.managerFeedback,
+          performanceRating: data.performanceRating,
+          decision: data.decision,
+          extensionMonths: data.extensionMonths ?? null,
+          newProbationEnd,
+          decidedBy: decidedBy ?? null,
+          decidedAt: new Date(),
+          companyId,
+        },
+      });
+
+      // Update employee based on decision
+      if (data.decision === 'CONFIRMED') {
+        await tx.employee.update({
+          where: { id: employeeId },
+          data: {
+            status: 'CONFIRMED',
+            confirmationDate: new Date(),
+          },
+        });
+
+        await tx.employeeTimeline.create({
+          data: {
+            employeeId,
+            eventType: 'CONFIRMED' as any,
+            title: 'Probation Confirmed',
+            description: `Employee confirmed after probation. Rating: ${data.performanceRating}/5`,
+            eventData: { reviewId: review.id, rating: data.performanceRating, feedback: data.managerFeedback } as any,
+            performedBy: decidedBy ?? null,
+          },
+        });
+      } else if (data.decision === 'EXTENDED') {
+        await tx.employee.update({
+          where: { id: employeeId },
+          data: {
+            probationEndDate: newProbationEnd,
+          },
+        });
+
+        await tx.employeeTimeline.create({
+          data: {
+            employeeId,
+            eventType: 'CUSTOM' as any,
+            title: 'Probation Extended',
+            description: `Probation extended by ${data.extensionMonths} month(s). New end date: ${newProbationEnd?.toISOString().split('T')[0]}`,
+            eventData: { reviewId: review.id, extensionMonths: data.extensionMonths, newProbationEnd } as any,
+            performedBy: decidedBy ?? null,
+          },
+        });
+      } else if (data.decision === 'TERMINATED') {
+        await tx.employee.update({
+          where: { id: employeeId },
+          data: {
+            status: 'EXITED',
+            lastWorkingDate: new Date(),
+            exitReason: 'Probation termination',
+          },
+        });
+
+        await tx.employeeTimeline.create({
+          data: {
+            employeeId,
+            eventType: 'EXITED' as any,
+            title: 'Probation Terminated',
+            description: `Employment terminated during probation. Rating: ${data.performanceRating}/5`,
+            eventData: { reviewId: review.id, rating: data.performanceRating, feedback: data.managerFeedback } as any,
+            performedBy: decidedBy ?? null,
+          },
+        });
+      }
+
+      logger.info(`Probation review submitted for employee ${employeeId}: ${data.decision}`);
+      return review;
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Org Chart (ORA-10)
+  // ────────────────────────────────────────────────────────────────────
+
+  async getOrgChart(companyId: string) {
+    const employees = await platformPrisma.employee.findMany({
+      where: {
+        companyId,
+        status: { not: 'EXITED' },
+      },
+      select: {
+        id: true,
+        employeeId: true,
+        firstName: true,
+        lastName: true,
+        profilePhotoUrl: true,
+        reportingManagerId: true,
+        department: { select: { id: true, name: true } },
+        designation: { select: { id: true, name: true } },
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+
+    // Build tree structure
+    type OrgNode = typeof employees[number] & { reportees: OrgNode[] };
+
+    const nodeMap = new Map<string, OrgNode>();
+    const roots: OrgNode[] = [];
+
+    // First pass: create all nodes
+    for (const emp of employees) {
+      nodeMap.set(emp.id, { ...emp, reportees: [] });
+    }
+
+    // Second pass: link children to parents
+    for (const emp of employees) {
+      const node = nodeMap.get(emp.id)!;
+      if (emp.reportingManagerId && nodeMap.has(emp.reportingManagerId)) {
+        nodeMap.get(emp.reportingManagerId)!.reportees.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+
+    return roots;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Anonymisation (ORA-11 — Data Retention & GDPR)
+  // ────────────────────────────────────────────────────────────────────
+
+  async anonymiseEmployee(companyId: string, employeeId: string) {
+    const employee = await platformPrisma.employee.findUnique({ where: { id: employeeId } });
+    if (!employee || employee.companyId !== companyId) {
+      throw ApiError.notFound('Employee not found');
+    }
+
+    if (employee.status !== 'EXITED') {
+      throw ApiError.badRequest('Only EXITED employees can be anonymised');
+    }
+
+    const anonSuffix = employee.id.slice(-6);
+
+    await platformPrisma.$transaction(async (tx) => {
+      await tx.employee.update({
+        where: { id: employeeId },
+        data: {
+          firstName: `ANON-${anonSuffix}`,
+          lastName: 'Anonymised',
+          middleName: null,
+          personalMobile: '0000000000',
+          alternativeMobile: null,
+          personalEmail: `anon-${anonSuffix}@redacted.local`,
+          officialEmail: null,
+          currentAddress: Prisma.JsonNull,
+          permanentAddress: Prisma.JsonNull,
+          emergencyContactName: 'Anonymised',
+          emergencyContactRelation: 'N/A',
+          emergencyContactMobile: '0000000000',
+          panNumber: null,
+          aadhaarNumber: null,
+          bankAccountNumber: null,
+          bankIfscCode: null,
+          bankName: null,
+          profilePhotoUrl: null,
+          dateOfBirth: new Date('1900-01-01'),
+        },
+      });
+
+      await tx.employeeTimeline.create({
+        data: {
+          employeeId,
+          eventType: 'CUSTOM' as any,
+          title: 'Data Anonymised',
+          description: 'Data anonymised per retention policy',
+          eventData: Prisma.JsonNull,
+          performedBy: null,
+        },
+      });
+    });
+
+    logger.info(`Employee ${employeeId} anonymised in company ${companyId}`);
+    return { message: 'Employee data anonymised', employeeId };
   }
 
   // ────────────────────────────────────────────────────────────────────
