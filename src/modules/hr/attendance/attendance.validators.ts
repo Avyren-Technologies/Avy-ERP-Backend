@@ -85,6 +85,13 @@ export const createRosterSchema = z.object({
 
 export const updateRosterSchema = createRosterSchema.partial();
 
+// ── Populate Month ───────────────────────────────────────────────────
+
+export const populateMonthSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2020).max(2099),
+});
+
 // ── Overtime Rules ────────────────────────────────────────────────────
 
 export const overtimeRulesSchema = z.object({

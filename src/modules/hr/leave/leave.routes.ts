@@ -21,6 +21,8 @@ router.delete('/leave-policies/:id', requirePermissions(['hr:delete']), controll
 router.get('/leave-balances', requirePermissions(['hr:read']), controller.listBalances);
 router.post('/leave-balances/adjust', requirePermissions(['hr:update']), controller.adjustBalance);
 router.post('/leave-balances/initialize', requirePermissions(['hr:create']), controller.initializeBalances);
+router.post('/leave-balances/accrue', requirePermissions(['hr:update']), controller.accrueBalances);
+router.post('/leave-balances/carry-forward', requirePermissions(['hr:update']), controller.carryForwardBalances);
 
 // ── Leave Requests ──────────────────────────────────────────────────
 router.get('/leave-requests', requirePermissions(['hr:read']), controller.listRequests);
@@ -29,6 +31,7 @@ router.get('/leave-requests/:id', requirePermissions(['hr:read']), controller.ge
 router.patch('/leave-requests/:id/approve', requirePermissions(['hr:update']), controller.approveRequest);
 router.patch('/leave-requests/:id/reject', requirePermissions(['hr:update']), controller.rejectRequest);
 router.patch('/leave-requests/:id/cancel', requirePermissions(['hr:update']), controller.cancelRequest);
+router.patch('/leave-requests/:id/partial-cancel', requirePermissions(['hr:update']), controller.partialCancelRequest);
 
 // ── Summary ─────────────────────────────────────────────────────────
 router.get('/leave/summary', requirePermissions(['hr:read']), controller.getLeaveSummary);

@@ -20,39 +20,37 @@ export class EmployeeService {
     });
 
     if (!noSeries) {
-      // Fallback: EMP-<timestamp> (timestamp ensures uniqueness)
-      return `EMP-${Date.now()}`;
+      throw ApiError.badRequest(
+        'Employee Number Series is not configured. Please create a Number Series for "Employee Onboarding" first.'
+      );
     }
 
-    // Find the actual last used employee ID to derive the next number.
-    // Using count() is not safe under concurrency — two concurrent creates
-    // would get the same count and generate duplicate IDs.
-    const lastEmployee = await tx.employee.findFirst({
-      where: { companyId },
-      orderBy: { createdAt: 'desc' },
-      select: { employeeId: true },
+    // Atomically reserve the next number using raw SQL to prevent race conditions.
+    // We use the startNumber field as a mutable counter: each call increments it,
+    // effectively treating startNumber as "next number to assign".
+    await tx.$executeRaw`
+      UPDATE no_series_configs
+      SET "startNumber" = "startNumber" + 1,
+          "updatedAt" = NOW()
+      WHERE id = ${noSeries.id}
+    `;
+
+    // Read back the updated value (the incremented startNumber is the assigned number)
+    const updated = await tx.noSeriesConfig.findUnique({
+      where: { id: noSeries.id },
+      select: { startNumber: true, prefix: true, suffix: true, numberCount: true },
     });
 
-    let nextNum = noSeries.startNumber || 1;
-    if (lastEmployee?.employeeId) {
-      // Extract the numeric portion from the last employee ID
-      const prefix = noSeries.prefix || '';
-      const suffix = noSeries.suffix || '';
-      let numericPart = lastEmployee.employeeId;
-      if (prefix && numericPart.startsWith(prefix)) {
-        numericPart = numericPart.slice(prefix.length);
-      }
-      if (suffix && numericPart.endsWith(suffix)) {
-        numericPart = numericPart.slice(0, -suffix.length);
-      }
-      const parsed = parseInt(numericPart, 10);
-      if (!isNaN(parsed)) {
-        nextNum = parsed + 1;
-      }
+    if (!updated) {
+      throw ApiError.internal('Failed to generate employee ID: NoSeries update failed');
     }
 
-    const padded = String(nextNum).padStart(noSeries.numberCount || 5, '0');
-    return `${noSeries.prefix || ''}${padded}${noSeries.suffix || ''}`;
+    // The number we just reserved is (startNumber - 1) since we incremented first,
+    // but to keep it simple: the original startNumber was the next to use, and we
+    // incremented it for the next caller. So the assigned number is updated.startNumber - 1.
+    const assignedNumber = updated.startNumber - 1;
+    const padded = String(assignedNumber).padStart(updated.numberCount || 5, '0');
+    return `${updated.prefix || ''}${padded}${updated.suffix || ''}`;
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -152,13 +150,33 @@ export class EmployeeService {
     // Validate references exist (outside transaction — read-only checks)
     await this.validateReferences(companyId, data);
 
-    // Retry loop to handle concurrent employee ID collisions.
-    // The @@unique([companyId, employeeId]) constraint ensures no duplicates;
-    // on collision (Prisma P2002), we retry with the next available number.
-    const MAX_RETRIES = 3;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        return await platformPrisma.$transaction(async (tx) => {
+    // Check email uniqueness within the company
+    if (data.personalEmail) {
+      const existingByPersonalEmail = await platformPrisma.employee.findFirst({
+        where: { companyId, personalEmail: data.personalEmail, status: { not: 'EXITED' } },
+        select: { id: true, employeeId: true },
+      });
+      if (existingByPersonalEmail) {
+        throw ApiError.conflict(
+          `An active employee (${existingByPersonalEmail.employeeId}) already has this personal email`
+        );
+      }
+    }
+
+    if (data.officialEmail) {
+      const existingByOfficialEmail = await platformPrisma.employee.findFirst({
+        where: { companyId, officialEmail: data.officialEmail, status: { not: 'EXITED' } },
+        select: { id: true, employeeId: true },
+      });
+      if (existingByOfficialEmail) {
+        throw ApiError.conflict(
+          `An active employee (${existingByOfficialEmail.employeeId}) already has this official email`
+        );
+      }
+    }
+
+    // Atomic ID generation eliminates collisions — no retry loop needed
+    return await platformPrisma.$transaction(async (tx) => {
           const employeeId = await this.generateEmployeeId(companyId, tx as any);
 
           // Calculate probation end date if grade has probationMonths
@@ -245,8 +263,8 @@ export class EmployeeService {
               voterId: n(data.voterId),
               pran: n(data.pran),
 
-              // Status defaults to PROBATION (from schema default)
-              status: 'PROBATION',
+              // Status: configurable initial status, defaults to PROBATION
+              status: data.initialStatus ?? 'PROBATION',
 
               // Timeline: JOINED event
               timeline: {
@@ -359,24 +377,32 @@ export class EmployeeService {
           logger.info(`Employee created: ${employee.id} (${employee.employeeId}) for company ${companyId}`);
           return employee;
         });
-      } catch (error: any) {
-        // P2002 = unique constraint violation — retry with next available ID
-        if (error?.code === 'P2002' && attempt < MAX_RETRIES - 1) {
-          logger.warn(`Employee ID collision for company ${companyId}, retrying (attempt ${attempt + 2}/${MAX_RETRIES})`);
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    // Should never reach here, but TypeScript needs it
-    throw ApiError.internal('Failed to generate unique employee ID after retries');
   }
 
   async updateEmployee(companyId: string, id: string, data: any, performedBy?: string) {
     const existing = await platformPrisma.employee.findUnique({ where: { id } });
     if (!existing || existing.companyId !== companyId) {
       throw ApiError.notFound('Employee not found');
+    }
+
+    // Check email uniqueness when emails change
+    if (data.personalEmail && data.personalEmail !== existing.personalEmail) {
+      const dup = await platformPrisma.employee.findFirst({
+        where: { companyId, personalEmail: data.personalEmail, status: { not: 'EXITED' }, id: { not: id } },
+        select: { id: true, employeeId: true },
+      });
+      if (dup) {
+        throw ApiError.conflict(`An active employee (${dup.employeeId}) already has this personal email`);
+      }
+    }
+    if (data.officialEmail && data.officialEmail !== existing.officialEmail) {
+      const dup = await platformPrisma.employee.findFirst({
+        where: { companyId, officialEmail: data.officialEmail, status: { not: 'EXITED' }, id: { not: id } },
+        select: { id: true, employeeId: true },
+      });
+      if (dup) {
+        throw ApiError.conflict(`An active employee (${dup.employeeId}) already has this official email`);
+      }
     }
 
     // Validate references if they're being changed

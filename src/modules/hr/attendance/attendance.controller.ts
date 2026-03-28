@@ -15,6 +15,7 @@ import {
   createRosterSchema,
   updateRosterSchema,
   overtimeRulesSchema,
+  populateMonthSchema,
 } from './attendance.validators';
 
 export class AttendanceController {
@@ -77,6 +78,21 @@ export class AttendanceController {
     const date = req.query.date as string | undefined;
     const summary = await attendanceService.getSummary(companyId, date);
     res.json(createSuccessResponse(summary, 'Attendance summary retrieved'));
+  });
+
+  // ── Populate Month ─────────────────────────────────────────────────
+
+  populateMonth = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = populateMonthSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await attendanceService.populateMonthAttendance(companyId, parsed.data.month, parsed.data.year);
+    res.status(201).json(createSuccessResponse(result, `Month populated: ${result.created} records created`));
   });
 
   // ── Attendance Rules ────────────────────────────────────────────────

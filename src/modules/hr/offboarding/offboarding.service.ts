@@ -454,7 +454,9 @@ export class OffboardingService {
     // ── 3. Salary for worked days in last month ────────────────────
     const today = new Date();
     const dayOfMonth = lastWorkingDate.getDate();
-    const salaryForWorkedDays = (monthlyGross / 30) * dayOfMonth;
+    const daysInLastMonth = new Date(lastWorkingDate.getFullYear(), lastWorkingDate.getMonth() + 1, 0).getDate();
+    const salaryForWorkedDays = (monthlyGross / daysInLastMonth) * dayOfMonth;
+    const dailyRate = monthlyGross / daysInLastMonth;
 
     // ── 4. Leave encashment ────────────────────────────────────────
     const currentYear = today.getFullYear();
@@ -491,8 +493,11 @@ export class OffboardingService {
 
     if (gratuityEligible && !gratuityForfeited) {
       // Gratuity = (Last drawn basic * 15 * years of service) / 26
+      // Per Indian Gratuity Act: 6+ months in last year rounds up to full year
+      const lastYearFraction = tenureYears - Math.floor(tenureYears);
+      const roundedYears = lastYearFraction >= 0.5 ? Math.ceil(tenureYears) : Math.floor(tenureYears);
       gratuityAmount = Math.min(
-        (basicMonthly * 15 * Math.floor(tenureYears)) / 26,
+        (basicMonthly * 15 * roundedYears) / 26,
         GRATUITY_CAP,
       );
     }
@@ -527,7 +532,7 @@ export class OffboardingService {
       ));
       const remainingNoticeDays = Math.max(0, noticePeriodDays - daysServedInNotice);
       // Positive = company pays employee for unserved notice
-      noticePay = remainingNoticeDays * (monthlyGross / 30);
+      noticePay = remainingNoticeDays * dailyRate;
     } else {
       // Check if employee served full notice
       const resignDate = exitRequest.resignationDate ?? new Date();
@@ -537,7 +542,7 @@ export class OffboardingService {
       const shortfall = Math.max(0, noticePeriodDays - daysServedInNotice);
       if (shortfall > 0) {
         // Negative = employee owes company (deduction)
-        noticePay = -(shortfall * (monthlyGross / 30));
+        noticePay = -(shortfall * dailyRate);
       }
     }
 
@@ -596,10 +601,37 @@ export class OffboardingService {
     const totalDeductionsBeforeTds = loanRecovery + assetRecovery + otherDeductions
       + Math.abs(Math.min(0, noticePay)); // only if employee shortfall
 
-    // Simplified TDS: 10% on taxable components (salary, bonus, leave encashment)
+    // TDS on taxable components (salary, bonus, leave encashment)
     // Gratuity exempt up to limit, reimbursement non-taxable
     const taxableAmount = Math.max(0, salaryForWorkedDays + bonusProRata + leaveEncashment + Math.max(0, noticePay));
-    const tdsOnFnF = taxableAmount * 0.10; // simplified 10% flat
+    let tdsOnFnF = 0;
+    const annualTaxableProjection = taxableAmount * 12 / (lastWorkingDate.getMonth() + 1); // Annualize
+    if (annualTaxableProjection > 400000) {
+      // Use new regime slabs (simplified)
+      let annualTax = 0;
+      const slabs = [
+        { limit: 400000, rate: 0 },
+        { limit: 800000, rate: 0.05 },
+        { limit: 1200000, rate: 0.10 },
+        { limit: 1600000, rate: 0.15 },
+        { limit: 2000000, rate: 0.20 },
+        { limit: 2400000, rate: 0.25 },
+        { limit: Infinity, rate: 0.30 },
+      ];
+      let remaining = annualTaxableProjection;
+      let prevLimit = 0;
+      for (const slab of slabs) {
+        const slabAmount = Math.min(remaining, slab.limit - prevLimit);
+        if (slabAmount <= 0) break;
+        annualTax += slabAmount * slab.rate;
+        remaining -= slabAmount;
+        prevLimit = slab.limit;
+      }
+      annualTax *= 1.04; // 4% cess
+      // Pro-rate to months worked
+      const monthsWorked = lastWorkingDate.getMonth() + 1;
+      tdsOnFnF = Math.round(annualTax * monthsWorked / 12 * 100) / 100;
+    }
 
     // ── 14. Total amount ───────────────────────────────────────────
     const totalAmount = totalEarnings - totalDeductionsBeforeTds - tdsOnFnF;
@@ -652,7 +684,7 @@ export class OffboardingService {
         reimbursementPending: new Prisma.Decimal(round2(reimbursementPending)),
         tdsOnFnF: new Prisma.Decimal(round2(tdsOnFnF)),
         otherEarnings: new Prisma.Decimal(round2(otherEarnings)),
-        otherDeductions: new Prisma.Decimal(round2(otherDeductions + retrenchmentCompensation * -1)),
+        otherDeductions: new Prisma.Decimal(round2(otherDeductions)),
         totalAmount: new Prisma.Decimal(round2(totalAmount)),
         components: componentsBreakdown,
         status: 'COMPUTED',

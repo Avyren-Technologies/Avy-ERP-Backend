@@ -8,6 +8,11 @@ function n<T>(value: T | undefined): T | null {
   return value === undefined ? null : value;
 }
 
+/** Round to 2 decimal places. */
+function round(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
 interface ListOptions {
   page?: number;
   limit?: number;
@@ -92,6 +97,22 @@ async function getWorkingDaysInMonth(companyId: string, month: number, year: num
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Helper: get fiscal year start month (default April for India)
+// ────────────────────────────────────────────────────────────────────────────
+function getFiscalYearRange(month: number, year: number): { startMonth: number; startYear: number } {
+  // Indian fiscal year: April to March
+  if (month >= 4) {
+    return { startMonth: 4, startYear: year };
+  }
+  return { startMonth: 4, startYear: year - 1 };
+}
+
+function getFiscalYearLabel(month: number, year: number): string {
+  const { startYear } = getFiscalYearRange(month, year);
+  return `${startYear}-${String(startYear + 1).slice(2)}`;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // PayrollRunService
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -161,6 +182,25 @@ export class PayrollRunService {
         status: 'DRAFT',
       },
     });
+  }
+
+  // M9: Delete run (DRAFT only)
+  async deleteRun(companyId: string, runId: string) {
+    const run = await platformPrisma.payrollRun.findUnique({ where: { id: runId } });
+    if (!run || run.companyId !== companyId) {
+      throw ApiError.notFound('Payroll run not found');
+    }
+    if (run.status !== 'DRAFT') {
+      throw ApiError.badRequest('Only DRAFT payroll runs can be deleted');
+    }
+
+    // Delete entries first, then the run
+    await platformPrisma.$transaction([
+      platformPrisma.payrollEntry.deleteMany({ where: { payrollRunId: runId } }),
+      platformPrisma.payrollRun.delete({ where: { id: runId } }),
+    ]);
+
+    return { message: `Payroll run ${runId} for ${run.month}/${run.year} deleted successfully` };
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -353,7 +393,7 @@ export class PayrollRunService {
         },
         loans: {
           where: { status: 'ACTIVE' },
-          select: { emiAmount: true },
+          select: { id: true, emiAmount: true },
         },
       },
     });
@@ -385,6 +425,46 @@ export class PayrollRunService {
     // Get overtime rule
     const otRule = await platformPrisma.overtimeRule.findUnique({ where: { companyId } });
 
+    // L1: Fetch attendance rules ONCE for fullDayThresholdHours
+    const attendanceRules = await platformPrisma.attendanceRule.findUnique({ where: { companyId } });
+    const workHoursPerDay = attendanceRules?.fullDayThresholdHours
+      ? Number(attendanceRules.fullDayThresholdHours)
+      : 8;
+
+    // C4: Fetch salary components with pfInclusion ONCE before the loop
+    const pfInclusionComponents = await platformPrisma.salaryComponent.findMany({
+      where: { companyId, pfInclusion: true, isActive: true },
+      select: { code: true },
+    });
+    const pfInclusionCodes = new Set(pfInclusionComponents.map((c) => c.code));
+
+    // M5: Batch-fetch ALL attendance records for the company/month
+    const allAttendance = await platformPrisma.attendanceRecord.findMany({
+      where: { companyId, date: { gte: monthStart, lt: monthEnd } },
+      select: { employeeId: true, date: true, status: true, overtimeHours: true },
+    });
+    const attendanceByEmployee = new Map<string, typeof allAttendance>();
+    for (const rec of allAttendance) {
+      if (!attendanceByEmployee.has(rec.employeeId)) attendanceByEmployee.set(rec.employeeId, []);
+      attendanceByEmployee.get(rec.employeeId)!.push(rec);
+    }
+
+    // C1: Batch-fetch ALL approved leave requests for the month
+    const allLeaveRequests = await platformPrisma.leaveRequest.findMany({
+      where: {
+        companyId,
+        status: { in: ['APPROVED', 'AUTO_APPROVED'] },
+        fromDate: { lt: monthEnd },
+        toDate: { gte: monthStart },
+      },
+      select: { employeeId: true, fromDate: true, toDate: true, isHalfDay: true, days: true },
+    });
+    const leaveByEmployee = new Map<string, typeof allLeaveRequests>();
+    for (const lr of allLeaveRequests) {
+      if (!leaveByEmployee.has(lr.employeeId)) leaveByEmployee.set(lr.employeeId, []);
+      leaveByEmployee.get(lr.employeeId)!.push(lr);
+    }
+
     let totalGross = 0;
     let totalDeductions = 0;
     let totalNet = 0;
@@ -394,6 +474,8 @@ export class PayrollRunService {
     await platformPrisma.payrollEntry.deleteMany({ where: { payrollRunId: runId } });
 
     const entriesToCreate: any[] = [];
+    // M7: Collect loan updates for batch processing
+    const loanUpdates: { id: string; emiAmount: number }[] = [];
 
     for (const emp of employees) {
       const salary = emp.salaryRecords[0];
@@ -402,26 +484,49 @@ export class PayrollRunService {
       const monthlyGross = Number(salary.monthlyGross ?? 0) || Number(salary.annualCtc) / 12;
       const components = salary.components as Record<string, number>;
 
-      // Get attendance for the month
-      const attendanceRecords = await platformPrisma.attendanceRecord.findMany({
-        where: {
-          employeeId: emp.id,
-          companyId,
-          date: { gte: monthStart, lt: monthEnd },
-        },
-        select: { status: true, overtimeHours: true },
-      });
+      // M5: Use batch-fetched attendance records
+      const attendanceRecords = attendanceByEmployee.get(emp.id) ?? [];
+
+      // C1: Get leave requests for this employee
+      const empLeaveRequests = leaveByEmployee.get(emp.id) ?? [];
+
+      // Build a set of dates that have attendance records for quick lookup
+      const attendanceDateSet = new Set<string>();
+      for (const rec of attendanceRecords) {
+        attendanceDateSet.add(rec.date.toISOString().slice(0, 10));
+      }
+
+      // Build a map of leave dates (date -> isHalfDay) for this employee in this month
+      const leaveDateMap = new Map<string, boolean>(); // date string -> isHalfDay
+      for (const lr of empLeaveRequests) {
+        const leaveStart = lr.fromDate < monthStart ? monthStart : lr.fromDate;
+        const leaveEnd = lr.toDate >= monthEnd ? new Date(monthEnd.getTime() - 86400000) : lr.toDate;
+        const cursor = new Date(leaveStart);
+        while (cursor <= leaveEnd) {
+          const dateStr = cursor.toISOString().slice(0, 10);
+          leaveDateMap.set(dateStr, !!lr.isHalfDay);
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      }
 
       let presentDays = 0;
       let lopDays = 0;
       let otHours = 0;
 
       for (const rec of attendanceRecords) {
+        const dateStr = rec.date.toISOString().slice(0, 10);
         if (rec.status === 'PRESENT' || rec.status === 'LATE') {
           presentDays++;
         } else if (rec.status === 'HALF_DAY') {
-          presentDays += 0.5;
-          lopDays += 0.5;
+          // M1: Check if the half-day is covered by approved leave
+          const hasApprovedLeave = leaveDateMap.has(dateStr);
+          if (hasApprovedLeave) {
+            // Leave covers the half-day, count as full present
+            presentDays += 1;
+          } else {
+            presentDays += 0.5;
+            lopDays += 0.5;
+          }
         } else if (rec.status === 'LOP') {
           lopDays++;
         } else if (rec.status === 'ON_LEAVE' || rec.status === 'HOLIDAY' || rec.status === 'WEEK_OFF') {
@@ -432,8 +537,16 @@ export class PayrollRunService {
         if (rec.overtimeHours) otHours += Number(rec.overtimeHours);
       }
 
-      // If no attendance records, assume full working days (first run scenario)
-      if (attendanceRecords.length === 0) {
+      // C1: For approved leave days without attendance records, add to presentDays
+      for (const [dateStr, isHalfDay] of leaveDateMap) {
+        if (!attendanceDateSet.has(dateStr)) {
+          // This leave day has no attendance record — count as present
+          presentDays += isHalfDay ? 0.5 : 1;
+        }
+      }
+
+      // If no attendance records AND no leave records, assume full working days (first run scenario)
+      if (attendanceRecords.length === 0 && leaveDateMap.size === 0) {
         presentDays = totalWorkingDays;
         lopDays = 0;
       }
@@ -444,7 +557,7 @@ export class PayrollRunService {
         const daysInMonth = new Date(run.year, run.month, 0).getDate();
         const effectiveDays = daysInMonth - joiningDay + 1;
         // If no attendance logged yet, use pro-rated working days
-        if (attendanceRecords.length === 0) {
+        if (attendanceRecords.length === 0 && leaveDateMap.size === 0) {
           presentDays = Math.round((totalWorkingDays * effectiveDays / daysInMonth) * 10) / 10;
         }
       }
@@ -454,7 +567,7 @@ export class PayrollRunService {
       let grossEarnings = 0;
       for (const [code, amount] of Object.entries(components)) {
         const effectiveAmount = lopDays > 0
-          ? Math.round((amount - (amount * lopDays / totalWorkingDays)) * 100) / 100
+          ? round(amount - (amount * lopDays / totalWorkingDays))
           : amount;
         if (effectiveAmount > 0) {
           earnings[code] = effectiveAmount;
@@ -465,14 +578,24 @@ export class PayrollRunService {
       // Overtime
       let overtimeAmount = 0;
       if (otHours > 0 && otRule) {
-        const basicComponent = Object.entries(components).find(([code]) =>
-          code.toLowerCase().includes('basic')
-        );
-        const basicPerDay = basicComponent
-          ? basicComponent[1] / totalWorkingDays
-          : monthlyGross / totalWorkingDays;
-        const ratePerHour = basicPerDay / 8; // 8-hour workday assumption
-        overtimeAmount = Math.round(otHours * ratePerHour * Number(otRule.rateMultiplier) * 100) / 100;
+        // C4: Use pfInclusion components for basic/PF wage calculation instead of string matching
+        let basicAmount = 0;
+        for (const [code, amount] of Object.entries(components)) {
+          if (pfInclusionCodes.has(code)) {
+            basicAmount += amount;
+          }
+        }
+        // Fallback: if no pfInclusion components matched, use string matching
+        if (basicAmount === 0) {
+          const basicComponent = Object.entries(components).find(([code]) =>
+            code.toLowerCase().includes('basic')
+          );
+          basicAmount = basicComponent ? basicComponent[1] : monthlyGross;
+        }
+        const basicPerDay = basicAmount / totalWorkingDays;
+        // L1: Use fullDayThresholdHours instead of hardcoded 8
+        const ratePerHour = basicPerDay / workHoursPerDay;
+        overtimeAmount = round(otHours * ratePerHour * Number(otRule.rateMultiplier));
         grossEarnings += overtimeAmount;
       }
 
@@ -480,6 +603,8 @@ export class PayrollRunService {
       let loanDeduction = 0;
       for (const loan of emp.loans) {
         loanDeduction += Number(loan.emiAmount);
+        // M7: Collect loan updates for batch processing
+        loanUpdates.push({ id: loan.id, emiAmount: Number(loan.emiAmount) });
       }
 
       // Standard deductions (non-statutory for now; statutory done in step 4)
@@ -494,7 +619,7 @@ export class PayrollRunService {
         : undefined;
 
       // Variance calculation
-      const netPay = Math.round((grossEarnings - totalDed) * 100) / 100;
+      const netPay = round(grossEarnings - totalDed);
       const prevNet = prevEntries.get(emp.id);
       let variancePercent: number | null = null;
       if (prevNet && prevNet > 0) {
@@ -540,15 +665,27 @@ export class PayrollRunService {
       await platformPrisma.payrollEntry.createMany({ data: entriesToCreate });
     }
 
+    // M7: Batch-update loan outstanding balances
+    if (loanUpdates.length > 0) {
+      await platformPrisma.$transaction(
+        loanUpdates.map((lu) =>
+          platformPrisma.loanRecord.update({
+            where: { id: lu.id },
+            data: { outstanding: { decrement: lu.emiAmount } },
+          })
+        )
+      );
+    }
+
     // Update run totals
     const updatedRun = await platformPrisma.payrollRun.update({
       where: { id: runId },
       data: {
         status: 'COMPUTED',
         computedAt: new Date(),
-        totalGross: Math.round(totalGross * 100) / 100,
-        totalDeductions: Math.round(totalDeductions * 100) / 100,
-        totalNet: Math.round(totalNet * 100) / 100,
+        totalGross: round(totalGross),
+        totalDeductions: round(totalDeductions),
+        totalNet: round(totalNet),
         employeeCount,
       },
     });
@@ -561,12 +698,21 @@ export class PayrollRunService {
     const run = await this.getRunAndValidateStatus(companyId, runId, 'COMPUTED');
 
     // Fetch all configs upfront
-    const [pfConfig, esiConfig, ptConfigs, lwfConfigs] = await Promise.all([
+    const [pfConfig, esiConfig, ptConfigs, lwfConfigs, taxConfig] = await Promise.all([
       platformPrisma.pFConfig.findUnique({ where: { companyId } }),
       platformPrisma.eSIConfig.findUnique({ where: { companyId } }),
       platformPrisma.pTConfig.findMany({ where: { companyId } }),
       platformPrisma.lWFConfig.findMany({ where: { companyId } }),
+      // C3: Fetch TaxConfig ONCE outside the loop
+      platformPrisma.taxConfig.findUnique({ where: { companyId } }),
     ]);
+
+    // C4: Fetch salary components with pfInclusion ONCE before the loop
+    const pfInclusionComponents = await platformPrisma.salaryComponent.findMany({
+      where: { companyId, pfInclusion: true, isActive: true },
+      select: { code: true },
+    });
+    const pfInclusionCodes = new Set(pfInclusionComponents.map((c) => c.code));
 
     // Build PT slab lookup by state
     const ptSlabsByState = new Map<string, any[]>();
@@ -582,6 +728,73 @@ export class PayrollRunService {
         employerAmount: Number(lwf.employerAmount),
       });
     }
+
+    // C3: Determine TDS slabs and cess rate
+    const cessRate = taxConfig ? Number(taxConfig.cessRate) / 100 : 0.04;
+    const defaultNewRegimeSlabs = [
+      { fromAmount: 0, toAmount: 400000, rate: 0 },
+      { fromAmount: 400000, toAmount: 800000, rate: 0.05 },
+      { fromAmount: 800000, toAmount: 1200000, rate: 0.10 },
+      { fromAmount: 1200000, toAmount: 1600000, rate: 0.15 },
+      { fromAmount: 1600000, toAmount: 2000000, rate: 0.20 },
+      { fromAmount: 2000000, toAmount: 2400000, rate: 0.25 },
+      { fromAmount: 2400000, toAmount: Infinity, rate: 0.30 },
+    ];
+
+    // C3: Determine fiscal year range for YTD calculation
+    const { startMonth, startYear } = getFiscalYearRange(run.month, run.year);
+    const fiscalYearLabel = getFiscalYearLabel(run.month, run.year);
+
+    // C3: Batch-fetch all previous payroll entries this fiscal year for YTD gross
+    const fiscalStart = new Date(startYear, startMonth - 1, 1);
+    const previousRuns = await platformPrisma.payrollRun.findMany({
+      where: {
+        companyId,
+        status: { in: ['COMPUTED', 'STATUTORY_DONE', 'APPROVED', 'DISBURSED', 'ARCHIVED'] },
+        OR: [
+          { year: startYear, month: { gte: startMonth } },
+          ...(startYear < run.year ? [{ year: run.year, month: { lt: run.month } }] : []),
+          // Same year but earlier month (and after fiscal start)
+          ...(startYear === run.year ? [{ year: run.year, month: { gte: startMonth, lt: run.month } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    const prevRunIds = previousRuns.map((r) => r.id);
+
+    // Build YTD gross per employee and YTD TDS per employee
+    const ytdGrossMap = new Map<string, number>();
+    const ytdTdsMap = new Map<string, number>();
+    if (prevRunIds.length > 0) {
+      const prevEntries = await platformPrisma.payrollEntry.findMany({
+        where: { payrollRunId: { in: prevRunIds } },
+        select: { employeeId: true, grossEarnings: true, tdsAmount: true },
+      });
+      for (const pe of prevEntries) {
+        ytdGrossMap.set(pe.employeeId, (ytdGrossMap.get(pe.employeeId) ?? 0) + Number(pe.grossEarnings));
+        ytdTdsMap.set(pe.employeeId, (ytdTdsMap.get(pe.employeeId) ?? 0) + Number(pe.tdsAmount ?? 0));
+      }
+    }
+
+    // C3: Batch-fetch IT declarations for employee regime preferences
+    const itDeclarations = await platformPrisma.iTDeclaration.findMany({
+      where: {
+        companyId,
+        financialYear: fiscalYearLabel,
+        status: { in: ['SUBMITTED', 'VERIFIED'] },
+      },
+      select: { employeeId: true, regime: true },
+    });
+    const employeeRegimeMap = new Map<string, string>();
+    for (const itd of itDeclarations) {
+      employeeRegimeMap.set(itd.employeeId, itd.regime);
+    }
+
+    // Calculate remaining months in fiscal year (including current month)
+    const currentMonthIndex = run.month >= startMonth
+      ? run.month - startMonth
+      : (12 - startMonth) + run.month;
+    const remainingMonths = 12 - currentMonthIndex - 1; // months AFTER current
 
     // Fetch all entries with employee details
     const entries = await platformPrisma.payrollEntry.findMany({
@@ -599,6 +812,9 @@ export class PayrollRunService {
 
     let runTotalDeductions = 0;
     let runTotalNet = 0;
+
+    // M5: Collect all entry updates for batch transaction
+    const entryUpdates: { id: string; data: any }[] = [];
 
     for (const entry of entries) {
       const empType = entry.employee.employeeType;
@@ -618,18 +834,26 @@ export class PayrollRunService {
       // 1. PF Calculation
       if (pfConfig && empType.pfApplicable) {
         const wageCeiling = Number(pfConfig.wageCeiling);
-        // PF wage = sum of PF-included components, capped at wage ceiling
-        // For simplicity, use Basic as PF wage, capped at ceiling
-        const basicAmount = Object.entries(earningsObj).find(([code]) =>
-          code.toLowerCase().includes('basic')
-        )?.[1] ?? 0;
-        const pfWage = Math.min(basicAmount, wageCeiling);
+        // C4: Use pfInclusion components instead of string matching
+        let pfWageBase = 0;
+        for (const [code, amount] of Object.entries(earningsObj)) {
+          if (pfInclusionCodes.has(code)) {
+            pfWageBase += amount;
+          }
+        }
+        // Fallback to string matching if no pfInclusion codes matched
+        if (pfWageBase === 0) {
+          pfWageBase = Object.entries(earningsObj).find(([code]) =>
+            code.toLowerCase().includes('basic')
+          )?.[1] ?? 0;
+        }
+        const pfWage = Math.min(pfWageBase, wageCeiling);
 
-        pfEmployee = Math.round(pfWage * Number(pfConfig.employeeRate) / 100 * 100) / 100;
+        pfEmployee = round(pfWage * Number(pfConfig.employeeRate) / 100);
 
-        const epf = Math.round(pfWage * Number(pfConfig.employerEpfRate) / 100 * 100) / 100;
-        const eps = Math.round(pfWage * Number(pfConfig.employerEpsRate) / 100 * 100) / 100;
-        const edli = Math.round(pfWage * Number(pfConfig.employerEdliRate) / 100 * 100) / 100;
+        const epf = round(pfWage * Number(pfConfig.employerEpfRate) / 100);
+        const eps = round(pfWage * Number(pfConfig.employerEpsRate) / 100);
+        const edli = round(pfWage * Number(pfConfig.employerEdliRate) / 100);
         pfEmployer = epf + eps + edli;
       }
 
@@ -637,8 +861,8 @@ export class PayrollRunService {
       if (esiConfig && empType.esiApplicable) {
         const esiCeiling = Number(esiConfig.wageCeiling);
         if (grossEarnings <= esiCeiling) {
-          esiEmployee = Math.round(grossEarnings * Number(esiConfig.employeeRate) / 100 * 100) / 100;
-          esiEmployer = Math.round(grossEarnings * Number(esiConfig.employerRate) / 100 * 100) / 100;
+          esiEmployee = round(grossEarnings * Number(esiConfig.employeeRate) / 100);
+          esiEmployer = round(grossEarnings * Number(esiConfig.employerRate) / 100);
         }
       }
 
@@ -653,22 +877,43 @@ export class PayrollRunService {
         }
       }
 
-      // 4. TDS — simplified monthly projection (annual tax / 12)
-      // Placeholder: compute basic tax using annual gross
-      const annualGross = grossEarnings * 12;
-      if (annualGross > 400000) { // Threshold for new regime
-        // Simple slab calculation for new regime
-        let annualTax = 0;
-        if (annualGross > 2400000) annualTax += (annualGross - 2400000) * 0.30;
-        if (annualGross > 2000000) annualTax += Math.min(annualGross - 2000000, 400000) * 0.25;
-        if (annualGross > 1600000) annualTax += Math.min(annualGross - 1600000, 400000) * 0.20;
-        if (annualGross > 1200000) annualTax += Math.min(annualGross - 1200000, 400000) * 0.15;
-        if (annualGross > 800000) annualTax += Math.min(annualGross - 800000, 400000) * 0.10;
-        if (annualGross > 400000) annualTax += Math.min(annualGross - 400000, 400000) * 0.05;
-        // Add 4% cess
-        annualTax = annualTax * 1.04;
-        tdsAmount = Math.round(annualTax / 12 * 100) / 100;
+      // 4. TDS — C3: Use TaxConfig + YTD projection
+      const ytdGross = ytdGrossMap.get(entry.employeeId) ?? 0;
+      const ytdTds = ytdTdsMap.get(entry.employeeId) ?? 0;
+      const projectedAnnualIncome = ytdGross + grossEarnings + (remainingMonths * grossEarnings);
+
+      // Determine regime: employee preference > company default > NEW
+      const empRegime = employeeRegimeMap.get(entry.employeeId)
+        ?? (taxConfig?.defaultRegime ?? 'NEW');
+
+      let slabs: Array<{ fromAmount: number; toAmount: number; rate: number }>;
+      if (taxConfig) {
+        const rawSlabs = empRegime === 'OLD'
+          ? (taxConfig.oldRegimeSlabs as any[])
+          : (taxConfig.newRegimeSlabs as any[]);
+        slabs = Array.isArray(rawSlabs) && rawSlabs.length > 0 ? rawSlabs : defaultNewRegimeSlabs;
+      } else {
+        slabs = defaultNewRegimeSlabs;
       }
+
+      // Apply slabs to projected annual income
+      let annualTax = 0;
+      for (const slab of slabs) {
+        const upper = slab.toAmount === null || slab.toAmount === undefined ? Infinity : slab.toAmount;
+        if (projectedAnnualIncome > slab.fromAmount) {
+          const taxableInSlab = Math.min(projectedAnnualIncome, upper) - slab.fromAmount;
+          annualTax += taxableInSlab * slab.rate;
+        }
+      }
+
+      // Add cess
+      annualTax = annualTax * (1 + cessRate);
+
+      // Subtract YTD TDS to get this month's TDS
+      const totalTdsForYear = round(annualTax);
+      const monthsElapsed = currentMonthIndex + 1; // including current month
+      const proportionalTds = round(totalTdsForYear * monthsElapsed / 12);
+      tdsAmount = Math.max(round(proportionalTds - ytdTds), 0);
 
       // 5. LWF
       if (state && lwfByState.has(state)) {
@@ -680,15 +925,16 @@ export class PayrollRunService {
       // Update entry with statutory amounts
       const statutoryDeductions = pfEmployee + esiEmployee + ptAmount + tdsAmount + lwfEmployee;
       const totalDeductions = Number(entry.loanDeduction ?? 0) + statutoryDeductions;
-      const netPay = Math.round((grossEarnings - totalDeductions) * 100) / 100;
+      const netPay = round(grossEarnings - totalDeductions);
 
       const employerContributions: Record<string, number> = {};
       if (pfEmployer > 0) employerContributions.PF_EMPLOYER = pfEmployer;
       if (esiEmployer > 0) employerContributions.ESI_EMPLOYER = esiEmployer;
       if (lwfEmployer > 0) employerContributions.LWF_EMPLOYER = lwfEmployer;
 
-      await platformPrisma.payrollEntry.update({
-        where: { id: entry.id },
+      // M5: Collect updates instead of individual queries
+      entryUpdates.push({
+        id: entry.id,
         data: {
           pfEmployee,
           pfEmployer,
@@ -710,13 +956,25 @@ export class PayrollRunService {
       runTotalNet += netPay;
     }
 
+    // M5: Apply all entry updates in a single transaction
+    if (entryUpdates.length > 0) {
+      await platformPrisma.$transaction(
+        entryUpdates.map((eu) =>
+          platformPrisma.payrollEntry.update({
+            where: { id: eu.id },
+            data: eu.data,
+          })
+        )
+      );
+    }
+
     // Update run totals
     const updatedRun = await platformPrisma.payrollRun.update({
       where: { id: runId },
       data: {
         status: 'STATUTORY_DONE',
-        totalDeductions: Math.round(runTotalDeductions * 100) / 100,
-        totalNet: Math.round(runTotalNet * 100) / 100,
+        totalDeductions: round(runTotalDeductions),
+        totalNet: round(runTotalNet),
       },
     });
 
@@ -851,10 +1109,14 @@ export class PayrollRunService {
       throw ApiError.notFound('Payroll entry not found');
     }
 
-    // Verify run is in a state that allows overrides (COMPUTED or STATUTORY_DONE)
+    // H1: Guard — reject override if run is in a final state
     const run = await platformPrisma.payrollRun.findUnique({ where: { id: runId } });
     if (!run || !['COMPUTED', 'STATUTORY_DONE'].includes(run.status)) {
       throw ApiError.badRequest('Payroll run must be in COMPUTED or STATUTORY_DONE status to override entries');
+    }
+    // H1: Additional guard — reject if APPROVED, DISBURSED, or ARCHIVED
+    if (['APPROVED', 'DISBURSED', 'ARCHIVED'].includes(run.status)) {
+      throw ApiError.badRequest('Cannot override entries in APPROVED, DISBURSED, or ARCHIVED payroll runs');
     }
 
     const currentEarnings = entry.earnings as Record<string, number>;
@@ -871,20 +1133,39 @@ export class PayrollRunService {
       + Number(entry.tdsAmount ?? 0)
       + Number(entry.lwfEmployee ?? 0)
       + Number(entry.loanDeduction ?? 0);
-    const netPay = Math.round((grossEarnings - deductionTotal) * 100) / 100;
+    const netPay = round(grossEarnings - deductionTotal);
 
-    return platformPrisma.payrollEntry.update({
+    const updatedEntry = await platformPrisma.payrollEntry.update({
       where: { id: entryId },
       data: {
         earnings: newEarnings,
         deductions: newDeductions,
-        grossEarnings: Math.round(grossEarnings * 100) / 100,
-        totalDeductions: Math.round(deductionTotal * 100) / 100,
+        grossEarnings: round(grossEarnings),
+        totalDeductions: round(deductionTotal),
         netPay,
         isException: true,
         exceptionNote: data.exceptionNote ?? entry.exceptionNote ?? 'Manual override applied',
       },
     });
+
+    // H2: Recalculate run totals after entry override
+    const allEntries = await platformPrisma.payrollEntry.findMany({
+      where: { payrollRunId: runId },
+      select: { grossEarnings: true, totalDeductions: true, netPay: true },
+    });
+    const newTotalGross = allEntries.reduce((s, e) => s + Number(e.grossEarnings), 0);
+    const newTotalDeductions = allEntries.reduce((s, e) => s + Number(e.totalDeductions), 0);
+    const newTotalNet = allEntries.reduce((s, e) => s + Number(e.netPay), 0);
+    await platformPrisma.payrollRun.update({
+      where: { id: runId },
+      data: {
+        totalGross: round(newTotalGross),
+        totalDeductions: round(newTotalDeductions),
+        totalNet: round(newTotalNet),
+      },
+    });
+
+    return updatedEntry;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -966,6 +1247,7 @@ export class PayrollRunService {
     return { ...payslip, entry };
   }
 
+  // H1: Generate payslips with snapshot data from PayrollEntry
   async generatePayslips(companyId: string, runId: string) {
     const run = await platformPrisma.payrollRun.findUnique({ where: { id: runId } });
     if (!run || run.companyId !== companyId) {
@@ -984,25 +1266,48 @@ export class PayrollRunService {
       })
     ).map((h) => h.employeeId);
 
+    // H1: Fetch full entry data for snapshot
     const entries = await platformPrisma.payrollEntry.findMany({
       where: {
         payrollRunId: runId,
         employeeId: { notIn: fullHoldEmployeeIds },
       },
-      select: { employeeId: true },
     });
 
-    // Upsert payslips
+    // Delete existing payslips for this run and recreate with snapshot data
+    await platformPrisma.payslip.deleteMany({ where: { payrollRunId: runId } });
+
+    // H1: Create payslips with snapshot data from each entry
     const payslipData = entries.map((e) => ({
       payrollRunId: runId,
       employeeId: e.employeeId,
       month: run.month,
       year: run.year,
       companyId,
+      // H1: Snapshot fields from PayrollEntry
+      grossEarnings: Number(e.grossEarnings),
+      totalDeductions: Number(e.totalDeductions),
+      netPay: Number(e.netPay),
+      earnings: e.earnings ?? Prisma.JsonNull,
+      deductions: e.deductions ?? Prisma.JsonNull,
+      employerContributions: e.employerContributions ?? Prisma.JsonNull,
+      pfEmployee: e.pfEmployee !== null ? Number(e.pfEmployee) : null,
+      pfEmployer: e.pfEmployer !== null ? Number(e.pfEmployer) : null,
+      esiEmployee: e.esiEmployee !== null ? Number(e.esiEmployee) : null,
+      esiEmployer: e.esiEmployer !== null ? Number(e.esiEmployer) : null,
+      ptAmount: e.ptAmount !== null ? Number(e.ptAmount) : null,
+      tdsAmount: e.tdsAmount !== null ? Number(e.tdsAmount) : null,
+      lwfEmployee: e.lwfEmployee !== null ? Number(e.lwfEmployee) : null,
+      lwfEmployer: e.lwfEmployer !== null ? Number(e.lwfEmployer) : null,
+      loanDeduction: e.loanDeduction !== null ? Number(e.loanDeduction) : null,
+      overtimeAmount: e.overtimeAmount !== null ? Number(e.overtimeAmount) : null,
+      workingDays: e.workingDays !== null ? Number(e.workingDays) : null,
+      presentDays: e.presentDays !== null ? Number(e.presentDays) : null,
+      lopDays: e.lopDays !== null ? Number(e.lopDays) : null,
+      // C3: Mark TDS as provisional
+      tdsProvisional: true,
     }));
 
-    // Delete existing payslips for this run and recreate
-    await platformPrisma.payslip.deleteMany({ where: { payrollRunId: runId } });
     if (payslipData.length > 0) {
       await platformPrisma.payslip.createMany({ data: payslipData, skipDuplicates: true });
     }
@@ -1023,6 +1328,21 @@ export class PayrollRunService {
     });
 
     return updated;
+  }
+
+  // L7: Bulk email payslips for a run
+  async bulkEmailPayslips(companyId: string, runId: string) {
+    const run = await platformPrisma.payrollRun.findUnique({ where: { id: runId } });
+    if (!run || run.companyId !== companyId) {
+      throw ApiError.notFound('Payroll run not found');
+    }
+
+    const result = await platformPrisma.payslip.updateMany({
+      where: { payrollRunId: runId, companyId },
+      data: { emailedAt: new Date() },
+    });
+
+    return { emailed: result.count, runId };
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1320,25 +1640,25 @@ export class PayrollRunService {
           const oldAmt = oldComponents[code] ?? 0;
           const diff = newAmt - oldAmt;
           if (diff > 0) {
-            arrearComponents[code] = Math.round(diff * 100) / 100;
+            arrearComponents[code] = round(diff);
             monthArrear += diff;
           }
         }
       } else {
         // Flat difference
-        arrearComponents['CTC_DIFF'] = Math.round(diffMonthly * 100) / 100;
+        arrearComponents['CTC_DIFF'] = round(diffMonthly);
         monthArrear = diffMonthly;
       }
 
       if (monthArrear > 0) {
         arrearEntries.push({
-          companyId,
+          companyId: revision.companyId,
           employeeId: revision.employeeId,
           revisionId: id,
           forMonth: arrearMonth,
           forYear: arrearYear,
           components: arrearComponents,
-          totalAmount: Math.round(monthArrear * 100) / 100,
+          totalAmount: round(monthArrear),
         });
         totalArrears += monthArrear;
       }
@@ -1354,7 +1674,7 @@ export class PayrollRunService {
     await platformPrisma.$transaction(async (tx) => {
       // Close current salary
       await tx.employeeSalary.updateMany({
-        where: { employeeId: revision.employeeId, companyId, isCurrent: true },
+        where: { employeeId: revision.employeeId, companyId: revision.companyId, isCurrent: true },
         data: { isCurrent: false, effectiveTo: new Date() },
       });
 
@@ -1362,11 +1682,11 @@ export class PayrollRunService {
       const newComponentsData = (revision.newComponents as Record<string, number>) ?? {};
       await tx.employeeSalary.create({
         data: {
-          companyId,
+          companyId: revision.companyId,
           employeeId: revision.employeeId,
           structureId: currentSalary.structureId,
           annualCtc: Number(revision.newCtc),
-          monthlyGross: Math.round(newMonthly * 100) / 100,
+          monthlyGross: round(newMonthly),
           components: Object.keys(newComponentsData).length > 0 ? newComponentsData : currentSalary.components as any,
           effectiveFrom: effectiveDate,
           isCurrent: true,
@@ -1384,12 +1704,12 @@ export class PayrollRunService {
         data: {
           status: 'APPLIED',
           arrearsComputed: true,
-          totalArrears: Math.round(totalArrears * 100) / 100,
+          totalArrears: round(totalArrears),
         },
       });
     });
 
-    return this.getRevision(companyId, id);
+    return this.getRevision(revision.companyId, id);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1677,9 +1997,9 @@ export class PayrollRunService {
       month,
       year,
       employeeCount: entries.length,
-      totalEmployee: Math.round(totalEmployee * 100) / 100,
-      totalEmployer: Math.round(totalEmployer * 100) / 100,
-      totalESI: Math.round((totalEmployee + totalEmployer) * 100) / 100,
+      totalEmployee: round(totalEmployee),
+      totalEmployer: round(totalEmployer),
+      totalESI: round(totalEmployee + totalEmployer),
       entries: entries.map((e) => ({
         ipNumber: e.employee.esiIpNumber ?? '',
         employeeName: `${e.employee.firstName} ${e.employee.lastName}`,
@@ -1728,11 +2048,11 @@ export class PayrollRunService {
     return {
       month,
       year,
-      totalPT: Math.round(totalPT * 100) / 100,
+      totalPT: round(totalPT),
       byState: Object.fromEntries(
         Array.from(byState.entries()).map(([state, data]) => [
           state,
-          { count: data.count, total: Math.round(data.total * 100) / 100 },
+          { count: data.count, total: round(data.total) },
         ])
       ),
       entries: entries.map((e) => ({

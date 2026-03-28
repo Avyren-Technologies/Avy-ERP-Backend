@@ -13,6 +13,9 @@ import {
   createLeaveRequestSchema,
   approveRequestSchema,
   rejectRequestSchema,
+  accrueBalancesSchema,
+  carryForwardSchema,
+  partialCancelRequestSchema,
 } from './leave.validators';
 
 export class LeaveController {
@@ -237,6 +240,49 @@ export class LeaveController {
 
     const result = await leaveService.cancelRequest(companyId, req.params.id!);
     res.json(createSuccessResponse(result, 'Leave request cancelled'));
+  });
+
+  // ── Partial Cancel ──────────────────────────────────────────────────
+
+  partialCancelRequest = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = partialCancelRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await leaveService.partialCancelRequest(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(result, 'Leave request partially cancelled'));
+  });
+
+  // ── Accrual & Carry-Forward ────────────────────────────────────────
+
+  accrueBalances = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = accrueBalancesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await leaveService.accrueBalances(companyId, parsed.data.month, parsed.data.year);
+    res.json(createSuccessResponse(result, 'Leave balances accrued'));
+  });
+
+  carryForwardBalances = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = carryForwardSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await leaveService.carryForwardBalances(companyId, parsed.data.fromYear, parsed.data.toYear);
+    res.json(createSuccessResponse(result, 'Leave balances carried forward'));
   });
 
   // ── Summary ─────────────────────────────────────────────────────────

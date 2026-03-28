@@ -554,23 +554,9 @@ export class LeaveService {
       actualDays = await this.calculateLeaveDays(companyId, from, to, leaveType);
     }
 
-    // Check balance
-    const currentYear = from.getFullYear();
-    const balance = await platformPrisma.leaveBalance.findUnique({
-      where: {
-        employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year: currentYear },
-      },
-    });
-
-    if (!balance) {
-      throw ApiError.badRequest('No leave balance found. Please initialize balances first');
-    }
-
-    if (Number(balance.balance) < actualDays && leaveType.category !== 'UNPAID') {
-      throw ApiError.badRequest(
-        `Insufficient balance. Available: ${balance.balance}, Requested: ${actualDays}`
-      );
-    }
+    // Check balance — handle cross-year leave requests (M3)
+    const fromYear = from.getFullYear();
+    const toYear = to.getFullYear();
 
     // Check for overlapping requests
     const overlapping = await platformPrisma.leaveRequest.findFirst({
@@ -585,6 +571,103 @@ export class LeaveService {
 
     if (overlapping) {
       throw ApiError.badRequest('Overlapping leave request already exists');
+    }
+
+    if (fromYear !== toYear) {
+      // Cross-year: split days between years
+      const yearEnd = new Date(fromYear, 11, 31);
+      yearEnd.setHours(0, 0, 0, 0);
+      const daysInFromYear = Math.round(
+        (yearEnd.getTime() - from.getTime()) / (1000 * 3600 * 24) + 1
+      );
+      const daysInToYear = actualDays - daysInFromYear;
+
+      const balanceFrom = await platformPrisma.leaveBalance.findUnique({
+        where: {
+          employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year: fromYear },
+        },
+      });
+
+      const balanceTo = await platformPrisma.leaveBalance.findUnique({
+        where: {
+          employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year: toYear },
+        },
+      });
+
+      if (!balanceFrom) {
+        throw ApiError.badRequest(`No leave balance found for year ${fromYear}. Please initialize balances first`);
+      }
+      if (!balanceTo) {
+        throw ApiError.badRequest(`No leave balance found for year ${toYear}. Please initialize balances first`);
+      }
+
+      if (leaveType.category !== 'UNPAID') {
+        if (Number(balanceFrom.balance) < daysInFromYear) {
+          throw ApiError.badRequest(
+            `Insufficient balance for ${fromYear}. Available: ${balanceFrom.balance}, Requested: ${daysInFromYear}`
+          );
+        }
+        if (Number(balanceTo.balance) < daysInToYear) {
+          throw ApiError.badRequest(
+            `Insufficient balance for ${toYear}. Available: ${balanceTo.balance}, Requested: ${daysInToYear}`
+          );
+        }
+      }
+
+      // Create request and deduct from both years
+      const [request] = await platformPrisma.$transaction([
+        platformPrisma.leaveRequest.create({
+          data: {
+            companyId,
+            employeeId,
+            leaveTypeId,
+            fromDate: from,
+            toDate: to,
+            days: actualDays,
+            isHalfDay: isHalfDay ?? false,
+            halfDayType: n(halfDayType),
+            reason,
+            status: 'PENDING',
+          },
+          include: {
+            employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+            leaveType: { select: { id: true, name: true, code: true } },
+          },
+        }),
+        platformPrisma.leaveBalance.update({
+          where: { id: balanceFrom.id },
+          data: {
+            taken: { increment: daysInFromYear },
+            balance: { decrement: daysInFromYear },
+          },
+        }),
+        platformPrisma.leaveBalance.update({
+          where: { id: balanceTo.id },
+          data: {
+            taken: { increment: daysInToYear },
+            balance: { decrement: daysInToYear },
+          },
+        }),
+      ]);
+
+      return request;
+    }
+
+    // Same-year leave request (original flow)
+    const balance = await platformPrisma.leaveBalance.findUnique({
+      where: {
+        employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year: fromYear },
+      },
+    });
+
+    if (!balance) {
+      throw ApiError.badRequest('No leave balance found. Please initialize balances first');
+    }
+
+    if (Number(balance.balance) < actualDays && leaveType.category !== 'UNPAID') {
+      throw ApiError.badRequest(
+        `Insufficient balance. Available: ${balance.balance}, Requested: ${actualDays}`
+      );
     }
 
     // Create request and deduct balance (optimistic)
@@ -629,7 +712,7 @@ export class LeaveService {
       throw ApiError.badRequest(`Cannot approve a request with status "${request.status}"`);
     }
 
-    return platformPrisma.leaveRequest.update({
+    const updatedRequest = await platformPrisma.leaveRequest.update({
       where: { id },
       data: {
         status: 'APPROVED',
@@ -637,10 +720,48 @@ export class LeaveService {
         approvedAt: new Date(),
       },
       include: {
-        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true, shiftId: true } },
         leaveType: { select: { id: true, name: true, code: true } },
       },
     });
+
+    // Auto-create attendance records for each leave day
+    const from = new Date(request.fromDate);
+    const to = new Date(request.toDate);
+    const current = new Date(from);
+
+    while (current <= to) {
+      const dateOnly = new Date(current);
+      dateOnly.setHours(0, 0, 0, 0);
+
+      await platformPrisma.attendanceRecord.upsert({
+        where: {
+          employeeId_date: {
+            employeeId: request.employeeId,
+            date: dateOnly,
+          },
+        },
+        create: {
+          companyId,
+          employeeId: request.employeeId,
+          date: dateOnly,
+          status: 'ON_LEAVE',
+          source: 'MANUAL',
+          shiftId: (updatedRequest.employee as any)?.shiftId ?? null,
+          leaveRequestId: id,
+          remarks: `Auto-created: ${request.isHalfDay ? 'Half-day' : 'Full-day'} leave approved`,
+        },
+        update: {
+          status: 'ON_LEAVE',
+          leaveRequestId: id,
+          remarks: `Updated: Leave approved`,
+        },
+      });
+
+      current.setDate(current.getDate() + 1);
+    }
+
+    return updatedRequest;
   }
 
   async rejectRequest(companyId: string, id: string, userId: string, note: string) {
@@ -693,6 +814,12 @@ export class LeaveService {
     }
 
     const [updatedRequest] = await platformPrisma.$transaction(operations);
+
+    // Delete auto-created attendance records linked to this leave request
+    await platformPrisma.attendanceRecord.deleteMany({
+      where: { leaveRequestId: id },
+    });
+
     return updatedRequest;
   }
 
@@ -754,7 +881,282 @@ export class LeaveService {
     }
 
     const [updatedRequest] = await platformPrisma.$transaction(operations);
+
+    // Delete auto-created attendance records linked to this leave request
+    await platformPrisma.attendanceRecord.deleteMany({
+      where: { leaveRequestId: id },
+    });
+
     return updatedRequest;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Partial Cancellation (L8)
+  // ────────────────────────────────────────────────────────────────────
+
+  async partialCancelRequest(companyId: string, id: string, data: { cancelFromDate: string }) {
+    const request = await platformPrisma.leaveRequest.findUnique({ where: { id } });
+    if (!request || request.companyId !== companyId) {
+      throw ApiError.notFound('Leave request not found');
+    }
+
+    if (request.status !== 'APPROVED') {
+      throw ApiError.badRequest('Only approved leave requests can be partially cancelled');
+    }
+
+    const cancelFrom = new Date(data.cancelFromDate);
+    cancelFrom.setHours(0, 0, 0, 0);
+    const fromDate = new Date(request.fromDate);
+    fromDate.setHours(0, 0, 0, 0);
+    const toDate = new Date(request.toDate);
+    toDate.setHours(0, 0, 0, 0);
+
+    if (cancelFrom <= fromDate || cancelFrom > toDate) {
+      throw ApiError.badRequest('cancelFromDate must be between fromDate (exclusive) and toDate (inclusive)');
+    }
+
+    // Calculate remaining days to cancel (from cancelFromDate to toDate)
+    const cancelledDays = Math.round(
+      (toDate.getTime() - cancelFrom.getTime()) / (1000 * 3600 * 24) + 1
+    );
+    const newDays = Number(request.days) - cancelledDays;
+
+    // New toDate = day before cancelFromDate
+    const newToDate = new Date(cancelFrom);
+    newToDate.setDate(newToDate.getDate() - 1);
+    newToDate.setHours(0, 0, 0, 0);
+
+    // Find balance to refund
+    const currentYear = fromDate.getFullYear();
+    const balance = await platformPrisma.leaveBalance.findUnique({
+      where: {
+        employeeId_leaveTypeId_year: {
+          employeeId: request.employeeId,
+          leaveTypeId: request.leaveTypeId,
+          year: currentYear,
+        },
+      },
+    });
+
+    const operations: any[] = [
+      platformPrisma.leaveRequest.update({
+        where: { id },
+        data: {
+          toDate: newToDate,
+          days: newDays,
+        },
+        include: {
+          employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+          leaveType: { select: { id: true, name: true, code: true } },
+        },
+      }),
+    ];
+
+    if (balance) {
+      operations.push(
+        platformPrisma.leaveBalance.update({
+          where: { id: balance.id },
+          data: {
+            taken: { decrement: cancelledDays },
+            balance: { increment: cancelledDays },
+          },
+        })
+      );
+    }
+
+    const [updatedRequest] = await platformPrisma.$transaction(operations);
+
+    // Delete attendance records for cancelled dates
+    await platformPrisma.attendanceRecord.deleteMany({
+      where: {
+        leaveRequestId: id,
+        date: { gte: cancelFrom },
+      },
+    });
+
+    return { ...updatedRequest, cancelledDays, refundedDays: cancelledDays };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Leave Accrual (M2)
+  // ────────────────────────────────────────────────────────────────────
+
+  async accrueBalances(companyId: string, month: number, year: number) {
+    // Fetch all active leave types with accrualFrequency
+    const leaveTypes = await platformPrisma.leaveType.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        accrualFrequency: { not: null },
+      },
+    });
+
+    // Fetch all active employees
+    const employees = await platformPrisma.employee.findMany({
+      where: { companyId, status: 'ACTIVE' },
+      select: { id: true, employeeId: true, firstName: true, lastName: true },
+    });
+
+    const results: any[] = [];
+
+    for (const employee of employees) {
+      for (const lt of leaveTypes) {
+        // Check if accrual is due based on frequency
+        const isDue = this.isAccrualDue(lt.accrualFrequency!, month);
+        if (!isDue) continue;
+
+        // Calculate accrual amount
+        const accrualAmount = this.calculateAccrualAmount(
+          lt.accrualFrequency!,
+          Number(lt.annualEntitlement)
+        );
+
+        // Find or create balance record
+        let balance = await platformPrisma.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: employee.id,
+              leaveTypeId: lt.id,
+              year,
+            },
+          },
+        });
+
+        if (!balance) {
+          balance = await platformPrisma.leaveBalance.create({
+            data: {
+              companyId,
+              employeeId: employee.id,
+              leaveTypeId: lt.id,
+              year,
+              openingBalance: 0,
+              accrued: 0,
+              taken: 0,
+              adjusted: 0,
+              balance: 0,
+            },
+          });
+        }
+
+        // Increment accrued and balance
+        await platformPrisma.leaveBalance.update({
+          where: { id: balance.id },
+          data: {
+            accrued: { increment: accrualAmount },
+            balance: { increment: accrualAmount },
+          },
+        });
+
+        results.push({
+          employeeId: employee.id,
+          employeeCode: employee.employeeId,
+          leaveTypeId: lt.id,
+          leaveTypeCode: lt.code,
+          accrualAmount,
+        });
+      }
+    }
+
+    return {
+      month,
+      year,
+      totalAccrued: results.length,
+      results,
+    };
+  }
+
+  async carryForwardBalances(companyId: string, fromYear: number, toYear: number) {
+    // Get all leave types where carryForward is allowed
+    const leaveTypes = await platformPrisma.leaveType.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        carryForwardAllowed: true,
+      },
+    });
+
+    // Get all active employees
+    const employees = await platformPrisma.employee.findMany({
+      where: { companyId, status: 'ACTIVE' },
+      select: { id: true, employeeId: true },
+    });
+
+    const results: any[] = [];
+
+    for (const employee of employees) {
+      for (const lt of leaveTypes) {
+        // Get balance for fromYear
+        const fromBalance = await platformPrisma.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: employee.id,
+              leaveTypeId: lt.id,
+              year: fromYear,
+            },
+          },
+        });
+
+        if (!fromBalance || Number(fromBalance.balance) <= 0) continue;
+
+        // Calculate carry-forward amount
+        const remaining = Number(fromBalance.balance);
+        const maxCF = lt.maxCarryForwardDays ? Number(lt.maxCarryForwardDays) : remaining;
+        const carryForwardAmount = Math.min(remaining, maxCF);
+
+        if (carryForwardAmount <= 0) continue;
+
+        // Find or create toYear balance
+        let toBalance = await platformPrisma.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: employee.id,
+              leaveTypeId: lt.id,
+              year: toYear,
+            },
+          },
+        });
+
+        if (toBalance) {
+          // Update existing balance with carry-forward as opening balance
+          await platformPrisma.leaveBalance.update({
+            where: { id: toBalance.id },
+            data: {
+              openingBalance: { increment: carryForwardAmount },
+              balance: { increment: carryForwardAmount },
+            },
+          });
+        } else {
+          await platformPrisma.leaveBalance.create({
+            data: {
+              companyId,
+              employeeId: employee.id,
+              leaveTypeId: lt.id,
+              year: toYear,
+              openingBalance: carryForwardAmount,
+              accrued: 0,
+              taken: 0,
+              adjusted: 0,
+              balance: carryForwardAmount,
+            },
+          });
+        }
+
+        results.push({
+          employeeId: employee.id,
+          employeeCode: employee.employeeId,
+          leaveTypeId: lt.id,
+          leaveTypeCode: lt.code,
+          carryForwardAmount,
+        });
+      }
+    }
+
+    return {
+      fromYear,
+      toYear,
+      totalCarriedForward: results.length,
+      results,
+    };
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -881,6 +1283,40 @@ export class LeaveService {
     }
 
     return days;
+  }
+
+  /** Check if accrual is due for the given month based on frequency. */
+  private isAccrualDue(frequency: string, month: number): boolean {
+    switch (frequency) {
+      case 'MONTHLY':
+        return true;
+      case 'QUARTERLY':
+        return month % 3 === 1; // Jan, Apr, Jul, Oct
+      case 'ANNUAL':
+        return month === 1; // January only
+      case 'UPFRONT':
+        return month === 1; // Grant full amount in January
+      case 'PRO_RATA':
+        return true; // Monthly pro-rata
+      default:
+        return false;
+    }
+  }
+
+  /** Calculate accrual amount based on frequency and annual entitlement. */
+  private calculateAccrualAmount(frequency: string, annualEntitlement: number): number {
+    switch (frequency) {
+      case 'MONTHLY':
+      case 'PRO_RATA':
+        return Math.round((annualEntitlement / 12) * 100) / 100;
+      case 'QUARTERLY':
+        return Math.round((annualEntitlement / 4) * 100) / 100;
+      case 'ANNUAL':
+      case 'UPFRONT':
+        return annualEntitlement;
+      default:
+        return 0;
+    }
   }
 }
 

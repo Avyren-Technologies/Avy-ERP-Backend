@@ -12,6 +12,7 @@ router.patch('/attendance/rules', requirePermissions(['hr:update']), controller.
 router.get('/attendance', requirePermissions(['hr:read']), controller.listRecords);
 router.post('/attendance', requirePermissions(['hr:create']), controller.createRecord);
 router.get('/attendance/summary', requirePermissions(['hr:read']), controller.getSummary);
+router.post('/attendance/populate-month', requirePermissions(['hr:create']), controller.populateMonth);
 
 // ── Overrides / Regularization (must be before :id) ──────────────────
 router.get('/attendance/overrides', requirePermissions(['hr:read']), controller.listOverrides);

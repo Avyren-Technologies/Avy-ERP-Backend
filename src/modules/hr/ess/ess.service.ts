@@ -309,7 +309,7 @@ export class ESSService {
 
     if (currentStep >= totalSteps) {
       // Last step — mark as APPROVED
-      return platformPrisma.approvalRequest.update({
+      const updatedRequest = await platformPrisma.approvalRequest.update({
         where: { id: requestId },
         data: {
           status: 'APPROVED',
@@ -319,6 +319,11 @@ export class ESSService {
           workflow: { select: { id: true, name: true, triggerEvent: true } },
         },
       });
+
+      // Callback: update source entity status based on entityType
+      await this.onApprovalComplete(companyId, request.entityType, request.entityId, 'APPROVED');
+
+      return updatedRequest;
     }
 
     // Advance to next step
@@ -359,7 +364,7 @@ export class ESSService {
     const existingHistory = (request.stepHistory as any[]) ?? [];
     const updatedHistory = [...existingHistory, historyEntry];
 
-    return platformPrisma.approvalRequest.update({
+    const updatedRequest = await platformPrisma.approvalRequest.update({
       where: { id: requestId },
       data: {
         status: 'REJECTED',
@@ -369,6 +374,115 @@ export class ESSService {
         workflow: { select: { id: true, name: true, triggerEvent: true } },
       },
     });
+
+    // Callback: update source entity status based on entityType
+    await this.onApprovalComplete(companyId, request.entityType, request.entityId, 'REJECTED');
+
+    return updatedRequest;
+  }
+
+  private async onApprovalComplete(companyId: string, entityType: string, entityId: string, decision: 'APPROVED' | 'REJECTED') {
+    try {
+      switch (entityType) {
+        case 'PayrollRun':
+          if (decision === 'APPROVED') {
+            await platformPrisma.payrollRun.update({
+              where: { id: entityId },
+              data: { status: 'APPROVED', approvedAt: new Date() },
+            });
+          }
+          break;
+
+        case 'SalaryRevision':
+          await platformPrisma.salaryRevision.update({
+            where: { id: entityId },
+            data: {
+              status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+              ...(decision === 'APPROVED' && { approvedAt: new Date() }),
+            },
+          });
+          break;
+
+        case 'ExitRequest':
+          if (decision === 'APPROVED') {
+            await platformPrisma.exitRequest.update({
+              where: { id: entityId },
+              data: { status: 'APPROVED' },
+            });
+          } else {
+            // On rejection, revert employee status
+            const exitReq = await platformPrisma.exitRequest.findUnique({
+              where: { id: entityId },
+              select: { employeeId: true },
+            });
+            if (exitReq) {
+              await platformPrisma.employee.update({
+                where: { id: exitReq.employeeId },
+                data: { status: 'ACTIVE', lastWorkingDate: null, exitReason: null },
+              });
+            }
+            await platformPrisma.exitRequest.update({
+              where: { id: entityId },
+              data: { status: 'REJECTED' },
+            });
+          }
+          break;
+
+        case 'EmployeeTransfer':
+          if (decision === 'APPROVED') {
+            // Apply the transfer to the employee
+            const transfer = await platformPrisma.employeeTransfer.findUnique({
+              where: { id: entityId },
+            });
+            if (transfer) {
+              await platformPrisma.employeeTransfer.update({
+                where: { id: entityId },
+                data: { status: 'APPROVED' },
+              });
+              // Update employee's department/designation/location/manager
+              const updateData: any = {};
+              if (transfer.toDepartmentId) updateData.departmentId = transfer.toDepartmentId;
+              if (transfer.toDesignationId) updateData.designationId = transfer.toDesignationId;
+              if (transfer.toLocationId) updateData.locationId = transfer.toLocationId;
+              if (transfer.toManagerId) updateData.reportingManagerId = transfer.toManagerId;
+              if (Object.keys(updateData).length > 0) {
+                await platformPrisma.employee.update({
+                  where: { id: transfer.employeeId },
+                  data: updateData,
+                });
+              }
+            }
+          } else {
+            await platformPrisma.employeeTransfer.update({
+              where: { id: entityId },
+              data: { status: 'REJECTED' },
+            });
+          }
+          break;
+
+        case 'EmployeePromotion':
+          if (decision === 'APPROVED') {
+            await platformPrisma.employeeTransfer.update({
+              where: { id: entityId },
+              data: { status: 'APPROVED' },
+            });
+          } else {
+            await platformPrisma.employeeTransfer.update({
+              where: { id: entityId },
+              data: { status: 'REJECTED' },
+            });
+          }
+          break;
+
+        default:
+          // Unknown entity type — log but don't fail
+          break;
+      }
+    } catch (error) {
+      // Log the callback error but don't fail the approval
+      // The approval itself succeeded; entity update failure should be retryable
+      console.error(`Approval callback failed for ${entityType}/${entityId}:`, error);
+    }
   }
 
   async createRequest(companyId: string, data: {

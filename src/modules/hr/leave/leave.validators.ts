@@ -82,3 +82,21 @@ export const approveRequestSchema = z.object({
 export const rejectRequestSchema = z.object({
   note: z.string().min(1).max(500),
 });
+
+// ── Accrual & Carry-Forward ──────────────────────────────────────────
+
+export const accrueBalancesSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+});
+
+export const carryForwardSchema = z.object({
+  fromYear: z.number().int().min(2000).max(2100),
+  toYear: z.number().int().min(2000).max(2100),
+});
+
+// ── Partial Cancellation ─────────────────────────────────────────────
+
+export const partialCancelRequestSchema = z.object({
+  cancelFromDate: z.string().min(1), // ISO date string
+});

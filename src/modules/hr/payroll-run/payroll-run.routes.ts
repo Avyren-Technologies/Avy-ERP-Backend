@@ -8,6 +8,7 @@ const router = Router();
 router.get('/payroll-runs', requirePermissions(['hr:read']), controller.listRuns);
 router.post('/payroll-runs', requirePermissions(['hr:create']), controller.createRun);
 router.get('/payroll-runs/:id', requirePermissions(['hr:read']), controller.getRun);
+router.delete('/payroll-runs/:id', requirePermissions(['hr:delete']), controller.deleteRun);
 
 // ── 6-Step Wizard ────────────────────────────────────────────────────
 router.patch('/payroll-runs/:id/lock-attendance', requirePermissions(['hr:update']), controller.lockAttendance);
@@ -27,6 +28,7 @@ router.get('/payslips', requirePermissions(['hr:read']), controller.listPayslips
 router.get('/payslips/:id', requirePermissions(['hr:read']), controller.getPayslip);
 router.post('/payslips/:id/email', requirePermissions(['hr:update']), controller.emailPayslip);
 router.post('/payroll-runs/:id/generate-payslips', requirePermissions(['hr:create']), controller.generatePayslips);
+router.post('/payroll-runs/:id/bulk-email-payslips', requirePermissions(['hr:update']), controller.bulkEmailPayslips);
 
 // ── Salary Holds ─────────────────────────────────────────────────────
 router.get('/salary-holds', requirePermissions(['hr:read']), controller.listHolds);

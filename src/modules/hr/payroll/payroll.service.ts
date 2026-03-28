@@ -550,29 +550,43 @@ export class PayrollConfigService {
     const components = structure.components as any[];
     const breakup: Record<string, number> = {};
     const monthly = annualCtc / 12;
-
-    // First pass: find basic (FIXED components need their value from the structure)
     let basicAmount = 0;
-    let grossAmount = monthly;
+    const grossAmount = monthly;
 
+    // First pass: FIXED components
     for (const comp of components) {
       if (comp.calculationMethod === 'FIXED') {
         breakup[comp.componentId] = comp.value ?? 0;
-        if (comp.componentId.toLowerCase().includes('basic') || comp.formula?.toLowerCase()?.includes('basic')) {
+        // Identify basic by checking the component's name/code stored in the structure,
+        // or by looking at the isBasic flag if present
+        if (comp.isBasic || comp.code?.toLowerCase()?.includes('basic') || comp.name?.toLowerCase()?.includes('basic')) {
           basicAmount = comp.value ?? 0;
         }
       }
     }
 
-    // If no fixed basic found, try percent-based basic
+    // Second pass: PERCENT_OF_GROSS components (typically Basic is the first one)
     for (const comp of components) {
       if (comp.calculationMethod === 'PERCENT_OF_GROSS') {
-        breakup[comp.componentId] = Math.round(((comp.value ?? 0) / 100) * grossAmount * 100) / 100;
-        if (!basicAmount) basicAmount = breakup[comp.componentId] ?? 0;
+        const amount = Math.round(((comp.value ?? 0) / 100) * grossAmount * 100) / 100;
+        breakup[comp.componentId] = amount;
+        // Identify basic by checking the component's name/code/flag,
+        // or treat the first PERCENT_OF_GROSS as basic if none explicitly marked
+        if (comp.isBasic || comp.code?.toLowerCase()?.includes('basic') || comp.name?.toLowerCase()?.includes('basic')) {
+          basicAmount = amount;
+        } else if (!basicAmount) {
+          // Fallback: first PERCENT_OF_GROSS is assumed to be basic
+          basicAmount = amount;
+        }
       }
     }
 
-    // Second pass: percent of basic
+    // If still no basic found, fall back to 40% of monthly gross (industry standard)
+    if (!basicAmount) {
+      basicAmount = Math.round(monthly * 0.4 * 100) / 100;
+    }
+
+    // Third pass: PERCENT_OF_BASIC components
     for (const comp of components) {
       if (comp.calculationMethod === 'PERCENT_OF_BASIC') {
         breakup[comp.componentId] = Math.round(((comp.value ?? 0) / 100) * basicAmount * 100) / 100;

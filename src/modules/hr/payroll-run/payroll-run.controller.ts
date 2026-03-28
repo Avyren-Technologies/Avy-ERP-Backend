@@ -39,6 +39,15 @@ export class PayrollRunController {
     res.json(createSuccessResponse(run, 'Payroll run retrieved'));
   });
 
+  // M9: Delete run (DRAFT only)
+  deleteRun = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await payrollRunService.deleteRun(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Payroll run deleted'));
+  });
+
   createRun = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
@@ -188,6 +197,15 @@ export class PayrollRunController {
 
     const result = await payrollRunService.emailPayslip(companyId, req.params.id!);
     res.json(createSuccessResponse(result, 'Payslip email sent'));
+  });
+
+  // L7: Bulk email payslips for a run
+  bulkEmailPayslips = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await payrollRunService.bulkEmailPayslips(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Payslip emails sent'));
   });
 
   // ══════════════════════════════════════════════════════════════════════════

@@ -76,6 +76,9 @@ export const createEmployeeSchema = z.object({
   voterId: z.string().optional(),
   pran: z.string().optional(),
 
+  // Optional: initial employee status (defaults to PROBATION)
+  initialStatus: z.enum(['ACTIVE', 'PROBATION', 'CONFIRMED']).optional(),
+
   // Optional: Create a User (login) account simultaneously
   createUserAccount: z.boolean().optional(),
   userPassword: z.string().min(6, 'Password must be at least 6 characters').optional(),

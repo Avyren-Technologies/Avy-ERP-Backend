@@ -286,21 +286,144 @@ export class AttendanceService {
       }
     }
 
-    // Department-wise breakdown
-    const departmentBreakdown = await platformPrisma.attendanceRecord.groupBy({
-      by: ['status'],
+    // Department-wise breakdown — fetch records with employee.department, group in JS
+    const deptRecords = await platformPrisma.attendanceRecord.findMany({
       where: {
         companyId,
         date: { gte: dayStart, lte: dayEnd },
+        employee: { departmentId: { not: null } },
       },
-      _count: { status: true },
+      select: {
+        status: true,
+        employee: {
+          select: {
+            department: { select: { id: true, name: true } },
+          },
+        },
+      },
     });
+
+    const deptMap = new Map<string, { departmentId: string; departmentName: string; present: number; absent: number; onLeave: number; total: number }>();
+    for (const rec of deptRecords) {
+      const dept = rec.employee?.department;
+      if (!dept) continue;
+      if (!deptMap.has(dept.id)) {
+        deptMap.set(dept.id, { departmentId: dept.id, departmentName: dept.name, present: 0, absent: 0, onLeave: 0, total: 0 });
+      }
+      const entry = deptMap.get(dept.id)!;
+      entry.total++;
+      if (rec.status === 'PRESENT' || rec.status === 'LATE') entry.present++;
+      else if (rec.status === 'ABSENT') entry.absent++;
+      else if (rec.status === 'ON_LEAVE') entry.onLeave++;
+    }
+    const departmentBreakdown = Array.from(deptMap.values()).sort((a, b) => a.departmentName.localeCompare(b.departmentName));
 
     return {
       date: dayStart.toISOString().split('T')[0],
       summary,
       departmentBreakdown,
     };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Populate Month (auto-fill holidays & week-offs)
+  // ────────────────────────────────────────────────────────────────────
+
+  async populateMonthAttendance(companyId: string, month: number, year: number) {
+    const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    // 1. Get all active employees for the company
+    const employees = await platformPrisma.employee.findMany({
+      where: { companyId, status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED'] } },
+      select: { id: true },
+    });
+
+    if (employees.length === 0) {
+      return { created: 0 };
+    }
+
+    // 2. Get the company's default roster for week-off days
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+    });
+    const weekOff1 = roster?.weekOff1 ?? null;
+    const weekOff2 = roster?.weekOff2 ?? null;
+
+    // 3. Get all holidays for this month
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 0); // last day of month
+    const holidays = await platformPrisma.holidayCalendar.findMany({
+      where: {
+        companyId,
+        date: { gte: monthStart, lte: monthEnd },
+      },
+      select: { date: true },
+    });
+
+    // Build a Set of holiday date strings (YYYY-MM-DD) for fast lookup
+    const holidayDates = new Set(
+      holidays.map((h) => h.date.toISOString().split('T')[0])
+    );
+
+    // 4. Get all existing attendance records for the month to avoid overwriting
+    const existingRecords = await platformPrisma.attendanceRecord.findMany({
+      where: {
+        companyId,
+        date: { gte: monthStart, lte: new Date(year, month - 1, monthEnd.getDate(), 23, 59, 59, 999) },
+      },
+      select: { employeeId: true, date: true },
+    });
+
+    const existingKeys = new Set(
+      existingRecords.map((r) => `${r.employeeId}_${r.date.toISOString().split('T')[0]}`)
+    );
+
+    // 5. Build the batch of records to create
+    const daysInMonth = monthEnd.getDate();
+    const recordsToCreate: Array<{
+      companyId: string;
+      employeeId: string;
+      date: Date;
+      status: string;
+      source: string;
+    }> = [];
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month - 1, day);
+      const dateStr = date.toISOString().split('T')[0];
+      const dow = dayOfWeek[date.getDay()];
+      const isHoliday = holidayDates.has(dateStr);
+      const isWeekOff = dow === weekOff1 || dow === weekOff2;
+
+      if (!isHoliday && !isWeekOff) continue;
+
+      const status = isHoliday ? 'HOLIDAY' : 'WEEK_OFF';
+
+      for (const emp of employees) {
+        const key = `${emp.id}_${dateStr}`;
+        if (existingKeys.has(key)) continue;
+
+        recordsToCreate.push({
+          companyId,
+          employeeId: emp.id,
+          date,
+          status,
+          source: 'MANUAL',
+        });
+      }
+    }
+
+    if (recordsToCreate.length === 0) {
+      return { created: 0 };
+    }
+
+    // 6. Batch create using createMany with skipDuplicates
+    const result = await platformPrisma.attendanceRecord.createMany({
+      data: recordsToCreate,
+      skipDuplicates: true,
+    });
+
+    return { created: result.count };
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -415,6 +538,21 @@ export class AttendanceService {
       throw ApiError.notFound('Attendance record not found');
     }
 
+    // Check if payroll is locked for this record's month
+    const recordDate = new Date(record.date);
+    const recordMonth = recordDate.getMonth() + 1;
+    const recordYear = recordDate.getFullYear();
+
+    const payrollRun = await platformPrisma.payrollRun.findUnique({
+      where: { companyId_month_year: { companyId, month: recordMonth, year: recordYear } },
+    });
+
+    if (payrollRun && payrollRun.status !== 'DRAFT') {
+      throw ApiError.badRequest(
+        `Cannot create override: attendance for ${recordMonth}/${recordYear} is locked for payroll processing (status: ${payrollRun.status})`
+      );
+    }
+
     return platformPrisma.attendanceOverride.create({
       data: {
         companyId,
@@ -523,6 +661,12 @@ export class AttendanceService {
         updateData.isLate = false;
         updateData.lateMinutes = 0;
       }
+
+      // Mark as regularized
+      updateData.isRegularized = true;
+      updateData.regularizedAt = new Date();
+      updateData.regularizedBy = userId;
+      updateData.regularizationReason = override.reason;
 
       if (Object.keys(updateData).length > 0) {
         await platformPrisma.attendanceRecord.update({
@@ -881,15 +1025,23 @@ export class AttendanceService {
       }
     }
 
-    // Check early exit
+    // Check early exit (with night-shift cross-midnight support)
     if (punchOut && shift.toTime) {
-      const parts = shift.toTime.split(':').map(Number);
-      const shiftHour = parts[0] ?? 0;
-      const shiftMin = parts[1] ?? 0;
-      const shiftEnd = new Date(punchOut);
-      shiftEnd.setHours(shiftHour, shiftMin, 0, 0);
+      const fromParts = shift.fromTime.split(':').map(Number);
+      const toParts = shift.toTime.split(':').map(Number);
+      const fromMinutes = (fromParts[0] ?? 0) * 60 + (fromParts[1] ?? 0);
+      const toMinutes = (toParts[0] ?? 0) * 60 + (toParts[1] ?? 0);
+      const isOvernightShift = toMinutes < fromMinutes;
 
-      // Subtract early exit tolerance
+      const shiftEnd = new Date(punchOut);
+      shiftEnd.setHours(toParts[0] ?? 0, toParts[1] ?? 0, 0, 0);
+
+      // If overnight shift and punchOut is still on the first day (before midnight),
+      // the shift end is on the next day
+      if (isOvernightShift && punchOut.getHours() >= (fromParts[0] ?? 0)) {
+        shiftEnd.setDate(shiftEnd.getDate() + 1);
+      }
+
       const toleranceEnd = new Date(shiftEnd.getTime() - earlyExitTolerance * 60 * 1000);
       const diffMs = toleranceEnd.getTime() - punchOut.getTime();
 

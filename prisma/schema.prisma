@@ -1325,6 +1325,13 @@ model AttendanceRecord {
   checkInPhotoUrl   String?        @db.Text
   checkOutPhotoUrl  String?        @db.Text
   geoStatus         String?        // NO_LOCATION, INSIDE_GEOFENCE, OUTSIDE_GEOFENCE
+  // ── Regularization fields (M8) ──
+  isRegularized         Boolean   @default(false)
+  regularizedAt         DateTime?
+  regularizedBy         String?
+  regularizationReason  String?
+  // ── Leave linkage (C1) ──
+  leaveRequestId        String?
   companyId     String
   company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt     DateTime         @default(now())
@@ -1857,6 +1864,29 @@ model Payslip {
   year         Int
   pdfUrl       String?
   emailedAt    DateTime?
+
+  // ── Immutable snapshot (H1) — frozen at generation time ──
+  grossEarnings       Decimal? @db.Decimal(15, 2)
+  totalDeductions     Decimal? @db.Decimal(15, 2)
+  netPay              Decimal? @db.Decimal(15, 2)
+  earnings            Json?    // { componentCode: amount }
+  deductions          Json?    // { componentCode: amount }
+  employerContributions Json?  // { PF_EMPLOYER: x, ESI_EMPLOYER: y }
+  pfEmployee          Decimal? @db.Decimal(15, 2)
+  pfEmployer          Decimal? @db.Decimal(15, 2)
+  esiEmployee         Decimal? @db.Decimal(15, 2)
+  esiEmployer         Decimal? @db.Decimal(15, 2)
+  ptAmount            Decimal? @db.Decimal(15, 2)
+  tdsAmount           Decimal? @db.Decimal(15, 2)
+  lwfEmployee         Decimal? @db.Decimal(15, 2)
+  lwfEmployer         Decimal? @db.Decimal(15, 2)
+  loanDeduction       Decimal? @db.Decimal(15, 2)
+  overtimeAmount      Decimal? @db.Decimal(15, 2)
+  workingDays         Int?
+  presentDays         Decimal? @db.Decimal(5, 1)
+  lopDays             Decimal? @db.Decimal(5, 1)
+  tdsProvisional      Boolean  @default(false) // C3: flag for provisional TDS
+
   companyId    String
   company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt    DateTime   @default(now())
