@@ -27,7 +27,7 @@ router.get('/attendance/:id', requirePermissions(['hr:read']), controller.getRec
 router.patch('/attendance/:id', requirePermissions(['hr:update']), controller.updateRecord);
 
 // ── Holiday Calendar ──────────────────────────────────────────────────
-router.get('/holidays', requirePermissions(['hr:read']), controller.listHolidays);
+router.get('/holidays', requirePermissions(['hr:read', 'ess:view-holidays']), controller.listHolidays);
 router.post('/holidays', requirePermissions(['hr:create']), controller.createHoliday);
 router.post('/holidays/clone', requirePermissions(['hr:create']), controller.cloneHolidays);
 router.patch('/holidays/:id', requirePermissions(['hr:update']), controller.updateHoliday);

@@ -401,15 +401,58 @@ export class ESSController {
   // ── ESS Self-Service ──────────────────────────────────────────────
 
   /** Resolve employeeId from authenticated user or optional query param (admin override).
-   *  Returns null when no employee record is linked — callers handle gracefully. */
-  private resolveEmployeeId(req: Request): string | null {
-    return (req.query.employeeId as string) || (req.user as any)?.employeeId || null;
+   *  Performs DB lookup as fallback if JWT doesn't contain employeeId (e.g., employee
+   *  was linked after last login). Auto-links user→employee by email match if found. */
+  private async resolveEmployeeId(req: Request): Promise<string | null> {
+    // 1. Explicit query param (admin viewing another employee's data)
+    if (req.query.employeeId) return req.query.employeeId as string;
+
+    // 2. From JWT token (set during login if user was already linked)
+    if ((req.user as any)?.employeeId) return (req.user as any).employeeId;
+
+    // 3. Fallback: look up User → Employee link from DB
+    const userId = req.user?.id;
+    const companyId = req.user?.companyId;
+    if (!userId || !companyId) return null;
+
+    const user = await platformPrisma.user.findUnique({
+      where: { id: userId },
+      select: { employeeId: true, email: true },
+    });
+
+    // 3a. User has employeeId in DB (linked after last login)
+    if (user?.employeeId) return user.employeeId;
+
+    // 3b. Try matching by email (user email = employee officialEmail or personalEmail)
+    if (user?.email) {
+      const employee = await platformPrisma.employee.findFirst({
+        where: {
+          companyId,
+          status: { not: 'EXITED' },
+          OR: [
+            { officialEmail: user.email },
+            { personalEmail: user.email },
+          ],
+        },
+        select: { id: true },
+      });
+      if (employee) {
+        // Auto-link for future requests (so this DB lookup only happens once)
+        await platformPrisma.user.update({
+          where: { id: userId },
+          data: { employeeId: employee.id },
+        });
+        return employee.id;
+      }
+    }
+
+    return null;
   }
 
-  /** Resolve managerId from query param or authenticated user's employee link.
-   *  Returns null when no employee record is linked. */
-  private resolveManagerId(req: Request): string | null {
-    return (req.query.managerId as string) || (req.user as any)?.employeeId || null;
+  /** Resolve managerId from query param or authenticated user's employee link. */
+  private async resolveManagerId(req: Request): Promise<string | null> {
+    if (req.query.managerId) return req.query.managerId as string;
+    return this.resolveEmployeeId(req);
   }
 
   private static readonly NOT_LINKED_MSG = 'No employee record linked to your account. Please contact HR.';
@@ -418,7 +461,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) {
       res.json(createSuccessResponse(null, ESSController.NOT_LINKED_MSG));
       return;
@@ -431,7 +474,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -444,7 +487,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -457,7 +500,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -473,7 +516,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -486,7 +529,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
 
     const parsed = applyLeaveSchema.safeParse(req.body);
@@ -502,7 +545,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
 
     const parsed = regularizeAttendanceSchema.safeParse(req.body);
@@ -520,7 +563,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = this.resolveManagerId(req);
+    const managerId = await this.resolveManagerId(req);
     if (!managerId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -534,7 +577,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = this.resolveManagerId(req);
+    const managerId = await this.resolveManagerId(req);
     if (!managerId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -548,7 +591,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = this.resolveManagerId(req);
+    const managerId = await this.resolveManagerId(req);
     if (!managerId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -564,7 +607,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const managerId = this.resolveManagerId(req);
+    const managerId = await this.resolveManagerId(req);
     if (!managerId) {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
@@ -583,7 +626,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) {
       res.json(createSuccessResponse({ status: 'NOT_LINKED', record: null }, ESSController.NOT_LINKED_MSG));
       return;
@@ -615,7 +658,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
 
     const parsed = checkInSchema.safeParse(req.body);
@@ -693,7 +736,7 @@ export class ESSController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const employeeId = this.resolveEmployeeId(req);
+    const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
 
     const parsed = checkOutSchema.safeParse(req.body);

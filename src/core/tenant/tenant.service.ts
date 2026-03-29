@@ -379,12 +379,57 @@ export class TenantService {
         },
       });
 
-      // ── 9. Users ───────────────────────────────────────────────
+      // ── 9. Create default RBAC Role for this tenant ──────────
+      const companyAdminRole = await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          name: 'Company Admin',
+          description: 'Full company access — all modules and actions',
+          permissions: [
+            'company:*', 'hr:*', 'production:*', 'inventory:*', 'sales:*',
+            'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
+            'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
+          ],
+          isSystem: true,
+        },
+      });
+
+      // Also create a default "Employee" role with ESS permissions
+      await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          name: 'Employee',
+          description: 'Standard employee with ESS self-service access',
+          permissions: [
+            'ess:view-payslips', 'ess:view-leave', 'ess:apply-leave',
+            'ess:view-attendance', 'ess:regularize-attendance', 'ess:view-holidays',
+            'ess:it-declaration', 'ess:view-directory', 'ess:view-profile',
+            'ess:download-form16', 'ess:view-goals', 'ess:submit-appraisal',
+            'ess:submit-feedback',
+          ],
+          isSystem: true,
+        },
+      });
+
+      // Create a default "Manager" role with team management permissions
+      await tx.role.create({
+        data: {
+          tenantId: tenant.id,
+          name: 'Manager',
+          description: 'Team manager with ESS + team management + approvals',
+          permissions: [
+            'ess:*', 'hr:read', 'hr:approve', 'reports:read',
+          ],
+          isSystem: true,
+        },
+      });
+
+      // ── 10. Users + TenantUser bridge ─────────────────────────
       if (payload.users.length > 0) {
         for (const u of payload.users) {
           const { firstName, lastName } = splitName(u.fullName);
           const hashed = await hashPassword(u.password);
-          await tx.user.create({
+          const newUser = await tx.user.create({
             data: {
               email: u.email,
               password: hashed,
@@ -393,6 +438,15 @@ export class TenantService {
               phone: n(u.mobile),
               role: 'COMPANY_ADMIN',
               companyId: company.id,
+            },
+          });
+
+          // Create TenantUser bridge — links user to role with permissions
+          await tx.tenantUser.create({
+            data: {
+              userId: newUser.id,
+              tenantId: tenant.id,
+              roleId: companyAdminRole.id,
             },
           });
         }

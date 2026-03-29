@@ -26,7 +26,7 @@ export const createEmployeeSchema = z.object({
   category: z.string().optional(),
   differentlyAbled: z.boolean().optional(),
   disabilityType: z.string().optional(),
-  profilePhotoUrl: z.string().optional(),
+  profilePhotoUrl: z.string().nullable().optional(),
 
   // Contact Info
   personalMobile: z.string().min(10, 'Mobile number must be at least 10 digits'),
@@ -76,6 +76,9 @@ export const createEmployeeSchema = z.object({
   voterId: z.string().optional(),
   pran: z.string().optional(),
 
+  // Probation
+  probationEndDate: z.string().or(z.date()).nullable().optional(),
+
   // Optional: initial employee status (defaults to PROBATION)
   initialStatus: z.enum(['ACTIVE', 'PROBATION', 'CONFIRMED']).optional(),
 
@@ -83,7 +86,14 @@ export const createEmployeeSchema = z.object({
   createUserAccount: z.boolean().optional(),
   userPassword: z.string().min(6, 'Password must be at least 6 characters').optional(),
   userRole: z.string().optional(),
-});
+  userLocationId: z.string().optional(),
+
+  // Document uploads (base64)
+  documentUploads: z.record(z.object({
+    fileName: z.string(),
+    base64: z.string(),
+  })).optional(),
+}).passthrough();
 
 // Refined version for create — validates user account fields
 export const createEmployeeWithUserSchema = createEmployeeSchema.refine(

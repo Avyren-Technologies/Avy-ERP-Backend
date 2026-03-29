@@ -7,6 +7,15 @@ function n<T>(value: T | undefined): T | null {
   return value === undefined ? null : value;
 }
 
+/** ESS my-profile JSON: never expose full bank account — last 4 digits only (digits after stripping non-numeric). */
+function bankAccountLast4Only(raw: string | null | undefined): string | null {
+  if (raw == null || String(raw).trim() === '') return null;
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length === 0) return null;
+  if (digits.length <= 4) return digits;
+  return digits.slice(-4);
+}
+
 interface ListOptions {
   page?: number;
   limit?: number;
@@ -1051,7 +1060,16 @@ export class ESSService {
         employeeType: { select: { id: true, name: true } },
         shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
         location: { select: { id: true, name: true } },
+        costCentre: { select: { id: true, name: true, code: true } },
         reportingManager: {
+          select: {
+            id: true,
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        functionalManager: {
           select: {
             id: true,
             employeeId: true,
@@ -1066,10 +1084,7 @@ export class ESSService {
       throw ApiError.notFound('Employee not found');
     }
 
-    // Filter sensitive fields based on ESS config
-    const config = await this.getESSConfig(companyId);
-
-    // Return profile data (always allowed fields)
+    // ESS my-profile: full read for self-service; bank account is last-4 only in JSON
     return {
       id: employee.id,
       employeeId: employee.employeeId,
@@ -1078,20 +1093,44 @@ export class ESSService {
       lastName: employee.lastName,
       dateOfBirth: employee.dateOfBirth,
       gender: employee.gender,
+      maritalStatus: employee.maritalStatus,
+      bloodGroup: employee.bloodGroup,
+      nationality: employee.nationality,
+      fatherMotherName: employee.fatherMotherName,
       personalMobile: employee.personalMobile,
+      alternativeMobile: employee.alternativeMobile,
       personalEmail: employee.personalEmail,
       officialEmail: employee.officialEmail,
       profilePhotoUrl: employee.profilePhotoUrl,
+      currentAddress: employee.currentAddress,
+      permanentAddress: employee.permanentAddress,
+      emergencyContactName: employee.emergencyContactName,
+      emergencyContactRelation: employee.emergencyContactRelation,
+      emergencyContactMobile: employee.emergencyContactMobile,
       joiningDate: employee.joiningDate,
+      probationEndDate: employee.probationEndDate,
+      confirmationDate: employee.confirmationDate,
+      noticePeriodDays: employee.noticePeriodDays,
       department: employee.department,
       designation: employee.designation,
       grade: employee.grade,
       employeeType: employee.employeeType,
       shift: employee.shift,
       location: employee.location,
+      costCentre: employee.costCentre,
       reportingManager: employee.reportingManager,
+      functionalManager: employee.functionalManager,
       status: employee.status,
       workType: employee.workType,
+      bankName: employee.bankName,
+      bankAccountNumber: bankAccountLast4Only(employee.bankAccountNumber),
+      bankIfscCode: employee.bankIfscCode,
+      bankBranch: employee.bankBranch,
+      accountType: employee.accountType,
+      panNumber: employee.panNumber,
+      aadhaarNumber: employee.aadhaarNumber,
+      uan: employee.uan,
+      esiIpNumber: employee.esiIpNumber,
     };
   }
 

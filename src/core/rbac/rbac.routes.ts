@@ -9,6 +9,7 @@ router.get('/roles', requirePermissions(['role:read']), rbacController.listRoles
 router.get('/roles/:id', requirePermissions(['role:read']), rbacController.getRole);
 router.post('/roles', requirePermissions(['role:create']), rbacController.createRole);
 router.put('/roles/:id', requirePermissions(['role:update']), rbacController.updateRole);
+router.patch('/roles/:id', requirePermissions(['role:update']), rbacController.updateRole);
 router.delete('/roles/:id', requirePermissions(['role:delete']), rbacController.deleteRole);
 
 // Role assignment

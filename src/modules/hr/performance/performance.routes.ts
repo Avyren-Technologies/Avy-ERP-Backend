@@ -23,17 +23,17 @@ router.get('/appraisal-entries', requirePermissions(['hr:read']), controller.lis
 router.get('/appraisal-cycles/:cycleId/entries', requirePermissions(['hr:read']), controller.listEntries);
 router.get('/appraisal-cycles/:cycleId/calibration', requirePermissions(['hr:read']), controller.getCalibrationView);
 router.post('/appraisal-entries', requirePermissions(['hr:create']), controller.createEntry);
-router.get('/appraisal-entries/:id', requirePermissions(['hr:read']), controller.getEntry);
-router.patch('/appraisal-entries/:id/self-review', requirePermissions(['hr:update']), controller.selfReview);
+router.get('/appraisal-entries/:id', requirePermissions(['hr:read', 'ess:submit-appraisal']), controller.getEntry);
+router.patch('/appraisal-entries/:id/self-review', requirePermissions(['hr:update', 'ess:submit-appraisal']), controller.selfReview);
 router.patch('/appraisal-entries/:id/manager-review', requirePermissions(['hr:update']), controller.managerReview);
 router.patch('/appraisal-entries/:id/publish', requirePermissions(['hr:update']), controller.publishEntry);
 
 // ── Goals ──────────────────────────────────────────────────────────
-router.get('/goals', requirePermissions(['hr:read']), controller.listGoals);
-router.post('/goals', requirePermissions(['hr:create']), controller.createGoal);
+router.get('/goals', requirePermissions(['hr:read', 'ess:view-goals']), controller.listGoals);
+router.post('/goals', requirePermissions(['hr:create', 'ess:view-goals']), controller.createGoal);
 router.get('/goals/cascade/:departmentId', requirePermissions(['hr:read']), controller.getGoalCascade);
-router.get('/goals/:id', requirePermissions(['hr:read']), controller.getGoal);
-router.patch('/goals/:id', requirePermissions(['hr:update']), controller.updateGoal);
+router.get('/goals/:id', requirePermissions(['hr:read', 'ess:view-goals']), controller.getGoal);
+router.patch('/goals/:id', requirePermissions(['hr:update', 'ess:view-goals']), controller.updateGoal);
 router.delete('/goals/:id', requirePermissions(['hr:delete']), controller.deleteGoal);
 
 // ── 360 Feedback ───────────────────────────────────────────────────
@@ -41,10 +41,10 @@ router.get('/appraisal-cycles/:cycleId/feedback', requirePermissions(['hr:read']
 router.get('/feedback360', requirePermissions(['hr:read']), controller.listAllFeedback);
 router.get('/feedback360/report/:employeeId/:cycleId', requirePermissions(['hr:read']), controller.getAggregatedFeedbackReport);
 router.post('/feedback360', requirePermissions(['hr:create']), controller.createFeedback);
-router.get('/feedback360/:id', requirePermissions(['hr:read']), controller.getFeedback);
-router.patch('/feedback360/:id', requirePermissions(['hr:update']), controller.updateFeedback);
+router.get('/feedback360/:id', requirePermissions(['hr:read', 'ess:submit-feedback']), controller.getFeedback);
+router.patch('/feedback360/:id', requirePermissions(['hr:update', 'ess:submit-feedback']), controller.updateFeedback);
 router.delete('/feedback360/:id', requirePermissions(['hr:delete']), controller.deleteFeedback);
-router.patch('/feedback360/:id/submit', requirePermissions(['hr:update']), controller.submitFeedback);
+router.patch('/feedback360/:id/submit', requirePermissions(['hr:update', 'ess:submit-feedback']), controller.submitFeedback);
 
 // ── Skill Library ──────────────────────────────────────────────────
 router.get('/skills', requirePermissions(['hr:read']), controller.listSkills);

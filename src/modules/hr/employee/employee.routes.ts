@@ -5,7 +5,7 @@ import { employeeController } from './employee.controller';
 const router = Router();
 
 // ── Employee CRUD ─────────────────────────────────────────────────────
-router.get('/employees', requirePermissions(['hr:read']), employeeController.listEmployees);
+router.get('/employees', requirePermissions(['hr:read', 'ess:view-directory']), employeeController.listEmployees);
 router.post('/employees', requirePermissions(['hr:create']), employeeController.createEmployee);
 
 // ── Probation (RED-7) — MUST be before /:id catch-all ────────────────
@@ -14,7 +14,7 @@ router.get('/employees/probation-due', requirePermissions(['hr:read']), employee
 // ── Org Chart (ORA-10) — MUST be before /:id catch-all ───────────────
 router.get('/employees/org-chart', requirePermissions(['hr:read']), employeeController.getOrgChart);
 
-router.get('/employees/:id', requirePermissions(['hr:read']), employeeController.getEmployee);
+router.get('/employees/:id', requirePermissions(['hr:read', 'ess:view-profile']), employeeController.getEmployee);
 router.patch('/employees/:id', requirePermissions(['hr:update']), employeeController.updateEmployee);
 router.patch('/employees/:id/status', requirePermissions(['hr:update']), employeeController.updateEmployeeStatus);
 router.delete('/employees/:id', requirePermissions(['hr:delete']), employeeController.deleteEmployee);

@@ -16,6 +16,10 @@ import { retentionRoutes } from './retention/retention.routes';
 
 const router = Router();
 
+// ESS config, approval workflows, notifications, IT declarations, ESS/MSS self-service
+// MUST be mounted BEFORE attendance/employee routes to prevent /attendance/:id from catching /attendance/my-status
+router.use('/', essRoutes);
+
 // Org structure masters (departments, designations, grades, employee-types, cost-centres)
 router.use('/', orgStructureRoutes);
 
@@ -33,9 +37,6 @@ router.use('/', payrollRoutes);
 
 // Payroll run engine (runs, entries, payslips, holds, revisions, arrears, statutory filings, reports)
 router.use('/', payrollRunRoutes);
-
-// ESS config, approval workflows, notifications, IT declarations, ESS/MSS self-service
-router.use('/', essRoutes);
 
 // Performance management (appraisal cycles, goals, entries, 360 feedback, skills, succession, dashboard)
 router.use('/', performanceRoutes);

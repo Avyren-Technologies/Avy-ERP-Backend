@@ -1396,17 +1396,37 @@ export class AttendanceService {
       const targetShift = shifts[shiftIndex];
       if (!targetShift) continue;
 
+      // Check if the target shift has noShuffle=true — if so, skip rotation for this shift
+      const shiftRecord = await platformPrisma.companyShift.findUnique({
+        where: { id: targetShift.shiftId },
+        select: { noShuffle: true },
+      });
+      if (shiftRecord?.noShuffle) continue; // This shift is excluded from auto-rotation
+
       const employeeIds = schedule.assignments.map((a) => a.employeeId);
       if (employeeIds.length === 0) continue;
 
-      // Update all assigned employees to the target shift
+      // Also exclude employees currently on a shift marked noShuffle
+      // (their current shift should not be auto-changed)
+      const employeesOnLockedShifts = await platformPrisma.employee.findMany({
+        where: {
+          id: { in: employeeIds },
+          shift: { noShuffle: true },
+        },
+        select: { id: true },
+      });
+      const lockedEmployeeIds = new Set(employeesOnLockedShifts.map((e) => e.id));
+      const rotatableEmployeeIds = employeeIds.filter((id) => !lockedEmployeeIds.has(id));
+      if (rotatableEmployeeIds.length === 0) continue;
+
+      // Update rotatable employees to the target shift
       await platformPrisma.employee.updateMany({
-        where: { id: { in: employeeIds }, companyId },
+        where: { id: { in: rotatableEmployeeIds }, companyId },
         data: { shiftId: targetShift.shiftId },
       });
 
       schedulesProcessed++;
-      employeesRotated += employeeIds.length;
+      employeesRotated += rotatableEmployeeIds.length;
     }
 
     return { schedulesProcessed, employeesRotated };

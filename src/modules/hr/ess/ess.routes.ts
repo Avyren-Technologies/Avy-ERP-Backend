@@ -37,9 +37,9 @@ router.patch('/notification-rules/:id', requirePermissions(['hr:update']), contr
 router.delete('/notification-rules/:id', requirePermissions(['hr:delete']), controller.deleteRule);
 
 // ── Shift Check-In / Check-Out ──────────────────────────────────────
-router.get('/attendance/my-status', requirePermissions(['hr:read']), controller.getMyAttendanceStatus);
-router.post('/attendance/check-in', requirePermissions(['hr:create']), controller.checkIn);
-router.post('/attendance/check-out', requirePermissions(['hr:create']), controller.checkOut);
+router.get('/attendance/my-status', requirePermissions(['hr:read', 'ess:view-attendance']), controller.getMyAttendanceStatus);
+router.post('/attendance/check-in', requirePermissions(['hr:create', 'ess:view-attendance']), controller.checkIn);
+router.post('/attendance/check-out', requirePermissions(['hr:create', 'ess:view-attendance']), controller.checkOut);
 
 // ── Manager Delegates ───────────────────────────────────────────────
 router.get('/delegates', requirePermissions(['hr:read']), controller.listDelegates);
@@ -47,22 +47,22 @@ router.post('/delegates', requirePermissions(['hr:create']), controller.createDe
 router.patch('/delegates/:id/revoke', requirePermissions(['hr:update']), controller.revokeDelegate);
 
 // ── IT Declarations ─────────────────────────────────────────────────
-router.get('/it-declarations', requirePermissions(['hr:read']), controller.listDeclarations);
-router.post('/it-declarations', requirePermissions(['hr:create']), controller.createDeclaration);
-router.get('/it-declarations/:id', requirePermissions(['hr:read']), controller.getDeclaration);
-router.patch('/it-declarations/:id', requirePermissions(['hr:update']), controller.updateDeclaration);
-router.patch('/it-declarations/:id/submit', requirePermissions(['hr:update']), controller.submitDeclaration);
+router.get('/it-declarations', requirePermissions(['hr:read', 'ess:it-declaration']), controller.listDeclarations);
+router.post('/it-declarations', requirePermissions(['hr:create', 'ess:it-declaration']), controller.createDeclaration);
+router.get('/it-declarations/:id', requirePermissions(['hr:read', 'ess:it-declaration']), controller.getDeclaration);
+router.patch('/it-declarations/:id', requirePermissions(['hr:update', 'ess:it-declaration']), controller.updateDeclaration);
+router.patch('/it-declarations/:id/submit', requirePermissions(['hr:update', 'ess:it-declaration']), controller.submitDeclaration);
 router.patch('/it-declarations/:id/verify', requirePermissions(['hr:update']), controller.verifyDeclaration);
 router.patch('/it-declarations/:id/lock', requirePermissions(['hr:update']), controller.lockDeclaration);
 
 // ── ESS Self-Service (Employee-facing) ──────────────────────────────
-router.get('/ess/my-profile', requirePermissions(['hr:read']), controller.getMyProfile);
-router.get('/ess/my-payslips', requirePermissions(['hr:read']), controller.getMyPayslips);
-router.get('/ess/my-leave-balance', requirePermissions(['hr:read']), controller.getMyLeaveBalance);
-router.get('/ess/my-attendance', requirePermissions(['hr:read']), controller.getMyAttendance);
-router.get('/ess/my-declarations', requirePermissions(['hr:read']), controller.getMyDeclarations);
-router.post('/ess/apply-leave', requirePermissions(['hr:create']), controller.applyLeave);
-router.post('/ess/regularize-attendance', requirePermissions(['hr:create']), controller.regularizeAttendance);
+router.get('/ess/my-profile', requirePermissions(['hr:read', 'ess:view-profile']), controller.getMyProfile);
+router.get('/ess/my-payslips', requirePermissions(['hr:read', 'ess:view-payslips']), controller.getMyPayslips);
+router.get('/ess/my-leave-balance', requirePermissions(['hr:read', 'ess:view-leave']), controller.getMyLeaveBalance);
+router.get('/ess/my-attendance', requirePermissions(['hr:read', 'ess:view-attendance']), controller.getMyAttendance);
+router.get('/ess/my-declarations', requirePermissions(['hr:read', 'ess:it-declaration']), controller.getMyDeclarations);
+router.post('/ess/apply-leave', requirePermissions(['hr:create', 'ess:apply-leave']), controller.applyLeave);
+router.post('/ess/regularize-attendance', requirePermissions(['hr:create', 'ess:regularize-attendance']), controller.regularizeAttendance);
 
 // ── MSS Manager Self-Service ────────────────────────────────────────
 router.get('/mss/team-members', requirePermissions(['hr:read']), controller.getTeamMembers);

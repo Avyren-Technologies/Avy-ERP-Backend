@@ -69,6 +69,10 @@ export const PERMISSION_MODULES = {
     label: 'Audit Logs',
     actions: ['read', 'export'],
   },
+  ess: {
+    label: 'Employee Self-Service',
+    actions: ['view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk'],
+  },
   platform: {
     label: 'Platform Administration',
     actions: ['admin'],
@@ -180,5 +184,21 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   'Viewer': {
     description: 'Read-only limited scope',
     permissions: ['hr:read', 'production:read', 'inventory:read'],
+  },
+  'Employee': {
+    description: 'Standard employee with ESS access — self-service for leave, attendance, payslips, and profile',
+    permissions: [
+      'ess:view-payslips', 'ess:view-leave', 'ess:apply-leave',
+      'ess:view-attendance', 'ess:regularize-attendance', 'ess:view-holidays',
+      'ess:it-declaration', 'ess:view-directory', 'ess:view-profile',
+      'ess:download-form16', 'ess:view-goals', 'ess:submit-appraisal',
+      'ess:submit-feedback',
+    ],
+  },
+  'Manager': {
+    description: 'Team manager — ESS access plus team management, approvals, and reporting',
+    permissions: [
+      'ess:*', 'hr:read', 'hr:approve', 'reports:read',
+    ],
   },
 };
