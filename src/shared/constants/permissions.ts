@@ -8,6 +8,89 @@
 export const PERMISSION_ACTIONS = ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'] as const;
 export type PermissionAction = typeof PERMISSION_ACTIONS[number];
 
+/**
+ * Permission inheritance: higher permissions imply lower ones.
+ * configure > approve > export > create = update = delete > read
+ * e.g., if user has 'hr:configure', they also have hr:approve, hr:export, hr:create, hr:update, hr:delete, hr:read
+ */
+export const PERMISSION_INHERITANCE: Record<string, string[]> = {
+  configure: ['approve', 'export', 'create', 'update', 'delete', 'read'],
+  approve: ['export', 'create', 'update', 'delete', 'read'],
+  export: ['read'],
+  create: ['read'],
+  update: ['read'],
+  delete: ['read'],
+  read: [],
+};
+
+/**
+ * Maps subscription module IDs (from MODULE_CATALOGUE) to permission module names.
+ * When a company doesn't subscribe to a module, all permissions for that module are suppressed.
+ */
+export const MODULE_TO_PERMISSION_MAP: Record<string, string[]> = {
+  'hr': ['hr', 'ess'],
+  'security': ['security'],
+  'production': ['production'],
+  'machine-maintenance': ['maintenance'],
+  'inventory': ['inventory'],
+  'vendor': ['vendor'],
+  'sales': ['sales'],
+  'finance': ['finance'],
+  'visitor': ['visitors'],
+  'masters': ['masters'],
+};
+
+/**
+ * Expand a flat permissions array by applying inheritance.
+ * e.g., ['hr:configure'] → ['hr:configure', 'hr:approve', 'hr:export', 'hr:create', 'hr:update', 'hr:delete', 'hr:read']
+ * ESS permissions (custom actions like view-payslips) are not expanded — they have no inheritance.
+ */
+export function expandPermissionsWithInheritance(permissions: string[]): string[] {
+  const expanded = new Set(permissions);
+
+  for (const perm of permissions) {
+    if (perm === '*') return ['*'];
+
+    const [module, action] = perm.split(':');
+    if (!module || !action) continue;
+    if (action === '*') continue; // module wildcard already covers all actions
+
+    const inherited = PERMISSION_INHERITANCE[action];
+    if (inherited) {
+      for (const inheritedAction of inherited) {
+        expanded.add(`${module}:${inheritedAction}`);
+      }
+    }
+  }
+
+  return Array.from(expanded);
+}
+
+/**
+ * Filter permissions by active company modules.
+ * Removes any permission whose module is not in the company's active subscription.
+ * System modules (user, role, company, reports, audit, platform) are never suppressed.
+ */
+export function suppressByModules(permissions: string[], activeModuleIds: string[]): string[] {
+  const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform']);
+
+  // Build set of allowed permission modules from active subscriptions
+  const allowedPermModules = new Set(SYSTEM_PERMISSION_MODULES);
+  for (const modId of activeModuleIds) {
+    const permModules = MODULE_TO_PERMISSION_MAP[modId];
+    if (permModules) {
+      permModules.forEach(m => allowedPermModules.add(m));
+    }
+  }
+
+  return permissions.filter(perm => {
+    if (perm === '*') return true;
+    const [module] = perm.split(':');
+    if (!module) return false;
+    return allowedPermModules.has(module);
+  });
+}
+
 export const PERMISSION_MODULES = {
   hr: {
     label: 'HR Management',

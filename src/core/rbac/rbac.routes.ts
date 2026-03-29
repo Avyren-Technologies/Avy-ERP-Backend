@@ -4,6 +4,9 @@ import { rbacController } from './rbac.controller';
 
 const router = Router();
 
+// Navigation manifest (auth-only, no specific permission needed)
+router.get('/navigation-manifest', rbacController.getNavigationManifest);
+
 // Role CRUD
 router.get('/roles', requirePermissions(['role:read']), rbacController.listRoles);
 router.get('/roles/:id', requirePermissions(['role:read']), rbacController.getRole);

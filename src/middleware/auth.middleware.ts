@@ -10,7 +10,7 @@ import {
 } from '../shared/utils';
 import { logger } from '../config/logger';
 import { RequestWithUser } from '../shared/types';
-import { hasPermission } from '../shared/constants/permissions';
+import { hasPermission, expandPermissionsWithInheritance, suppressByModules } from '../shared/constants/permissions';
 import { rbacService } from '../core/rbac/rbac.service';
 
 export interface AuthMiddlewareOptions {
@@ -76,11 +76,29 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
 
         // Resolve permissions dynamically from RBAC system
         // SUPER_ADMIN always gets wildcard; others get permissions from their TenantUser→Role
+        // Then apply: (1) inheritance expansion, (2) module-aware suppression
         let permissions: string[] = [];
         if (dbUser.role === 'SUPER_ADMIN') {
           permissions = ['*'];
         } else if (tenantId) {
-          permissions = await rbacService.getUserPermissions(dbUser.id, tenantId);
+          const rawPermissions = await rbacService.getUserPermissions(dbUser.id, tenantId);
+          // 1. Expand by inheritance (configure → approve → read etc.)
+          const expanded = expandPermissionsWithInheritance(rawPermissions);
+          // 2. Suppress by active modules (if company context available)
+          if (dbUser.companyId) {
+            const companyForModules = await platformPrisma.company.findUnique({
+              where: { id: dbUser.companyId },
+              select: { selectedModuleIds: true },
+            });
+            const activeModuleIds: string[] = companyForModules?.selectedModuleIds
+              ? (Array.isArray(companyForModules.selectedModuleIds)
+                ? companyForModules.selectedModuleIds as string[]
+                : JSON.parse(companyForModules.selectedModuleIds as string))
+              : [];
+            permissions = suppressByModules(expanded, activeModuleIds);
+          } else {
+            permissions = expanded;
+          }
         }
 
         // Load enabled feature toggles for this user

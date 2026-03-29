@@ -4,7 +4,8 @@ import { ApiError } from '../../shared/errors/api-error';
 import { AuthError } from '../../shared/errors';
 import { HttpStatus } from '../../shared/types';
 import { logger } from '../../config/logger';
-import { getAllPermissions, REFERENCE_ROLE_PERMISSIONS } from '../../shared/constants/permissions';
+import { getAllPermissions, REFERENCE_ROLE_PERMISSIONS, hasPermission } from '../../shared/constants/permissions';
+import { NAVIGATION_MANIFEST, getGroupedNavigation, type NavigationItem } from '../../shared/constants/navigation-manifest';
 import { createUserCacheKey, createUserPermissionsCacheKey } from '../../shared/utils';
 import { CreateRoleRequest, UpdateRoleRequest, RoleResponse } from './rbac.types';
 
@@ -217,6 +218,31 @@ export class RbacService {
     }
 
     logger.info(`Default roles seeded for tenant ${tenantId}`);
+  }
+
+  async getNavigationManifest(params: {
+    userPermissions: string[];
+    userRole: string;
+    activeModuleIds: string[];
+  }) {
+    const { userPermissions, userRole, activeModuleIds } = params;
+    const isSuperAdmin = userRole === 'SUPER_ADMIN';
+
+    const filtered = NAVIGATION_MANIFEST.filter((item) => {
+      // Role scope filter
+      if (item.roleScope === 'super_admin' && !isSuperAdmin) return false;
+      if (item.roleScope === 'company' && isSuperAdmin) return false;
+
+      // Module subscription filter (skip for system items with module: null)
+      if (item.module && !activeModuleIds.includes(item.module)) return false;
+
+      // Permission filter
+      if (item.requiredPerm && !hasPermission(userPermissions, item.requiredPerm)) return false;
+
+      return true;
+    });
+
+    return getGroupedNavigation(filtered);
   }
 
   // Invalidate cached permissions for all users with a specific role

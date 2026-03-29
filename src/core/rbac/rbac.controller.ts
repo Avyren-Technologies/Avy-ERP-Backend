@@ -6,6 +6,7 @@ import { asyncHandler } from '../../middleware/error.middleware';
 import { AuthError } from '../../shared/errors';
 import type { CreateRoleRequest, UpdateRoleRequest } from './rbac.types';
 import { getPermissionCatalogue } from '../../shared/constants/permissions';
+import { platformPrisma } from '../../config/database';
 
 export class RbacController {
   // List roles for the current tenant
@@ -76,6 +77,35 @@ export class RbacController {
   getReferenceRoles = asyncHandler(async (_req: Request, res: Response) => {
     const referenceRoles = rbacService.getReferenceRoles();
     res.json(createSuccessResponse(referenceRoles, 'Reference roles retrieved successfully'));
+  });
+
+  getNavigationManifest = asyncHandler(async (req: Request, res: Response) => {
+    const userPermissions = req.user?.permissions ?? [];
+    const userRole = req.user?.roleId ?? 'COMPANY_ADMIN';
+    const companyId = req.user?.companyId;
+
+    let activeModuleIds: string[] = [];
+    if (companyId) {
+      const company = await platformPrisma.company.findUnique({
+        where: { id: companyId },
+        select: { selectedModuleIds: true },
+      });
+      if (company?.selectedModuleIds) {
+        activeModuleIds = Array.isArray(company.selectedModuleIds)
+          ? company.selectedModuleIds as string[]
+          : typeof company.selectedModuleIds === 'string'
+            ? JSON.parse(company.selectedModuleIds)
+            : [];
+      }
+    }
+
+    const manifest = await rbacService.getNavigationManifest({
+      userPermissions,
+      userRole,
+      activeModuleIds,
+    });
+
+    res.json(createSuccessResponse(manifest, 'Navigation manifest retrieved'));
   });
 }
 
