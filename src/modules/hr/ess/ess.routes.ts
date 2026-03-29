@@ -64,6 +64,14 @@ router.get('/ess/my-declarations', requirePermissions(['hr:read', 'ess:it-declar
 router.post('/ess/apply-leave', requirePermissions(['hr:create', 'ess:apply-leave']), controller.applyLeave);
 router.post('/ess/regularize-attendance', requirePermissions(['hr:create', 'ess:regularize-attendance']), controller.regularizeAttendance);
 
+// ── ESS: Goals, Grievances, Training, Assets, Form 16 ──
+router.get('/ess/my-goals', requirePermissions(['hr:read', 'ess:view-goals']), controller.getMyGoals);
+router.get('/ess/my-grievances', requirePermissions(['hr:read', 'ess:raise-grievance']), controller.getMyGrievances);
+router.post('/ess/file-grievance', requirePermissions(['hr:create', 'ess:raise-grievance']), controller.fileGrievance);
+router.get('/ess/my-training', requirePermissions(['hr:read', 'ess:enroll-training']), controller.getMyTraining);
+router.get('/ess/my-assets', requirePermissions(['hr:read', 'ess:view-assets']), controller.getMyAssets);
+router.get('/ess/my-form16', requirePermissions(['hr:read', 'ess:download-form16']), controller.getMyForm16);
+
 // ── MSS Manager Self-Service ────────────────────────────────────────
 router.get('/mss/team-members', requirePermissions(['hr:read']), controller.getTeamMembers);
 router.get('/mss/pending-approvals', requirePermissions(['hr:read']), controller.getPendingManagerApprovals);

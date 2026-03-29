@@ -557,6 +557,84 @@ export class ESSController {
     res.status(201).json(createSuccessResponse(override, 'Attendance regularization submitted'));
   });
 
+  // ── ESS: Goals, Grievances, Training, Assets, Form 16 ─────────────
+
+  getMyGoals = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
+    const goals = await essService.getMyGoals(employeeId, companyId);
+    res.json(createSuccessResponse(goals, 'Goals retrieved'));
+  });
+
+  getMyGrievances = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
+    const cases = await essService.getMyGrievances(employeeId, companyId);
+    res.json(createSuccessResponse(cases, 'Grievances retrieved'));
+  });
+
+  fileGrievance = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
+
+    const grievance = await essService.fileGrievance(employeeId, companyId, req.body);
+    res.status(201).json(createSuccessResponse(grievance, 'Grievance filed'));
+  });
+
+  getMyTraining = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
+    const training = await essService.getMyTraining(employeeId, companyId);
+    res.json(createSuccessResponse(training, 'Training retrieved'));
+  });
+
+  getMyAssets = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
+      return;
+    }
+    const assets = await essService.getMyAssets(employeeId, companyId);
+    res.json(createSuccessResponse(assets, 'Assets retrieved'));
+  });
+
+  getMyForm16 = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse(null, ESSController.NOT_LINKED_MSG));
+      return;
+    }
+    const data = await essService.getMyForm16(employeeId, companyId);
+    res.json(createSuccessResponse(data, 'Form 16 data retrieved'));
+  });
+
   // ── MSS Manager Self-Service ──────────────────────────────────────
 
   getTeamMembers = asyncHandler(async (req: Request, res: Response) => {

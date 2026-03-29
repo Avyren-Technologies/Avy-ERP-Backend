@@ -1489,6 +1489,115 @@ export class ESSService {
 
     return leaveRequests;
   }
+
+  // ── My Goals ──
+  async getMyGoals(employeeId: string, companyId: string) {
+    if (!employeeId) throw ApiError.badRequest('Employee ID required');
+
+    const goals = await platformPrisma.goal.findMany({
+      where: { employeeId, companyId },
+      include: {
+        cycle: { select: { id: true, name: true, status: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return goals;
+  }
+
+  // ── My Grievances ──
+  async getMyGrievances(employeeId: string, companyId: string) {
+    if (!employeeId) throw ApiError.badRequest('Employee ID required');
+
+    const cases = await platformPrisma.grievanceCase.findMany({
+      where: { employeeId, companyId },
+      include: {
+        category: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return cases;
+  }
+
+  // ── File Grievance ──
+  async fileGrievance(employeeId: string, companyId: string, data: {
+    categoryId: string;
+    description: string;
+    isAnonymous?: boolean;
+  }) {
+    if (!employeeId) throw ApiError.badRequest('Employee ID required');
+
+    const grievance = await platformPrisma.grievanceCase.create({
+      data: {
+        companyId,
+        employeeId,
+        categoryId: data.categoryId,
+        description: data.description,
+        isAnonymous: data.isAnonymous ?? false,
+        status: 'OPEN',
+      },
+      include: {
+        category: { select: { id: true, name: true } },
+      },
+    });
+    return grievance;
+  }
+
+  // ── My Training ──
+  async getMyTraining(employeeId: string, companyId: string) {
+    if (!employeeId) throw ApiError.badRequest('Employee ID required');
+
+    const nominations = await platformPrisma.trainingNomination.findMany({
+      where: { employeeId, companyId },
+      include: {
+        training: { select: { id: true, name: true, type: true, mode: true, duration: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return nominations;
+  }
+
+  // ── My Assets ──
+  async getMyAssets(employeeId: string, companyId: string) {
+    if (!employeeId) throw ApiError.badRequest('Employee ID required');
+
+    const assignments = await platformPrisma.assetAssignment.findMany({
+      where: { employeeId, companyId, returnDate: null },
+      include: {
+        asset: {
+          select: {
+            id: true, name: true, serialNumber: true,
+            condition: true, status: true, purchaseDate: true,
+            category: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { issueDate: 'desc' },
+    });
+    return assignments;
+  }
+
+  // ── My Form 16 ──
+  async getMyForm16(employeeId: string, companyId: string) {
+    if (!employeeId) throw ApiError.badRequest('Employee ID required');
+
+    // Form 16 is generated from statutory filings. Return the employee's payslips and TDS records.
+    const payslips = await platformPrisma.payslip.findMany({
+      where: { employeeId, companyId },
+      select: {
+        id: true,
+        month: true,
+        year: true,
+        grossEarnings: true,
+        totalDeductions: true,
+        netPay: true,
+        tdsAmount: true,
+        createdAt: true,
+      },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    });
+
+    return { payslips };
+  }
 }
 
 export const essService = new ESSService();
