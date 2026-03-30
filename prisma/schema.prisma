@@ -73,8 +73,7 @@ model Company {
   // === Step 4: Fiscal & Calendar ===
   fiscalConfig Json? // { fyType, fyCustomStartMonth?, fyCustomEndMonth?, payrollFreq, cutoffDay, disbursementDay, weekStart, timezone, workingDays }
 
-  // === Step 5: Preferences ===
-  preferences    Json? // { currency, language, dateFormat, numberFormat, timeFormat, indiaCompliance, multiCurrency, ess, mobileApp, webApp, systemApp, aiChatbot, eSign, biometric, bankIntegration, emailNotif, whatsapp }
+  // === Step 5: Preferences (typed — see CompanySettings model) ===
   razorpayConfig Json? // { enabled, keyId, keySecret, webhookSecret, accountNumber, autoDisbursement, testMode }
 
   // === Step 6: Backend Endpoint ===
@@ -99,20 +98,20 @@ model Company {
   dayEndTime   String?
   weeklyOffs   Json? // string[] e.g. ["Sunday"]
 
-  // === Step 14: System Controls ===
-  systemControls Json? // { ncEditMode, loadUnload, cycleTime, payrollLock, leaveCarryForward, overtimeApproval, mfa }
-
   // === Wizard Status ===
   wizardStatus String @default("Draft") // Draft/Pilot/Active/Inactive
 
   // Relations
-  tenant     Tenant?
-  users      User[]
-  locations  Location[]
-  contacts   CompanyContact[]
-  shifts     CompanyShift[]
-  noSeries   NoSeriesConfig[]
-  iotReasons IotReason[]
+  tenant           Tenant?
+  users            User[]
+  locations        Location[]
+  contacts         CompanyContact[]
+  shifts           CompanyShift[]
+  noSeries         NoSeriesConfig[]
+  iotReasons       IotReason[]
+  companySettings  CompanySettings?
+  systemControls   SystemControls?
+  overtimeRequests OvertimeRequest[]
 
   // HRMS Relations
   departments   Department[]
@@ -443,6 +442,92 @@ model AuditLog {
 // TENANT ONBOARDING MODELS
 // ==========================================
 
+// Company Settings — replaces Company.preferences JSON blob
+model CompanySettings {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Locale ──
+  currency     CurrencyCode @default(INR)
+  language     LanguageCode @default(en)
+  timezone     String       @default("Asia/Kolkata")
+  dateFormat   String       @default("DD/MM/YYYY")
+  timeFormat   TimeFormat   @default(TWELVE_HOUR)
+  numberFormat String       @default("en-IN")
+
+  // ── Compliance ──
+  indiaCompliance Boolean @default(true)
+  gdprMode        Boolean @default(false)
+  auditTrail      Boolean @default(true)
+
+  // ── Integrations ──
+  bankIntegration       Boolean @default(false)
+  razorpayEnabled       Boolean @default(false)
+  emailNotifications    Boolean @default(true)
+  whatsappNotifications Boolean @default(false)
+  biometricIntegration  Boolean @default(false)
+  eSignIntegration      Boolean @default(false)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("company_settings")
+}
+
+// System Controls — replaces Company.systemControls JSON blob
+model SystemControls {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Module Enablement (replaces Feature Toggles) ──
+  attendanceEnabled  Boolean @default(true)
+  leaveEnabled       Boolean @default(true)
+  payrollEnabled     Boolean @default(true)
+  essEnabled         Boolean @default(true)
+  performanceEnabled Boolean @default(false)
+  recruitmentEnabled Boolean @default(false)
+  trainingEnabled    Boolean @default(false)
+  mobileAppEnabled   Boolean @default(true)
+  aiChatbotEnabled   Boolean @default(false)
+
+  // ── Production Controls ──
+  ncEditMode Boolean @default(false)
+  loadUnload Boolean @default(false)
+  cycleTime  Boolean @default(false)
+
+  // ── Payroll Controls ──
+  payrollLock           Boolean @default(true)
+  backdatedEntryControl Boolean @default(false)
+
+  // ── Leave Controls ──
+  leaveCarryForward   Boolean @default(true)
+  compOffEnabled      Boolean @default(false)
+  halfDayLeaveEnabled Boolean @default(true)
+
+  // ── Security & Access ──
+  mfaRequired                Boolean @default(false)
+  sessionTimeoutMinutes      Int     @default(30)
+  maxConcurrentSessions      Int     @default(3)
+  passwordMinLength          Int     @default(8)
+  passwordComplexity         Boolean @default(true)
+  accountLockThreshold       Int     @default(5)
+  accountLockDurationMinutes Int     @default(30)
+
+  // ── Audit ──
+  auditLogRetentionDays Int @default(365)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_controls")
+}
+
 // Plants & Branches (Step 10)
 model Location {
   id                  String   @id @default(cuid())
@@ -474,6 +559,15 @@ model Location {
   geoLng              String?
   geoRadius           Int      @default(50)
   geoShape            String?  @default("circle")
+
+  // ── Device & Capture Restrictions ──
+  allowedDevices      DeviceType[]
+  requireSelfie       Boolean? // null = inherit from attendance rules
+  requireLiveLocation Boolean? // null = inherit from attendance rules
+
+  // ── Advanced Geo ──
+  geoPolygon          Json?    // GeoJSON polygon coordinates for non-circular zones
+
   moduleIds           Json?
   customModulePricing Json?
   userTier            String?
@@ -525,25 +619,61 @@ model CompanyContact {
 
 // Shifts (Step 11)
 model CompanyShift {
-  id            String   @id @default(cuid())
-  companyId     String
-  name          String
-  fromTime      String
-  toTime        String
-  noShuffle     Boolean  @default(false)
-  downtimeSlots Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id        String @id @default(cuid())
+  companyId String
+
+  // ── Core Timing ──
+  name       String
+  shiftType  ShiftType @default(DAY)
+  startTime  String
+  endTime    String
+  isCrossDay Boolean   @default(false)
+
+  // ── Policy Overrides (null = inherit from Attendance Rules) ──
+  gracePeriodMinutes        Int?
+  earlyExitToleranceMinutes Int?
+  halfDayThresholdHours     Decimal? @db.Decimal(4, 2)
+  fullDayThresholdHours     Decimal? @db.Decimal(4, 2)
+  maxLateCheckInMinutes     Int?
+  minWorkingHoursForOT      Decimal? @db.Decimal(4, 2)
+
+  // ── Capture Overrides (null = inherit) ──
+  requireSelfie  Boolean?
+  requireGPS     Boolean?
+  allowedSources DeviceType[]
+
+  // ── Behavior ──
+  noShuffle           Boolean @default(false)
+  autoClockOutMinutes Int?
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   // HRMS Relations
   employees Employee[]
+  breaks    ShiftBreak[]
 
   // Attendance Relations
   attendanceRecords AttendanceRecord[] @relation("AttendanceShift")
 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@map("company_shifts")
+}
+
+model ShiftBreak {
+  id      String @id @default(cuid())
+  shiftId String
+
+  name      String
+  startTime String?
+  duration  Int
+  type      BreakType
+  isPaid    Boolean @default(false)
+
+  shift CompanyShift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@map("shift_breaks")
 }
 
 // Number Series (Step 12)
@@ -739,9 +869,12 @@ enum AttendanceStatus {
   ABSENT
   HALF_DAY
   LATE
+  EARLY_EXIT
+  INCOMPLETE
   ON_LEAVE
   HOLIDAY
   WEEK_OFF
+  REGULARIZED
   LOP
 }
 
@@ -797,6 +930,113 @@ enum RosterPattern {
   MON_SAT
   MON_SAT_ALT
   CUSTOM
+}
+
+// ==========================================
+// CONFIGURATION ENUMS
+// ==========================================
+
+// ── Company Settings ──
+enum CurrencyCode {
+  INR
+  USD
+  EUR
+  GBP
+  AED
+}
+
+enum LanguageCode {
+  en
+  hi
+  ta
+  te
+  mr
+  kn
+}
+
+enum TimeFormat {
+  TWELVE_HOUR
+  TWENTY_FOUR_HOUR
+}
+
+// ── Shift ──
+enum ShiftType {
+  DAY
+  NIGHT
+  FLEXIBLE
+}
+
+enum BreakType {
+  FIXED
+  FLEXIBLE
+}
+
+// ── Attendance ──
+enum PunchMode {
+  FIRST_LAST
+  EVERY_PAIR
+  SHIFT_BASED
+}
+
+enum RoundingStrategy {
+  NONE
+  NEAREST_15
+  NEAREST_30
+  FLOOR_15
+  CEIL_15
+}
+
+enum PunchRounding {
+  NONE
+  NEAREST_5
+  NEAREST_15
+}
+
+enum RoundingDirection {
+  NEAREST
+  UP
+  DOWN
+}
+
+enum DeductionType {
+  NONE
+  HALF_DAY_AFTER_LIMIT
+  PERCENTAGE
+}
+
+enum LocationAccuracy {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum DeviceType {
+  BIOMETRIC
+  MOBILE_GPS
+  WEB_PORTAL
+  SMART_CARD
+  FACE_RECOGNITION
+}
+
+// ── Overtime ──
+enum OTCalculationBasis {
+  AFTER_SHIFT
+  TOTAL_HOURS
+}
+
+enum OvertimeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+  COMP_OFF_ACCRUED
+}
+
+enum OTMultiplierSource {
+  WEEKDAY
+  WEEKEND
+  HOLIDAY
+  NIGHT_SHIFT
 }
 
 // ==========================================
@@ -1180,6 +1420,7 @@ model Employee {
 
   // Attendance & Leave Relations
   attendanceRecords AttendanceRecord[]
+  overtimeRequests  OvertimeRequest[]
   leaveBalances     LeaveBalance[]
   leaveRequests     LeaveRequest[]
 
@@ -1675,9 +1916,30 @@ model AttendanceRecord {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
-  overrides AttendanceOverride[]
+  // ── Resolved Policy Snapshot ──
+  appliedGracePeriodMinutes    Int?
+  appliedFullDayThresholdHours Decimal?   @db.Decimal(4, 2)
+  appliedHalfDayThresholdHours Decimal?   @db.Decimal(4, 2)
+  appliedBreakDeductionMinutes Int?
+  appliedPunchMode             PunchMode?
+  appliedLateDeduction         Decimal?   @db.Decimal(10, 2)
+  appliedEarlyExitDeduction    Decimal?   @db.Decimal(10, 2)
+
+  // ── Resolution Trace ──
+  resolutionTrace Json? // { field: "SHIFT" | "LOCATION" | "ATTENDANCE_RULE" | "SYSTEM_DEFAULT" }
+
+  // ── Evaluation Context ──
+  evaluationContext Json? // { isHoliday, isWeekOff, holidayName?, rosterPattern? }
+
+  // ── Status Reasoning ──
+  finalStatusReason String?
+
+  overrides       AttendanceOverride[]
+  overtimeRequest OvertimeRequest?
 
   @@unique([employeeId, date])
+  @@index([companyId, date])
+  @@index([companyId, status])
   @@map("attendance_records")
 }
 
@@ -1702,21 +1964,60 @@ model AttendanceOverride {
 }
 
 model AttendanceRule {
-  id                    String   @id @default(cuid())
-  dayBoundaryTime       String? // e.g. "00:00" — when calendar day changes for night shifts
-  halfDayThresholdHours Decimal? @db.Decimal(4, 2) // e.g. 5.0 hours
-  fullDayThresholdHours Decimal? @db.Decimal(4, 2) // e.g. 8.0 hours
-  lateArrivalsAllowed   Int? // per month before deduction
-  gracePeriodMinutes    Int? // late arrival tolerance
-  earlyExitMinutes      Int? // early exit tolerance
-  lopAutoDeduct         Boolean  @default(true)
-  missingPunchAlert     Boolean  @default(true)
-  selfieRequired        Boolean  @default(false)
-  gpsRequired           Boolean  @default(false)
-  companyId             String   @unique
-  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Time & Boundary ──
+  dayBoundaryTime String @default("00:00")
+
+  // ── Grace & Tolerance (defaults — shift can override) ──
+  gracePeriodMinutes        Int @default(15)
+  earlyExitToleranceMinutes Int @default(15)
+  maxLateCheckInMinutes     Int @default(240)
+
+  // ── Day Classification Thresholds (defaults — shift can override) ──
+  halfDayThresholdHours Decimal @default(4) @db.Decimal(4, 2)
+  fullDayThresholdHours Decimal @default(8) @db.Decimal(4, 2)
+
+  // ── Late/Early Tracking ──
+  lateArrivalsAllowedPerMonth Int @default(3)
+
+  // ── Deduction Rules ──
+  lopAutoDeduct           Boolean       @default(true)
+  lateDeductionType       DeductionType @default(NONE)
+  lateDeductionValue      Decimal?      @db.Decimal(5, 2)
+  earlyExitDeductionType  DeductionType @default(NONE)
+  earlyExitDeductionValue Decimal?      @db.Decimal(5, 2)
+
+  // ── Punch Interpretation ──
+  punchMode PunchMode @default(FIRST_LAST)
+
+  // ── Auto-Processing ──
+  autoMarkAbsentIfNoPunch  Boolean @default(true)
+  autoHalfDayEnabled       Boolean @default(true)
+  autoAbsentAfterDays      Int     @default(0)
+  regularizationWindowDays Int     @default(7)
+
+  // ── Rounding Rules ──
+  workingHoursRounding       RoundingStrategy  @default(NONE)
+  punchTimeRounding          PunchRounding     @default(NONE)
+  punchTimeRoundingDirection RoundingDirection @default(NEAREST)
+
+  // ── Exception Handling ──
+  ignoreLateOnLeaveDay Boolean @default(true)
+  ignoreLateOnHoliday  Boolean @default(true)
+  ignoreLateOnWeekOff  Boolean @default(true)
+
+  // ── Capture Requirements (defaults — location/shift can override) ──
+  selfieRequired    Boolean @default(false)
+  gpsRequired       Boolean @default(false)
+  missingPunchAlert Boolean @default(true)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("attendance_rules")
 }
@@ -1759,20 +2060,84 @@ model Roster {
 }
 
 model OvertimeRule {
-  id                 String   @id @default(cuid())
-  eligibleTypeIds    Json? // string[] of employeeTypeIds
-  rateMultiplier     Decimal  @db.Decimal(3, 1) // e.g. 1.5, 2.0
-  thresholdMinutes   Int? // min extra minutes before OT kicks in
-  monthlyCap         Decimal? @db.Decimal(5, 1) // max OT hours/month
-  weeklyCap          Decimal? @db.Decimal(5, 1)
-  autoIncludePayroll Boolean  @default(false)
-  approvalRequired   Boolean  @default(true)
-  companyId          String   @unique
-  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Eligibility ──
+  eligibleTypeIds Json? // string[] of employee type IDs; null = all eligible
+
+  // ── Calculation Basis ──
+  calculationBasis  OTCalculationBasis @default(AFTER_SHIFT)
+  thresholdMinutes  Int                @default(30)
+  minimumOtMinutes  Int                @default(30)
+  includeBreaksInOT Boolean            @default(false)
+
+  // ── Rate Multipliers ──
+  weekdayMultiplier    Decimal  @default(1.5) @db.Decimal(3, 2)
+  weekendMultiplier    Decimal?               @db.Decimal(3, 2)
+  holidayMultiplier    Decimal?               @db.Decimal(3, 2)
+  nightShiftMultiplier Decimal?               @db.Decimal(3, 2)
+
+  // ── Caps ──
+  dailyCapHours        Decimal? @db.Decimal(4, 1)
+  weeklyCapHours       Decimal? @db.Decimal(5, 1)
+  monthlyCapHours      Decimal? @db.Decimal(5, 1)
+  enforceCaps          Boolean  @default(false)
+  maxContinuousOtHours Decimal? @db.Decimal(4, 1)
+
+  // ── Approval & Payroll ──
+  approvalRequired   Boolean @default(true)
+  autoIncludePayroll Boolean @default(false)
+
+  // ── Comp-Off ──
+  compOffEnabled    Boolean @default(false)
+  compOffExpiryDays Int?
+
+  // ── Rounding ──
+  roundingStrategy RoundingStrategy @default(NONE)
+
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  overtimeRequests OvertimeRequest[]
+  createdBy        String?
+  updatedBy        String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   @@map("overtime_rules")
+}
+
+model OvertimeRequest {
+  id                 String @id @default(cuid())
+  attendanceRecordId String @unique
+  companyId          String
+  employeeId         String
+  overtimeRuleId     String
+
+  date              DateTime              @db.Date
+  requestedHours    Decimal               @db.Decimal(5, 2)
+  appliedMultiplier Decimal               @db.Decimal(3, 2)
+  multiplierSource  OTMultiplierSource
+  calculatedAmount  Decimal?              @db.Decimal(15, 2)
+
+  status        OvertimeRequestStatus @default(PENDING)
+  requestedBy   String
+  approvedBy    String?
+  approvalNotes String?
+  approvedAt    DateTime?
+
+  compOffGranted Boolean @default(false)
+
+  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee         Employee         @relation(fields: [employeeId], references: [id])
+  overtimeRule     OvertimeRule     @relation(fields: [overtimeRuleId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([employeeId, date])
+  @@map("overtime_requests")
 }
 
 model LeaveType {
@@ -2327,37 +2692,68 @@ model ArrearEntry {
 // ==========================================
 
 model ESSConfig {
-  id                       String   @id @default(cuid())
-  viewPayslips             Boolean  @default(true)
-  downloadForm16           Boolean  @default(true)
-  leaveApplication         Boolean  @default(true)
-  leaveBalanceView         Boolean  @default(true)
-  itDeclaration            Boolean  @default(true)
-  attendanceView           Boolean  @default(true)
-  attendanceRegularization Boolean  @default(false)
-  reimbursementClaims      Boolean  @default(false)
-  profileUpdate            Boolean  @default(false)
-  documentUpload           Boolean  @default(false)
-  loanApplication          Boolean  @default(false)
-  assetView                Boolean  @default(false)
-  performanceGoals         Boolean  @default(false)
-  appraisalAccess          Boolean  @default(false)
-  feedback360              Boolean  @default(false)
-  trainingEnrollment       Boolean  @default(false)
-  helpDesk                 Boolean  @default(false)
-  employeeDirectory        Boolean  @default(false)
-  holidayCalendar          Boolean  @default(true)
-  policyDocuments          Boolean  @default(false)
-  grievanceSubmission      Boolean  @default(false)
-  loginMethod              String   @default("PASSWORD") // PASSWORD, SSO, OTP
-  passwordMinLength        Int      @default(8)
-  passwordComplexity       Boolean  @default(true)
-  sessionTimeoutMinutes    Int      @default(30)
-  mfaRequired              Boolean  @default(false)
-  companyId                String   @unique
-  company                  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Payroll & Tax ──
+  viewPayslips        Boolean @default(true)
+  downloadPayslips    Boolean @default(true)
+  downloadForm16      Boolean @default(true)
+  viewSalaryStructure Boolean @default(false)
+  itDeclaration       Boolean @default(true)
+
+  // ── Leave ──
+  leaveApplication  Boolean @default(true)
+  leaveBalanceView  Boolean @default(true)
+  leaveCancellation Boolean @default(false)
+
+  // ── Attendance ──
+  attendanceView           Boolean @default(true)
+  attendanceRegularization Boolean @default(false)
+  viewShiftSchedule        Boolean @default(false)
+  shiftSwapRequest         Boolean @default(false)
+  wfhRequest               Boolean @default(false)
+
+  // ── Profile & Documents ──
+  profileUpdate     Boolean @default(false)
+  documentUpload    Boolean @default(false)
+  employeeDirectory Boolean @default(false)
+  viewOrgChart      Boolean @default(false)
+
+  // ── Financial ──
+  reimbursementClaims Boolean @default(false)
+  loanApplication    Boolean @default(false)
+  assetView          Boolean @default(false)
+
+  // ── Performance & Development ──
+  performanceGoals   Boolean @default(false)
+  appraisalAccess    Boolean @default(false)
+  feedback360        Boolean @default(false)
+  trainingEnrollment Boolean @default(false)
+
+  // ── Support & Communication ──
+  helpDesk            Boolean @default(false)
+  grievanceSubmission Boolean @default(false)
+  holidayCalendar     Boolean @default(true)
+  policyDocuments     Boolean @default(false)
+  announcementBoard   Boolean @default(false)
+
+  // ── Manager Self-Service (MSS) ──
+  mssViewTeam           Boolean @default(false)
+  mssApproveLeave       Boolean @default(false)
+  mssApproveAttendance  Boolean @default(false)
+  mssViewTeamAttendance Boolean @default(false)
+
+  // ── Mobile Behavior ──
+  mobileOfflinePunch     Boolean          @default(false)
+  mobileSyncRetryMinutes Int              @default(5)
+  mobileLocationAccuracy LocationAccuracy @default(HIGH)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("ess_configs")
 }
