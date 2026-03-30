@@ -299,33 +299,6 @@ async function upsertTenantUser(userId: string, tenantId: string, roleId: string
   });
 }
 
-async function upsertFeatureToggles(userId: string, tenantId: string) {
-  const featureList = ['hr', 'production', 'inventory', 'sales', 'finance', 'maintenance', 'visitor'];
-
-  await Promise.all(
-    featureList.map(async (feature) => {
-      return prisma.featureToggle.upsert({
-        where: {
-          tenantId_userId_feature: {
-            tenantId,
-            userId,
-            feature,
-          },
-        },
-        update: {
-          enabled: true,
-        },
-        create: {
-          tenantId,
-          userId,
-          feature,
-          enabled: true,
-        },
-      });
-    })
-  );
-}
-
 async function upsertAuditLogEntries(tenantId: string, userId: string) {
   const existing = await prisma.auditLog.findFirst({
     where: {
@@ -392,7 +365,6 @@ async function main(): Promise<void> {
   }
 
   await upsertTenantUser(companyAdmin.id, tenant.id, defaultCompanyAdminRole.id);
-  await upsertFeatureToggles(companyAdmin.id, tenant.id);
   await upsertAuditLogEntries(tenant.id, companyAdmin.id);
 
   console.log('✅ Seed completed successfully');

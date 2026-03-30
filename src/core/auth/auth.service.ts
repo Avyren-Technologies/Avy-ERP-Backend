@@ -91,20 +91,6 @@ export class AuthService {
     // Fetch permissions dynamically from RBAC system, then expand + suppress
     const permissions = await this.getExpandedPermissions(user.id, tenantId, user.companyId);
 
-    // Load enabled feature toggles
-    let featureToggles: string[] = [];
-    if (tenantId) {
-      try {
-        const toggles = await platformPrisma.featureToggle.findMany({
-          where: { tenantId, userId: user.id, enabled: true },
-          select: { feature: true },
-        });
-        featureToggles = toggles.map(t => t.feature);
-      } catch {
-        // Feature toggles are optional
-      }
-    }
-
     // Generate tokens
     const tokens = await this.generateTokens({
       userId: user.id,
@@ -127,7 +113,6 @@ export class AuthService {
       employeeId,
       roleId: user.role,
       permissions,
-      featureToggles,
       isActive: user.isActive,
     });
 
@@ -141,7 +126,6 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         permissions,
-        featureToggles,
         ...(user.companyId ? { companyId: user.companyId } : {}),
         ...(tenantId ? { tenantId } : {}),
         ...(employeeId ? { employeeId } : {}),
@@ -286,7 +270,6 @@ export class AuthService {
       companyId: result.company.id,
       roleId: result.user.role,
       permissions,
-      featureToggles: [],
       isActive: result.user.isActive,
     });
 
@@ -300,7 +283,6 @@ export class AuthService {
         lastName: result.user.lastName,
         role: result.user.role,
         permissions,
-        featureToggles: [],
         companyId: result.company.id,
         tenantId: result.tenant.id,
       },

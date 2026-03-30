@@ -63,7 +63,6 @@ export const APP_CONSTANTS = {
     'tenant',
     'company',
     'billing',
-    'feature-toggle',
     'rbac',
   ],
 

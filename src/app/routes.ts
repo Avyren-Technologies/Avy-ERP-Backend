@@ -13,7 +13,6 @@ import { companyRoutes } from '../core/company/company.routes';
 import { billingRoutes } from '../core/billing/billing.routes';
 import { dashboardPlatformRoutes, dashboardTenantRoutes } from '../core/dashboard/dashboard.routes';
 import { auditRoutes } from '../core/audit/audit.routes';
-import { featureToggleRoutes } from '../core/feature-toggle/feature-toggle.routes';
 import { companyAdminRoutes } from '../core/company-admin/company-admin.routes';
 import { supportCompanyRoutes, supportPlatformRoutes } from '../core/support/support.routes';
 
@@ -127,7 +126,6 @@ router.use('/reports', reportsRoutes);
 // Core tenant routes (for company admins)
 router.use('/dashboard', dashboardTenantRoutes);
 router.use('/rbac', rbacRoutes);
-router.use('/feature-toggles', featureToggleRoutes);
 router.use('/company', companyAdminRoutes);
 router.use('/company/support', supportCompanyRoutes);
 

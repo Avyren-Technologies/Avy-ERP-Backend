@@ -176,7 +176,6 @@ export function buildOpenApiSpec(router: Router) {
       { name: 'Auth', description: 'Authentication endpoints' },
       { name: 'Platform', description: 'Platform administration endpoints' },
       { name: 'Rbac', description: 'Role and permission endpoints' },
-      { name: 'Feature Toggles', description: 'Feature toggle management endpoints' },
       { name: 'Hr', description: 'Human resources endpoints' },
       { name: 'Production', description: 'Production management endpoints' },
       { name: 'Machines', description: 'Machine module endpoints' },

@@ -6,7 +6,7 @@ A multi-tenant SaaS ERP platform backend built with Node.js, Express.js, TypeScr
 
 - **Multi-tenant Architecture**: Schema-per-tenant isolation
 - **Modular Monolith**: Clean module boundaries with microservice-like organization
-- **RBAC**: Role-Based Access Control with feature toggles
+- **RBAC**: Role-Based Access Control with dynamic permissions
 - **Offline-First**: Mobile app support with sync capabilities
 - **Queue Workers**: Background job processing for reports and notifications
 - **Analytics & Reporting**: Real-time dashboards and scheduled reports
@@ -24,7 +24,6 @@ avy-erp-backend/
 │   │   ├── rbac/          # Role-based access control
 │   │   ├── company/       # Company management
 │   │   ├── billing/       # Subscription & billing
-│   │   └── feature-toggle/# User-level feature control
 │   ├── modules/            # Business modules
 │   │   ├── hr/            # Human resources
 │   │   ├── production/    # Manufacturing operations
@@ -234,7 +233,6 @@ npm run worker:notifications
 - **rbac**: Role and permission management
 - **company**: Company profile and settings
 - **billing**: Subscription management and invoicing
-- **feature-toggle**: User-level feature control
 
 ### Business Modules
 Each module is self-contained with:

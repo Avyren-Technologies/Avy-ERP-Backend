@@ -101,20 +101,6 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           }
         }
 
-        // Load enabled feature toggles for this user
-        let featureToggles: string[] = [];
-        if (tenantId) {
-          try {
-            const toggles = await platformPrisma.featureToggle.findMany({
-              where: { tenantId, userId: dbUser.id, enabled: true },
-              select: { feature: true },
-            });
-            featureToggles = toggles.map(t => t.feature);
-          } catch {
-            // Feature toggles are optional — don't block auth if table doesn't exist
-          }
-        }
-
         userData = JSON.stringify({
           id: dbUser.id,
           email: dbUser.email,
@@ -125,7 +111,6 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           employeeId: dbUser.employeeId ?? undefined,
           roleId: dbUser.role,
           permissions,
-          featureToggles,
           isActive: dbUser.isActive,
         });
 
@@ -229,21 +214,6 @@ function extractTokenFromRequest(req: RequestWithUser): string | null {
   }
 
   return null;
-}
-
-export function requireFeature(featureKey: string) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    if (!req.user) {
-      throw AuthError.missingToken();
-    }
-
-    const userFeatures: string[] = req.user.featureToggles || [];
-    if (!userFeatures.includes(featureKey)) {
-      throw new ApiError('Feature is disabled for this user', 403, true, 'FEATURE_DISABLED');
-    }
-
-    next();
-  };
 }
 
 export async function blacklistToken(token: string, expirySeconds?: number): Promise<void> {

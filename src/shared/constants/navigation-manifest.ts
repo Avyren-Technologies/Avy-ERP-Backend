@@ -59,7 +59,6 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
 
   { id: 'ca-users', label: 'User Management', icon: 'user-cog', requiredPerm: 'user:read', path: '/app/company/users', module: null, group: 'People & Access', roleScope: 'company', sortOrder: 410 },
   { id: 'ca-roles', label: 'Roles & Permissions', icon: 'shield', requiredPerm: 'role:read', path: '/app/company/roles', module: null, group: 'People & Access', roleScope: 'company', sortOrder: 411 },
-  { id: 'ca-toggles', label: 'Feature Toggles', icon: 'toggle-left', requiredPerm: 'role:read', path: '/app/company/feature-toggles', module: null, group: 'People & Access', roleScope: 'company', sortOrder: 412 },
 
   { id: 'ca-modules', label: 'Module Catalogue', icon: 'blocks', requiredPerm: 'company:read', path: '/app/modules', module: null, group: 'Configuration', roleScope: 'company', sortOrder: 420 },
   { id: 'ca-noseries', label: 'Number Series', icon: 'hash', requiredPerm: 'company:read', path: '/app/company/no-series', module: null, group: 'Configuration', roleScope: 'company', sortOrder: 421 },

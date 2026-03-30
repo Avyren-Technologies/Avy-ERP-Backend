@@ -25,8 +25,6 @@
 │   │   │   └── billing.routes.ts
 │   │   ├── company
 │   │   │   └── company.routes.ts
-│   │   ├── feature-toggle
-│   │   │   └── feature-toggle.routes.ts
 │   │   ├── rbac
 │   │   │   └── rbac.routes.ts
 │   │   └── tenant
