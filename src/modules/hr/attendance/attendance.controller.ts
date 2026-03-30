@@ -121,7 +121,7 @@ export class AttendanceController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const rules = await attendanceService.updateRules(companyId, parsed.data);
+    const rules = await attendanceService.updateRules(companyId, parsed.data, req.user?.id);
     res.json(createSuccessResponse(rules, 'Attendance rules updated'));
   });
 

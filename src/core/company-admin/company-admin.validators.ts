@@ -1,4 +1,12 @@
 import { z } from 'zod';
+import {
+  CurrencyCode,
+  LanguageCode,
+  TimeFormat,
+  ShiftType,
+  BreakType,
+  DeviceType,
+} from '@prisma/client';
 
 // ── Location ────────────────────────────────────────────────────────
 
@@ -34,16 +42,42 @@ export const updateLocationSchema = z.object({
 
 export const createShiftSchema = z.object({
   name: z.string().min(1),
-  fromTime: z.string().min(1),
-  toTime: z.string().min(1),
+  shiftType: z.nativeEnum(ShiftType).optional(),
+  startTime: z.string().min(1),
+  endTime: z.string().min(1),
+  isCrossDay: z.boolean().optional(),
+
+  // Policy overrides (null = inherit from Attendance Rules)
+  gracePeriodMinutes: z.number().int().min(0).nullable().optional(),
+  earlyExitToleranceMinutes: z.number().int().min(0).nullable().optional(),
+  halfDayThresholdHours: z.number().min(0).max(24).nullable().optional(),
+  fullDayThresholdHours: z.number().min(0).max(24).nullable().optional(),
+  maxLateCheckInMinutes: z.number().int().min(0).nullable().optional(),
+  minWorkingHoursForOT: z.number().min(0).max(24).nullable().optional(),
+
+  // Capture overrides (null = inherit)
+  requireSelfie: z.boolean().nullable().optional(),
+  requireGPS: z.boolean().nullable().optional(),
+  allowedSources: z.array(z.nativeEnum(DeviceType)).optional(),
+
+  // Behavior
   noShuffle: z.boolean().optional(),
-  downtimeSlots: z.array(z.object({
-    type: z.string().min(1),
-    duration: z.string().min(1),
-  })).optional(),
+  autoClockOutMinutes: z.number().int().min(1).nullable().optional(),
 });
 
 export const updateShiftSchema = createShiftSchema.partial();
+
+// ── Shift Break ─────────────────────────────────────────────────────
+
+export const createShiftBreakSchema = z.object({
+  name: z.string().min(1),
+  type: z.nativeEnum(BreakType),
+  startTime: z.string().nullable().optional(), // null for flexible breaks
+  duration: z.number().int().min(1),
+  isPaid: z.boolean().optional(),
+});
+
+export const updateShiftBreakSchema = createShiftBreakSchema.partial();
 
 // ── Contact ─────────────────────────────────────────────────────────
 
@@ -87,38 +121,70 @@ export const createIotReasonSchema = z.object({
 
 export const updateIotReasonSchema = createIotReasonSchema.partial();
 
-// ── Controls ────────────────────────────────────────────────────────
+// ── System Controls (typed model — replaces JSON blob) ──────────────
 
-export const updateControlsSchema = z.object({
+export const updateSystemControlsSchema = z.object({
+  // Module Enablement
+  attendanceEnabled: z.boolean().optional(),
+  leaveEnabled: z.boolean().optional(),
+  payrollEnabled: z.boolean().optional(),
+  essEnabled: z.boolean().optional(),
+  performanceEnabled: z.boolean().optional(),
+  recruitmentEnabled: z.boolean().optional(),
+  trainingEnabled: z.boolean().optional(),
+  mobileAppEnabled: z.boolean().optional(),
+  aiChatbotEnabled: z.boolean().optional(),
+
+  // Production Controls
   ncEditMode: z.boolean().optional(),
   loadUnload: z.boolean().optional(),
   cycleTime: z.boolean().optional(),
+
+  // Payroll Controls
   payrollLock: z.boolean().optional(),
+  backdatedEntryControl: z.boolean().optional(),
+
+  // Leave Controls
   leaveCarryForward: z.boolean().optional(),
-  overtimeApproval: z.boolean().optional(),
-  mfa: z.boolean().optional(),
+  compOffEnabled: z.boolean().optional(),
+  halfDayLeaveEnabled: z.boolean().optional(),
+
+  // Security & Access
+  mfaRequired: z.boolean().optional(),
+  sessionTimeoutMinutes: z.number().int().min(5).max(1440).optional(),
+  maxConcurrentSessions: z.number().int().min(1).max(10).optional(),
+  passwordMinLength: z.number().int().min(6).max(32).optional(),
+  passwordComplexity: z.boolean().optional(),
+  accountLockThreshold: z.number().int().min(1).max(20).optional(),
+  accountLockDurationMinutes: z.number().int().min(1).max(1440).optional(),
+
+  // Audit
+  auditLogRetentionDays: z.number().int().min(30).max(730).optional(),
 });
 
-// ── Settings (preferences) ──────────────────────────────────────────
+// ── Company Settings (typed model — replaces preferences JSON) ──────
 
-export const updateSettingsSchema = z.object({
-  currency: z.string().optional(),
-  language: z.string().optional(),
-  dateFormat: z.string().optional(),
-  numberFormat: z.string().optional(),
-  timeFormat: z.string().optional(),
+export const updateCompanySettingsSchema = z.object({
+  // Locale
+  currency: z.nativeEnum(CurrencyCode).optional(),
+  language: z.nativeEnum(LanguageCode).optional(),
+  timezone: z.string().min(1).optional(),
+  dateFormat: z.string().min(1).optional(),
+  timeFormat: z.nativeEnum(TimeFormat).optional(),
+  numberFormat: z.string().min(1).optional(),
+
+  // Compliance
   indiaCompliance: z.boolean().optional(),
-  multiCurrency: z.boolean().optional(),
-  ess: z.boolean().optional(),
-  mobileApp: z.boolean().optional(),
-  webApp: z.boolean().optional(),
-  systemApp: z.boolean().optional(),
-  aiChatbot: z.boolean().optional(),
-  eSign: z.boolean().optional(),
-  biometric: z.boolean().optional(),
+  gdprMode: z.boolean().optional(),
+  auditTrail: z.boolean().optional(),
+
+  // Integrations
   bankIntegration: z.boolean().optional(),
-  emailNotif: z.boolean().optional(),
-  whatsapp: z.boolean().optional(),
+  razorpayEnabled: z.boolean().optional(),
+  emailNotifications: z.boolean().optional(),
+  whatsappNotifications: z.boolean().optional(),
+  biometricIntegration: z.boolean().optional(),
+  eSignIntegration: z.boolean().optional(),
 });
 
 // ── Users ───────────────────────────────────────────────────────────

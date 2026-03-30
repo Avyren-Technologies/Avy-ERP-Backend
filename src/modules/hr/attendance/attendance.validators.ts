@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import {
+  PunchMode,
+  RoundingStrategy,
+  PunchRounding,
+  RoundingDirection,
+  DeductionType,
+} from '@prisma/client';
 
 // ── Attendance Records ────────────────────────────────────────────────
 
@@ -8,7 +15,7 @@ export const createAttendanceSchema = z.object({
   shiftId: z.string().optional(),
   punchIn: z.string().optional(), // ISO datetime
   punchOut: z.string().optional(), // ISO datetime
-  status: z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LATE', 'ON_LEAVE', 'HOLIDAY', 'WEEK_OFF', 'LOP']),
+  status: z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LATE', 'EARLY_EXIT', 'INCOMPLETE', 'ON_LEAVE', 'HOLIDAY', 'WEEK_OFF', 'LOP', 'REGULARIZED']),
   source: z.enum(['BIOMETRIC', 'FACE_RECOGNITION', 'MOBILE_GPS', 'WEB_PORTAL', 'MANUAL', 'IOT', 'SMART_CARD']),
   remarks: z.string().optional(),
   locationId: z.string().optional(),
@@ -16,19 +23,71 @@ export const createAttendanceSchema = z.object({
 
 export const updateAttendanceSchema = createAttendanceSchema.partial();
 
-// ── Attendance Rules ──────────────────────────────────────────────────
+// ── Attendance Rules (26 fields — spec Screen 3) ─────────────────────
 
 export const attendanceRulesSchema = z.object({
+  // Time & Boundary
   dayBoundaryTime: z.string().optional(),
+
+  // Grace & Tolerance
+  gracePeriodMinutes: z.number().int().min(0).optional(),
+  earlyExitToleranceMinutes: z.number().int().min(0).optional(),
+  maxLateCheckInMinutes: z.number().int().min(0).optional(),
+
+  // Day Classification Thresholds
   halfDayThresholdHours: z.number().min(0).max(24).optional(),
   fullDayThresholdHours: z.number().min(0).max(24).optional(),
-  lateArrivalsAllowed: z.number().int().min(0).optional(),
-  gracePeriodMinutes: z.number().int().min(0).optional(),
-  earlyExitMinutes: z.number().int().min(0).optional(),
+
+  // Late Tracking
+  lateArrivalsAllowedPerMonth: z.number().int().min(0).optional(),
+
+  // Deduction Rules
   lopAutoDeduct: z.boolean().optional(),
-  missingPunchAlert: z.boolean().optional(),
+  lateDeductionType: z.nativeEnum(DeductionType).optional(),
+  lateDeductionValue: z.number().min(0).nullable().optional(),
+  earlyExitDeductionType: z.nativeEnum(DeductionType).optional(),
+  earlyExitDeductionValue: z.number().min(0).nullable().optional(),
+
+  // Punch Interpretation
+  punchMode: z.nativeEnum(PunchMode).optional(),
+
+  // Auto-Processing
+  autoMarkAbsentIfNoPunch: z.boolean().optional(),
+  autoHalfDayEnabled: z.boolean().optional(),
+  autoAbsentAfterDays: z.number().int().min(0).optional(),
+  regularizationWindowDays: z.number().int().min(0).optional(),
+
+  // Rounding Rules
+  workingHoursRounding: z.nativeEnum(RoundingStrategy).optional(),
+  punchTimeRounding: z.nativeEnum(PunchRounding).optional(),
+  punchTimeRoundingDirection: z.nativeEnum(RoundingDirection).optional(),
+
+  // Exception Handling
+  ignoreLateOnLeaveDay: z.boolean().optional(),
+  ignoreLateOnHoliday: z.boolean().optional(),
+  ignoreLateOnWeekOff: z.boolean().optional(),
+
+  // Capture Requirements
   selfieRequired: z.boolean().optional(),
   gpsRequired: z.boolean().optional(),
+  missingPunchAlert: z.boolean().optional(),
+}).superRefine((data, ctx) => {
+  // lateDeductionValue required when lateDeductionType != NONE
+  if (data.lateDeductionType && data.lateDeductionType !== 'NONE' && (data.lateDeductionValue === undefined || data.lateDeductionValue === null)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'lateDeductionValue is required when lateDeductionType is not NONE',
+      path: ['lateDeductionValue'],
+    });
+  }
+  // earlyExitDeductionValue required when earlyExitDeductionType != NONE
+  if (data.earlyExitDeductionType && data.earlyExitDeductionType !== 'NONE' && (data.earlyExitDeductionValue === undefined || data.earlyExitDeductionValue === null)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'earlyExitDeductionValue is required when earlyExitDeductionType is not NONE',
+      path: ['earlyExitDeductionValue'],
+    });
+  }
 });
 
 // ── Overrides / Regularization ────────────────────────────────────────

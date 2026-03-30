@@ -7,14 +7,16 @@ import {
   updateLocationSchema,
   createShiftSchema,
   updateShiftSchema,
+  createShiftBreakSchema,
+  updateShiftBreakSchema,
   createContactSchema,
   updateContactSchema,
   createNoSeriesSchema,
   updateNoSeriesSchema,
   createIotReasonSchema,
   updateIotReasonSchema,
-  updateControlsSchema,
-  updateSettingsSchema,
+  updateSystemControlsSchema,
+  updateCompanySettingsSchema,
   createUserSchema,
   updateUserSchema,
   updateUserStatusSchema,
@@ -320,12 +322,12 @@ export class CompanyAdminController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const parsed = updateControlsSchema.safeParse(req.body);
+    const parsed = updateSystemControlsSchema.safeParse(req.body);
     if (!parsed.success) {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const controls = await companyAdminService.updateControls(companyId, parsed.data);
+    const controls = await companyAdminService.updateControls(companyId, parsed.data, req.user?.id);
     res.json(createSuccessResponse(controls, 'System controls updated'));
   });
 
@@ -343,13 +345,57 @@ export class CompanyAdminController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const parsed = updateSettingsSchema.safeParse(req.body);
+    const parsed = updateCompanySettingsSchema.safeParse(req.body);
     if (!parsed.success) {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const settings = await companyAdminService.updateSettings(companyId, parsed.data);
+    const settings = await companyAdminService.updateSettings(companyId, parsed.data, req.user?.id);
     res.json(createSuccessResponse(settings, 'Settings updated'));
+  });
+
+  // ── Shift Breaks ───────────────────────────────────────────────────
+
+  listShiftBreaks = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const breaks = await companyAdminService.listShiftBreaks(companyId, req.params.id!);
+    res.json(createSuccessResponse(breaks, 'Shift breaks retrieved'));
+  });
+
+  createShiftBreak = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createShiftBreakSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const shiftBreak = await companyAdminService.createShiftBreak(companyId, req.params.id!, parsed.data);
+    res.status(201).json(createSuccessResponse(shiftBreak, 'Shift break created'));
+  });
+
+  updateShiftBreak = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateShiftBreakSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const shiftBreak = await companyAdminService.updateShiftBreak(companyId, req.params.id!, req.params.breakId!, parsed.data);
+    res.json(createSuccessResponse(shiftBreak, 'Shift break updated'));
+  });
+
+  deleteShiftBreak = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await companyAdminService.deleteShiftBreak(companyId, req.params.id!, req.params.breakId!);
+    res.json(createSuccessResponse(result, 'Shift break deleted'));
   });
 
   // ── Users ───────────────────────────────────────────────────────────

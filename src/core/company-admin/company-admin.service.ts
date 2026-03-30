@@ -4,6 +4,12 @@ import { ApiError } from '../../shared/errors';
 import { hashPassword } from '../../shared/utils';
 import { logger } from '../../config/logger';
 import { MODULE_CATALOGUE, USER_TIERS, pricingService } from '../billing/pricing.service';
+import {
+  invalidateCompanySettings,
+  invalidateSystemControls,
+  invalidateShift,
+  invalidateShiftBreaks,
+} from '../../shared/utils/config-cache';
 
 // ── Module dependency graph + pricing ────────────────────────────────
 
@@ -292,6 +298,7 @@ export class CompanyAdminService {
   async listShifts(companyId: string) {
     return platformPrisma.companyShift.findMany({
       where: { companyId },
+      include: { breaks: { orderBy: { startTime: 'asc' } } },
       orderBy: { createdAt: 'asc' },
     });
   }
@@ -299,6 +306,7 @@ export class CompanyAdminService {
   async getShift(companyId: string, shiftId: string) {
     const shift = await platformPrisma.companyShift.findUnique({
       where: { id: shiftId },
+      include: { breaks: { orderBy: { startTime: 'asc' } } },
     });
 
     if (!shift || shift.companyId !== companyId) {
@@ -309,16 +317,31 @@ export class CompanyAdminService {
   }
 
   async createShift(companyId: string, data: any) {
-    return platformPrisma.companyShift.create({
+    const shift = await platformPrisma.companyShift.create({
       data: {
         companyId,
         name: data.name,
-        fromTime: data.fromTime,
-        toTime: data.toTime,
+        shiftType: data.shiftType ?? 'DAY',
+        startTime: data.startTime,
+        endTime: data.endTime,
+        isCrossDay: data.isCrossDay ?? false,
+        gracePeriodMinutes: n(data.gracePeriodMinutes),
+        earlyExitToleranceMinutes: n(data.earlyExitToleranceMinutes),
+        halfDayThresholdHours: n(data.halfDayThresholdHours),
+        fullDayThresholdHours: n(data.fullDayThresholdHours),
+        maxLateCheckInMinutes: n(data.maxLateCheckInMinutes),
+        minWorkingHoursForOT: n(data.minWorkingHoursForOT),
+        requireSelfie: n(data.requireSelfie),
+        requireGPS: n(data.requireGPS),
+        allowedSources: data.allowedSources ?? [],
         noShuffle: data.noShuffle ?? false,
-        downtimeSlots: data.downtimeSlots as any ?? Prisma.JsonNull,
+        autoClockOutMinutes: n(data.autoClockOutMinutes),
       },
+      include: { breaks: true },
     });
+
+    await invalidateShift(shift.id);
+    return shift;
   }
 
   async updateShift(companyId: string, shiftId: string, data: any) {
@@ -330,16 +353,31 @@ export class CompanyAdminService {
       throw ApiError.notFound('Shift not found');
     }
 
-    return platformPrisma.companyShift.update({
+    const updated = await platformPrisma.companyShift.update({
       where: { id: shiftId },
       data: {
         ...(data.name !== undefined && { name: data.name }),
-        ...(data.fromTime !== undefined && { fromTime: data.fromTime }),
-        ...(data.toTime !== undefined && { toTime: data.toTime }),
+        ...(data.shiftType !== undefined && { shiftType: data.shiftType }),
+        ...(data.startTime !== undefined && { startTime: data.startTime }),
+        ...(data.endTime !== undefined && { endTime: data.endTime }),
+        ...(data.isCrossDay !== undefined && { isCrossDay: data.isCrossDay }),
+        ...(data.gracePeriodMinutes !== undefined && { gracePeriodMinutes: n(data.gracePeriodMinutes) }),
+        ...(data.earlyExitToleranceMinutes !== undefined && { earlyExitToleranceMinutes: n(data.earlyExitToleranceMinutes) }),
+        ...(data.halfDayThresholdHours !== undefined && { halfDayThresholdHours: n(data.halfDayThresholdHours) }),
+        ...(data.fullDayThresholdHours !== undefined && { fullDayThresholdHours: n(data.fullDayThresholdHours) }),
+        ...(data.maxLateCheckInMinutes !== undefined && { maxLateCheckInMinutes: n(data.maxLateCheckInMinutes) }),
+        ...(data.minWorkingHoursForOT !== undefined && { minWorkingHoursForOT: n(data.minWorkingHoursForOT) }),
+        ...(data.requireSelfie !== undefined && { requireSelfie: n(data.requireSelfie) }),
+        ...(data.requireGPS !== undefined && { requireGPS: n(data.requireGPS) }),
+        ...(data.allowedSources !== undefined && { allowedSources: data.allowedSources }),
         ...(data.noShuffle !== undefined && { noShuffle: data.noShuffle }),
-        ...(data.downtimeSlots !== undefined && { downtimeSlots: data.downtimeSlots as any ?? Prisma.JsonNull }),
+        ...(data.autoClockOutMinutes !== undefined && { autoClockOutMinutes: n(data.autoClockOutMinutes) }),
       },
+      include: { breaks: { orderBy: { startTime: 'asc' } } },
     });
+
+    await invalidateShift(shiftId);
+    return updated;
   }
 
   async deleteShift(companyId: string, shiftId: string) {
@@ -358,7 +396,101 @@ export class CompanyAdminService {
     }
 
     await platformPrisma.companyShift.delete({ where: { id: shiftId } });
+    await invalidateShift(shiftId);
+    await invalidateShiftBreaks(shiftId);
     return { message: 'Shift deleted' };
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Shift Breaks (CRUD)
+  // ────────────────────────────────────────────────────────────────────
+
+  async listShiftBreaks(companyId: string, shiftId: string) {
+    // Verify shift belongs to company
+    const shift = await platformPrisma.companyShift.findUnique({
+      where: { id: shiftId },
+    });
+    if (!shift || shift.companyId !== companyId) {
+      throw ApiError.notFound('Shift not found');
+    }
+
+    return platformPrisma.shiftBreak.findMany({
+      where: { shiftId },
+      orderBy: { startTime: 'asc' },
+    });
+  }
+
+  async createShiftBreak(companyId: string, shiftId: string, data: any) {
+    const shift = await platformPrisma.companyShift.findUnique({
+      where: { id: shiftId },
+    });
+    if (!shift || shift.companyId !== companyId) {
+      throw ApiError.notFound('Shift not found');
+    }
+
+    const shiftBreak = await platformPrisma.shiftBreak.create({
+      data: {
+        shiftId,
+        name: data.name,
+        type: data.type,
+        startTime: n(data.startTime),
+        duration: data.duration,
+        isPaid: data.isPaid ?? false,
+      },
+    });
+
+    await invalidateShiftBreaks(shiftId);
+    return shiftBreak;
+  }
+
+  async updateShiftBreak(companyId: string, shiftId: string, breakId: string, data: any) {
+    const shift = await platformPrisma.companyShift.findUnique({
+      where: { id: shiftId },
+    });
+    if (!shift || shift.companyId !== companyId) {
+      throw ApiError.notFound('Shift not found');
+    }
+
+    const existing = await platformPrisma.shiftBreak.findUnique({
+      where: { id: breakId },
+    });
+    if (!existing || existing.shiftId !== shiftId) {
+      throw ApiError.notFound('Break not found');
+    }
+
+    const updated = await platformPrisma.shiftBreak.update({
+      where: { id: breakId },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.type !== undefined && { type: data.type }),
+        ...(data.startTime !== undefined && { startTime: n(data.startTime) }),
+        ...(data.duration !== undefined && { duration: data.duration }),
+        ...(data.isPaid !== undefined && { isPaid: data.isPaid }),
+      },
+    });
+
+    await invalidateShiftBreaks(shiftId);
+    return updated;
+  }
+
+  async deleteShiftBreak(companyId: string, shiftId: string, breakId: string) {
+    const shift = await platformPrisma.companyShift.findUnique({
+      where: { id: shiftId },
+    });
+    if (!shift || shift.companyId !== companyId) {
+      throw ApiError.notFound('Shift not found');
+    }
+
+    const existing = await platformPrisma.shiftBreak.findUnique({
+      where: { id: breakId },
+    });
+    if (!existing || existing.shiftId !== shiftId) {
+      throw ApiError.notFound('Break not found');
+    }
+
+    await platformPrisma.shiftBreak.delete({ where: { id: breakId } });
+    await invalidateShiftBreaks(shiftId);
+    return { message: 'Break deleted' };
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -588,77 +720,109 @@ export class CompanyAdminService {
   // ────────────────────────────────────────────────────────────────────
 
   async getControls(companyId: string) {
-    const company = await platformPrisma.company.findUnique({
-      where: { id: companyId },
-      select: { systemControls: true },
+    let controls = await platformPrisma.systemControls.findUnique({
+      where: { companyId },
     });
 
-    if (!company) {
-      throw ApiError.notFound('Company not found');
+    if (!controls) {
+      // Auto-seed with Prisma defaults
+      logger.info(`SystemControls missing for company ${companyId}, auto-seeding defaults`);
+      controls = await platformPrisma.systemControls.create({ data: { companyId } });
     }
 
-    return company.systemControls ?? {};
+    return controls;
   }
 
-  async updateControls(companyId: string, data: any) {
-    const company = await platformPrisma.company.findUnique({
-      where: { id: companyId },
-      select: { systemControls: true },
+  async updateControls(companyId: string, data: any, userId?: string) {
+    const controls = await platformPrisma.systemControls.upsert({
+      where: { companyId },
+      create: {
+        companyId,
+        ...data,
+        updatedBy: userId ?? null,
+      },
+      update: {
+        ...(data.attendanceEnabled !== undefined && { attendanceEnabled: data.attendanceEnabled }),
+        ...(data.leaveEnabled !== undefined && { leaveEnabled: data.leaveEnabled }),
+        ...(data.payrollEnabled !== undefined && { payrollEnabled: data.payrollEnabled }),
+        ...(data.essEnabled !== undefined && { essEnabled: data.essEnabled }),
+        ...(data.performanceEnabled !== undefined && { performanceEnabled: data.performanceEnabled }),
+        ...(data.recruitmentEnabled !== undefined && { recruitmentEnabled: data.recruitmentEnabled }),
+        ...(data.trainingEnabled !== undefined && { trainingEnabled: data.trainingEnabled }),
+        ...(data.mobileAppEnabled !== undefined && { mobileAppEnabled: data.mobileAppEnabled }),
+        ...(data.aiChatbotEnabled !== undefined && { aiChatbotEnabled: data.aiChatbotEnabled }),
+        ...(data.ncEditMode !== undefined && { ncEditMode: data.ncEditMode }),
+        ...(data.loadUnload !== undefined && { loadUnload: data.loadUnload }),
+        ...(data.cycleTime !== undefined && { cycleTime: data.cycleTime }),
+        ...(data.payrollLock !== undefined && { payrollLock: data.payrollLock }),
+        ...(data.backdatedEntryControl !== undefined && { backdatedEntryControl: data.backdatedEntryControl }),
+        ...(data.leaveCarryForward !== undefined && { leaveCarryForward: data.leaveCarryForward }),
+        ...(data.compOffEnabled !== undefined && { compOffEnabled: data.compOffEnabled }),
+        ...(data.halfDayLeaveEnabled !== undefined && { halfDayLeaveEnabled: data.halfDayLeaveEnabled }),
+        ...(data.mfaRequired !== undefined && { mfaRequired: data.mfaRequired }),
+        ...(data.sessionTimeoutMinutes !== undefined && { sessionTimeoutMinutes: data.sessionTimeoutMinutes }),
+        ...(data.maxConcurrentSessions !== undefined && { maxConcurrentSessions: data.maxConcurrentSessions }),
+        ...(data.passwordMinLength !== undefined && { passwordMinLength: data.passwordMinLength }),
+        ...(data.passwordComplexity !== undefined && { passwordComplexity: data.passwordComplexity }),
+        ...(data.accountLockThreshold !== undefined && { accountLockThreshold: data.accountLockThreshold }),
+        ...(data.accountLockDurationMinutes !== undefined && { accountLockDurationMinutes: data.accountLockDurationMinutes }),
+        ...(data.auditLogRetentionDays !== undefined && { auditLogRetentionDays: data.auditLogRetentionDays }),
+        updatedBy: userId ?? null,
+      },
     });
 
-    if (!company) {
-      throw ApiError.notFound('Company not found');
-    }
-
-    // Merge with existing controls
-    const existing = (company.systemControls as Record<string, any>) ?? {};
-    const merged = { ...existing, ...data };
-
-    await platformPrisma.company.update({
-      where: { id: companyId },
-      data: { systemControls: merged as any },
-    });
-
-    return merged;
+    await invalidateSystemControls(companyId);
+    return controls;
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // Settings (preferences JSON)
+  // Company Settings (typed model — replaces preferences JSON)
   // ────────────────────────────────────────────────────────────────────
 
   async getSettings(companyId: string) {
-    const company = await platformPrisma.company.findUnique({
-      where: { id: companyId },
-      select: { preferences: true },
+    let settings = await platformPrisma.companySettings.findUnique({
+      where: { companyId },
     });
 
-    if (!company) {
-      throw ApiError.notFound('Company not found');
+    if (!settings) {
+      // Auto-seed with Prisma defaults
+      logger.info(`CompanySettings missing for company ${companyId}, auto-seeding defaults`);
+      settings = await platformPrisma.companySettings.create({ data: { companyId } });
     }
 
-    return company.preferences ?? {};
+    return settings;
   }
 
-  async updateSettings(companyId: string, data: any) {
-    const company = await platformPrisma.company.findUnique({
-      where: { id: companyId },
-      select: { preferences: true },
+  async updateSettings(companyId: string, data: any, userId?: string) {
+    const settings = await platformPrisma.companySettings.upsert({
+      where: { companyId },
+      create: {
+        companyId,
+        ...data,
+        updatedBy: userId ?? null,
+      },
+      update: {
+        ...(data.currency !== undefined && { currency: data.currency }),
+        ...(data.language !== undefined && { language: data.language }),
+        ...(data.timezone !== undefined && { timezone: data.timezone }),
+        ...(data.dateFormat !== undefined && { dateFormat: data.dateFormat }),
+        ...(data.timeFormat !== undefined && { timeFormat: data.timeFormat }),
+        ...(data.numberFormat !== undefined && { numberFormat: data.numberFormat }),
+        ...(data.indiaCompliance !== undefined && { indiaCompliance: data.indiaCompliance }),
+        ...(data.gdprMode !== undefined && { gdprMode: data.gdprMode }),
+        ...(data.auditTrail !== undefined && { auditTrail: data.auditTrail }),
+        ...(data.bankIntegration !== undefined && { bankIntegration: data.bankIntegration }),
+        ...(data.razorpayEnabled !== undefined && { razorpayEnabled: data.razorpayEnabled }),
+        ...(data.emailNotifications !== undefined && { emailNotifications: data.emailNotifications }),
+        ...(data.whatsappNotifications !== undefined && { whatsappNotifications: data.whatsappNotifications }),
+        ...(data.biometricIntegration !== undefined && { biometricIntegration: data.biometricIntegration }),
+        ...(data.eSignIntegration !== undefined && { eSignIntegration: data.eSignIntegration }),
+        updatedBy: userId ?? null,
+      },
     });
 
-    if (!company) {
-      throw ApiError.notFound('Company not found');
-    }
-
-    // Merge with existing preferences
-    const existing = (company.preferences as Record<string, any>) ?? {};
-    const merged = { ...existing, ...data };
-
-    await platformPrisma.company.update({
-      where: { id: companyId },
-      data: { preferences: merged as any },
-    });
-
-    return merged;
+    await invalidateCompanySettings(companyId);
+    return settings;
   }
 
   // ────────────────────────────────────────────────────────────────────

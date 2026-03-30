@@ -1,6 +1,8 @@
 import { Prisma, AttendanceStatus, AttendanceSource } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { logger } from '../../../config/logger';
+import { invalidateAttendanceRules } from '../../../shared/utils/config-cache';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -72,7 +74,7 @@ export class AttendanceService {
               designation: { select: { id: true, name: true } },
             },
           },
-          shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+          shift: { select: { id: true, name: true, startTime: true, endTime: true } },
           location: { select: { id: true, name: true } },
         },
         skip: offset,
@@ -99,7 +101,7 @@ export class AttendanceService {
             designation: { select: { id: true, name: true } },
           },
         },
-        shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
         location: { select: { id: true, name: true } },
         overrides: {
           orderBy: { createdAt: 'desc' },
@@ -165,7 +167,7 @@ export class AttendanceService {
             designation: { select: { id: true, name: true } },
           },
         },
-        shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
       },
     });
   }
@@ -217,7 +219,7 @@ export class AttendanceService {
             designation: { select: { id: true, name: true } },
           },
         },
-        shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
       },
     });
   }
@@ -436,56 +438,77 @@ export class AttendanceService {
     });
 
     if (!rules) {
-      // Create default rules
+      // Auto-seed with Prisma defaults
+      logger.info(`AttendanceRule missing for company ${companyId}, auto-seeding defaults`);
       rules = await platformPrisma.attendanceRule.create({
-        data: {
-          companyId,
-          dayBoundaryTime: '00:00',
-          halfDayThresholdHours: 5.0,
-          fullDayThresholdHours: 8.0,
-          lateArrivalsAllowed: 3,
-          gracePeriodMinutes: 15,
-          earlyExitMinutes: 15,
-          lopAutoDeduct: true,
-          missingPunchAlert: true,
-          selfieRequired: false,
-          gpsRequired: false,
-        },
+        data: { companyId },
       });
     }
 
     return rules;
   }
 
-  async updateRules(companyId: string, data: any) {
-    return platformPrisma.attendanceRule.upsert({
+  async updateRules(companyId: string, data: any, userId?: string) {
+    const rules = await platformPrisma.attendanceRule.upsert({
       where: { companyId },
       create: {
         companyId,
-        dayBoundaryTime: data.dayBoundaryTime ?? '00:00',
-        halfDayThresholdHours: data.halfDayThresholdHours ?? 5.0,
-        fullDayThresholdHours: data.fullDayThresholdHours ?? 8.0,
-        lateArrivalsAllowed: data.lateArrivalsAllowed ?? 3,
-        gracePeriodMinutes: data.gracePeriodMinutes ?? 15,
-        earlyExitMinutes: data.earlyExitMinutes ?? 15,
-        lopAutoDeduct: data.lopAutoDeduct ?? true,
-        missingPunchAlert: data.missingPunchAlert ?? true,
-        selfieRequired: data.selfieRequired ?? false,
-        gpsRequired: data.gpsRequired ?? false,
+        ...data,
+        updatedBy: userId ?? null,
       },
       update: {
+        // Time & Boundary
         ...(data.dayBoundaryTime !== undefined && { dayBoundaryTime: data.dayBoundaryTime }),
+
+        // Grace & Tolerance
+        ...(data.gracePeriodMinutes !== undefined && { gracePeriodMinutes: data.gracePeriodMinutes }),
+        ...(data.earlyExitToleranceMinutes !== undefined && { earlyExitToleranceMinutes: data.earlyExitToleranceMinutes }),
+        ...(data.maxLateCheckInMinutes !== undefined && { maxLateCheckInMinutes: data.maxLateCheckInMinutes }),
+
+        // Day Classification Thresholds
         ...(data.halfDayThresholdHours !== undefined && { halfDayThresholdHours: data.halfDayThresholdHours }),
         ...(data.fullDayThresholdHours !== undefined && { fullDayThresholdHours: data.fullDayThresholdHours }),
-        ...(data.lateArrivalsAllowed !== undefined && { lateArrivalsAllowed: data.lateArrivalsAllowed }),
-        ...(data.gracePeriodMinutes !== undefined && { gracePeriodMinutes: data.gracePeriodMinutes }),
-        ...(data.earlyExitMinutes !== undefined && { earlyExitMinutes: data.earlyExitMinutes }),
+
+        // Late Tracking
+        ...(data.lateArrivalsAllowedPerMonth !== undefined && { lateArrivalsAllowedPerMonth: data.lateArrivalsAllowedPerMonth }),
+
+        // Deduction Rules
         ...(data.lopAutoDeduct !== undefined && { lopAutoDeduct: data.lopAutoDeduct }),
-        ...(data.missingPunchAlert !== undefined && { missingPunchAlert: data.missingPunchAlert }),
+        ...(data.lateDeductionType !== undefined && { lateDeductionType: data.lateDeductionType }),
+        ...(data.lateDeductionValue !== undefined && { lateDeductionValue: n(data.lateDeductionValue) }),
+        ...(data.earlyExitDeductionType !== undefined && { earlyExitDeductionType: data.earlyExitDeductionType }),
+        ...(data.earlyExitDeductionValue !== undefined && { earlyExitDeductionValue: n(data.earlyExitDeductionValue) }),
+
+        // Punch Interpretation
+        ...(data.punchMode !== undefined && { punchMode: data.punchMode }),
+
+        // Auto-Processing
+        ...(data.autoMarkAbsentIfNoPunch !== undefined && { autoMarkAbsentIfNoPunch: data.autoMarkAbsentIfNoPunch }),
+        ...(data.autoHalfDayEnabled !== undefined && { autoHalfDayEnabled: data.autoHalfDayEnabled }),
+        ...(data.autoAbsentAfterDays !== undefined && { autoAbsentAfterDays: data.autoAbsentAfterDays }),
+        ...(data.regularizationWindowDays !== undefined && { regularizationWindowDays: data.regularizationWindowDays }),
+
+        // Rounding Rules
+        ...(data.workingHoursRounding !== undefined && { workingHoursRounding: data.workingHoursRounding }),
+        ...(data.punchTimeRounding !== undefined && { punchTimeRounding: data.punchTimeRounding }),
+        ...(data.punchTimeRoundingDirection !== undefined && { punchTimeRoundingDirection: data.punchTimeRoundingDirection }),
+
+        // Exception Handling
+        ...(data.ignoreLateOnLeaveDay !== undefined && { ignoreLateOnLeaveDay: data.ignoreLateOnLeaveDay }),
+        ...(data.ignoreLateOnHoliday !== undefined && { ignoreLateOnHoliday: data.ignoreLateOnHoliday }),
+        ...(data.ignoreLateOnWeekOff !== undefined && { ignoreLateOnWeekOff: data.ignoreLateOnWeekOff }),
+
+        // Capture Requirements
         ...(data.selfieRequired !== undefined && { selfieRequired: data.selfieRequired }),
         ...(data.gpsRequired !== undefined && { gpsRequired: data.gpsRequired }),
+        ...(data.missingPunchAlert !== undefined && { missingPunchAlert: data.missingPunchAlert }),
+
+        updatedBy: userId ?? null,
       },
     });
+
+    await invalidateAttendanceRules(companyId);
+    return rules;
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1477,7 +1500,7 @@ export class AttendanceService {
   private detectLateAndEarlyExit(
     punchIn: Date | null,
     punchOut: Date | null,
-    shift: { fromTime: string; toTime: string },
+    shift: { startTime: string; endTime: string },
     rules: any
   ) {
     let isLate = false;
@@ -1486,11 +1509,11 @@ export class AttendanceService {
     let earlyMinutes: number | null = null;
 
     const gracePeriod = rules.gracePeriodMinutes ? Number(rules.gracePeriodMinutes) : 0;
-    const earlyExitTolerance = rules.earlyExitMinutes ? Number(rules.earlyExitMinutes) : 0;
+    const earlyExitTolerance = rules.earlyExitToleranceMinutes ? Number(rules.earlyExitToleranceMinutes) : 0;
 
     // Check late arrival
-    if (punchIn && shift.fromTime) {
-      const parts = shift.fromTime.split(':').map(Number);
+    if (punchIn && shift.startTime) {
+      const parts = shift.startTime.split(':').map(Number);
       const shiftHour = parts[0] ?? 0;
       const shiftMin = parts[1] ?? 0;
       const shiftStart = new Date(punchIn);
@@ -1507,9 +1530,9 @@ export class AttendanceService {
     }
 
     // Check early exit (with night-shift cross-midnight support)
-    if (punchOut && shift.toTime) {
-      const fromParts = shift.fromTime.split(':').map(Number);
-      const toParts = shift.toTime.split(':').map(Number);
+    if (punchOut && shift.endTime) {
+      const fromParts = shift.startTime.split(':').map(Number);
+      const toParts = shift.endTime.split(':').map(Number);
       const fromMinutes = (fromParts[0] ?? 0) * 60 + (fromParts[1] ?? 0);
       const toMinutes = (toParts[0] ?? 0) * 60 + (toParts[1] ?? 0);
       const isOvernightShift = toMinutes < fromMinutes;
