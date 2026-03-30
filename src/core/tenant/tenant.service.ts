@@ -11,6 +11,7 @@ import { cacheRedis, scanAndDelete } from '../../config/redis';
 import { ApiError } from '../../shared/errors';
 import { createRedisPattern, createTenantCacheKey, hashPassword } from '../../shared/utils';
 import { logger } from '../../config/logger';
+import { seedCompanyConfigs } from '../../shared/services/config-seeder.service';
 import type {
   OnboardTenantPayload,
   CompanySectionKey,
@@ -547,68 +548,8 @@ export class TenantService {
         }
       }
 
-      // Attendance Rule (singleton)
-      await tx.attendanceRule.create({
-        data: {
-          companyId: company.id,
-          dayBoundaryTime: '00:00',
-          halfDayThresholdHours: 4,
-          fullDayThresholdHours: 8,
-          lateArrivalsAllowed: 3,
-          gracePeriodMinutes: 15,
-          earlyExitMinutes: 15,
-          lopAutoDeduct: true,
-          missingPunchAlert: true,
-          selfieRequired: false,
-          gpsRequired: false,
-        },
-      });
-
-      // Overtime Rule (singleton)
-      await tx.overtimeRule.create({
-        data: {
-          companyId: company.id,
-          rateMultiplier: 1.5,
-          thresholdMinutes: 30,
-          monthlyCap: 40,
-          weeklyCap: 10,
-          autoIncludePayroll: false,
-          approvalRequired: true,
-        },
-      });
-
-      // ESS Config (singleton — enable all standard features)
-      await tx.eSSConfig.create({
-        data: {
-          companyId: company.id,
-          viewPayslips: true,
-          downloadForm16: true,
-          leaveApplication: true,
-          leaveBalanceView: true,
-          itDeclaration: true,
-          attendanceView: true,
-          attendanceRegularization: true,
-          reimbursementClaims: true,
-          profileUpdate: true,
-          documentUpload: true,
-          loanApplication: true,
-          assetView: true,
-          performanceGoals: true,
-          appraisalAccess: true,
-          feedback360: true,
-          trainingEnrollment: true,
-          helpDesk: true,
-          employeeDirectory: true,
-          holidayCalendar: true,
-          policyDocuments: true,
-          grievanceSubmission: true,
-          loginMethod: 'PASSWORD',
-          passwordMinLength: 8,
-          passwordComplexity: true,
-          sessionTimeoutMinutes: 30,
-          mfaRequired: false,
-        },
-      });
+      // AttendanceRule, OvertimeRule, ESSConfig, CompanySettings, SystemControls
+      // are now seeded AFTER the transaction by seedCompanyConfigs() — see below.
 
       // Statutory Configs (PF, ESI, Gratuity, Bonus) — use Prisma model defaults
       await tx.pFConfig.create({ data: { companyId: company.id } });
@@ -699,6 +640,11 @@ export class TenantService {
       }
       throw schemaError;
     }
+
+    // Seed HRMS config models (CompanySettings, SystemControls, AttendanceRule,
+    // OvertimeRule, ESSConfig) with industry-appropriate defaults.
+    // Uses upsert — idempotent and safe to re-run.
+    await seedCompanyConfigs(result.company.id, result.company.businessType ?? undefined);
 
     // Cache
     await this.cacheTenantData(result.tenant.id, result);
