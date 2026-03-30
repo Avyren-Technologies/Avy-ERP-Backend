@@ -126,7 +126,7 @@ export class EmployeeService {
         grade: { select: { id: true, name: true, code: true, probationMonths: true, noticeDays: true } },
         employeeType: { select: { id: true, name: true, code: true } },
         location: { select: { id: true, name: true, code: true } },
-        shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
         costCentre: { select: { id: true, name: true, code: true } },
         reportingManager: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
         functionalManager: { select: { id: true, firstName: true, lastName: true, employeeId: true } },

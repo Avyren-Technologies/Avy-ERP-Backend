@@ -1069,7 +1069,7 @@ export class ESSService {
         designation: { select: { id: true, name: true } },
         grade: { select: { id: true, name: true, code: true } },
         employeeType: { select: { id: true, name: true } },
-        shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
         location: { select: { id: true, name: true } },
         costCentre: { select: { id: true, name: true, code: true } },
         reportingManager: {
@@ -1187,7 +1187,7 @@ export class ESSService {
         },
       },
       include: {
-        shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
       },
       orderBy: { date: 'asc' },
     });
@@ -1445,7 +1445,7 @@ export class ESSService {
             department: { select: { id: true, name: true } },
           },
         },
-        shift: { select: { id: true, name: true, fromTime: true, toTime: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
       },
       orderBy: { employee: { firstName: 'asc' } },
     });

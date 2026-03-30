@@ -15,18 +15,7 @@ router.post('/locations', requirePermissions(['location:write']), controller.cre
 router.patch('/locations/:id', requirePermissions(['company:update']), controller.updateLocation);
 router.delete('/locations/:id', requirePermissions(['company:delete']), controller.deleteLocation);
 
-// ── Shifts ──────────────────────────────────────────────────────────
-router.get('/shifts', requirePermissions(['company:read']), controller.listShifts);
-router.get('/shifts/:id', requirePermissions(['company:read']), controller.getShift);
-router.post('/shifts', requirePermissions(['company:create']), controller.createShift);
-router.patch('/shifts/:id', requirePermissions(['company:update']), controller.updateShift);
-router.delete('/shifts/:id', requirePermissions(['company:delete']), controller.deleteShift);
 
-// ── Shift Breaks ────────────────────────────────────────────────────
-router.get('/shifts/:id/breaks', requirePermissions(['company:read']), controller.listShiftBreaks);
-router.post('/shifts/:id/breaks', requirePermissions(['company:create']), controller.createShiftBreak);
-router.patch('/shifts/:id/breaks/:breakId', requirePermissions(['company:update']), controller.updateShiftBreak);
-router.delete('/shifts/:id/breaks/:breakId', requirePermissions(['company:delete']), controller.deleteShiftBreak);
 
 // ── Contacts ────────────────────────────────────────────────────────
 router.get('/contacts', requirePermissions(['company:read']), controller.listContacts);

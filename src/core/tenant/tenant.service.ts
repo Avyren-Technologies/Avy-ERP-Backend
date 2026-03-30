@@ -183,7 +183,7 @@ export class TenantService {
   // Full wizard onboarding (atomic transaction)
   // ────────────────────────────────────────────────────────────────────
   async onboardTenant(payload: OnboardTenantPayload) {
-    const { identity, statutory, address, fiscal, preferences, endpoint, strategy, commercial, controls, shifts } = payload;
+    const { identity, statutory, address, fiscal, preferences, endpoint, strategy, commercial, shifts } = payload;
 
     // Check for duplicate company code
     const existing = await platformPrisma.company.findUnique({ where: { companyCode: identity.companyCode } });
@@ -223,26 +223,7 @@ export class TenantService {
         }
       : null;
 
-    // Preferences JSON (strip razorpay fields — stored separately)
-    const preferencesJson = {
-      currency: preferences.currency,
-      language: preferences.language,
-      dateFormat: preferences.dateFormat,
-      numberFormat: preferences.numberFormat,
-      timeFormat: preferences.timeFormat,
-      indiaCompliance: preferences.indiaCompliance,
-      multiCurrency: preferences.multiCurrency,
-      ess: preferences.ess,
-      mobileApp: preferences.mobileApp,
-      webApp: preferences.webApp,
-      systemApp: preferences.systemApp,
-      aiChatbot: preferences.aiChatbot,
-      eSign: preferences.eSign,
-      biometric: preferences.biometric,
-      bankIntegration: preferences.bankIntegration,
-      emailNotif: preferences.emailNotif,
-      whatsapp: preferences.whatsapp,
-    };
+    // Preferences are now saved to CompanySettings by seedCompanyConfigs() after the transaction.
 
     const result = await platformPrisma.$transaction(async (tx) => {
       // ── 1. Create Company ──────────────────────────────────────
@@ -279,8 +260,7 @@ export class TenantService {
           sameAsRegistered: address.sameAsRegistered,
           // Step 4 – Fiscal
           fiscalConfig: fiscal as any,
-          // Step 5 – Preferences
-          preferences: preferencesJson as any,
+          // Step 5 – Preferences (saved to CompanySettings by seedCompanyConfigs)
           razorpayConfig: razorpayConfig as any ?? Prisma.JsonNull,
           // Step 6 – Endpoint
           endpointType: endpoint.endpointType,
@@ -304,8 +284,7 @@ export class TenantService {
           dayStartTime: n(shifts.dayStartTime),
           dayEndTime: n(shifts.dayEndTime),
           weeklyOffs: shifts.weeklyOffs as any ?? Prisma.JsonNull,
-          // Step 15 – Controls
-          systemControls: controls as any,
+          // Step 15 – Controls (saved to SystemControls by seedCompanyConfigs)
           // Wizard status
           wizardStatus,
         },
@@ -345,10 +324,9 @@ export class TenantService {
           data: shifts.items.map((s) => ({
             companyId: company.id,
             name: s.name,
-            fromTime: s.fromTime,
-            toTime: s.toTime,
+            startTime: s.fromTime,
+            endTime: s.toTime,
             noShuffle: s.noShuffle ?? false,
-            downtimeSlots: s.downtimeSlots as any ?? Prisma.JsonNull,
           })),
         });
       }
@@ -830,12 +808,33 @@ export class TenantService {
         const rpConfig = razorpayEnabled
           ? { enabled: true, keyId: razorpayKeyId, keySecret: razorpayKeySecret, webhookSecret: razorpayWebhookSecret, accountNumber: razorpayAccountNumber, autoDisbursement: razorpayAutoDisbursement ?? false, testMode: razorpayTestMode ?? true }
           : null;
+
+        // Razorpay config stays on Company
         await platformPrisma.company.update({
           where: { id: companyId },
           data: {
-            preferences: prefs as any,
             razorpayConfig: rpConfig as any ?? Prisma.JsonNull,
           },
+        });
+
+        // Preferences are now stored in CompanySettings
+        const settingsData = {
+          currency: prefs.currency,
+          language: prefs.language,
+          dateFormat: prefs.dateFormat,
+          timeFormat: prefs.timeFormat,
+          numberFormat: prefs.numberFormat,
+          indiaCompliance: prefs.indiaCompliance,
+          bankIntegration: prefs.bankIntegration,
+          emailNotifications: prefs.emailNotif,
+          whatsappNotifications: prefs.whatsapp,
+          eSignIntegration: prefs.eSign,
+          biometricIntegration: prefs.biometric,
+        };
+        await platformPrisma.companySettings.upsert({
+          where: { companyId },
+          create: { companyId, ...settingsData },
+          update: settingsData,
         });
         break;
       }
@@ -861,9 +860,10 @@ export class TenantService {
         break;
 
       case 'controls':
-        await platformPrisma.company.update({
-          where: { id: companyId },
-          data: { systemControls: data as any },
+        await platformPrisma.systemControls.upsert({
+          where: { companyId },
+          create: { companyId, ...(data as any) },
+          update: data as any,
         });
         break;
 
@@ -935,10 +935,9 @@ export class TenantService {
               data: shiftsData.items.map((s) => ({
                 companyId,
                 name: s.name,
-                fromTime: s.fromTime,
-                toTime: s.toTime,
+                startTime: s.fromTime,
+                endTime: s.toTime,
                 noShuffle: s.noShuffle ?? false,
-                downtimeSlots: s.downtimeSlots as any ?? Prisma.JsonNull,
               })),
             });
           }
