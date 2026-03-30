@@ -130,7 +130,8 @@ export const applyLeaveSchema = z.object({
 });
 
 export const regularizeAttendanceSchema = z.object({
-  attendanceRecordId: z.string().min(1, 'Attendance record ID is required'),
+  attendanceRecordId: z.string().optional(), // Optional — if absent, use date to auto-create record
+  date: z.string().optional(),               // ISO date — used when no record exists (absent day)
   issueType: z.enum([
     'MISSING_PUNCH_IN',
     'MISSING_PUNCH_OUT',
@@ -141,7 +142,10 @@ export const regularizeAttendanceSchema = z.object({
   correctedPunchIn: z.string().optional(),
   correctedPunchOut: z.string().optional(),
   reason: z.string().min(1, 'Reason is required'),
-});
+}).refine(
+  (data) => data.attendanceRecordId || data.date,
+  { message: 'Either attendanceRecordId or date is required', path: ['attendanceRecordId'] }
+);
 
 // ── Shift Check-In / Check-Out ──────────────────────────────────────
 
