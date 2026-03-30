@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { logger } from '../../../config/logger';
+import { invalidateESSConfig } from '../../../shared/utils/config-cache';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -41,6 +43,7 @@ export class ESSService {
     let config = await platformPrisma.eSSConfig.findUnique({ where: { companyId } });
 
     if (!config) {
+      logger.info(`ESSConfig missing for company ${companyId}, auto-seeding defaults`);
       config = await platformPrisma.eSSConfig.create({
         data: { companyId },
       });
@@ -49,67 +52,75 @@ export class ESSService {
     return config;
   }
 
-  async updateESSConfig(companyId: string, data: any) {
-    return platformPrisma.eSSConfig.upsert({
+  async updateESSConfig(companyId: string, data: any, userId?: string) {
+    const config = await platformPrisma.eSSConfig.upsert({
       where: { companyId },
       create: {
         companyId,
-        viewPayslips: data.viewPayslips ?? true,
-        downloadForm16: data.downloadForm16 ?? true,
-        leaveApplication: data.leaveApplication ?? true,
-        leaveBalanceView: data.leaveBalanceView ?? true,
-        itDeclaration: data.itDeclaration ?? true,
-        attendanceView: data.attendanceView ?? true,
-        attendanceRegularization: data.attendanceRegularization ?? false,
-        reimbursementClaims: data.reimbursementClaims ?? false,
-        profileUpdate: data.profileUpdate ?? false,
-        documentUpload: data.documentUpload ?? false,
-        loanApplication: data.loanApplication ?? false,
-        assetView: data.assetView ?? false,
-        performanceGoals: data.performanceGoals ?? false,
-        appraisalAccess: data.appraisalAccess ?? false,
-        feedback360: data.feedback360 ?? false,
-        trainingEnrollment: data.trainingEnrollment ?? false,
-        helpDesk: data.helpDesk ?? false,
-        employeeDirectory: data.employeeDirectory ?? false,
-        holidayCalendar: data.holidayCalendar ?? true,
-        policyDocuments: data.policyDocuments ?? false,
-        grievanceSubmission: data.grievanceSubmission ?? false,
-        loginMethod: data.loginMethod ?? 'PASSWORD',
-        passwordMinLength: data.passwordMinLength ?? 8,
-        passwordComplexity: data.passwordComplexity ?? true,
-        sessionTimeoutMinutes: data.sessionTimeoutMinutes ?? 30,
-        mfaRequired: data.mfaRequired ?? false,
+        ...data,
+        updatedBy: userId ?? null,
       },
       update: {
+        // Payroll & Tax
         ...(data.viewPayslips !== undefined && { viewPayslips: data.viewPayslips }),
+        ...(data.downloadPayslips !== undefined && { downloadPayslips: data.downloadPayslips }),
         ...(data.downloadForm16 !== undefined && { downloadForm16: data.downloadForm16 }),
+        ...(data.viewSalaryStructure !== undefined && { viewSalaryStructure: data.viewSalaryStructure }),
+        ...(data.itDeclaration !== undefined && { itDeclaration: data.itDeclaration }),
+
+        // Leave
         ...(data.leaveApplication !== undefined && { leaveApplication: data.leaveApplication }),
         ...(data.leaveBalanceView !== undefined && { leaveBalanceView: data.leaveBalanceView }),
-        ...(data.itDeclaration !== undefined && { itDeclaration: data.itDeclaration }),
+        ...(data.leaveCancellation !== undefined && { leaveCancellation: data.leaveCancellation }),
+
+        // Attendance
         ...(data.attendanceView !== undefined && { attendanceView: data.attendanceView }),
         ...(data.attendanceRegularization !== undefined && { attendanceRegularization: data.attendanceRegularization }),
-        ...(data.reimbursementClaims !== undefined && { reimbursementClaims: data.reimbursementClaims }),
+        ...(data.viewShiftSchedule !== undefined && { viewShiftSchedule: data.viewShiftSchedule }),
+        ...(data.shiftSwapRequest !== undefined && { shiftSwapRequest: data.shiftSwapRequest }),
+        ...(data.wfhRequest !== undefined && { wfhRequest: data.wfhRequest }),
+
+        // Profile & Documents
         ...(data.profileUpdate !== undefined && { profileUpdate: data.profileUpdate }),
         ...(data.documentUpload !== undefined && { documentUpload: data.documentUpload }),
+        ...(data.employeeDirectory !== undefined && { employeeDirectory: data.employeeDirectory }),
+        ...(data.viewOrgChart !== undefined && { viewOrgChart: data.viewOrgChart }),
+
+        // Financial
+        ...(data.reimbursementClaims !== undefined && { reimbursementClaims: data.reimbursementClaims }),
         ...(data.loanApplication !== undefined && { loanApplication: data.loanApplication }),
         ...(data.assetView !== undefined && { assetView: data.assetView }),
+
+        // Performance & Development
         ...(data.performanceGoals !== undefined && { performanceGoals: data.performanceGoals }),
         ...(data.appraisalAccess !== undefined && { appraisalAccess: data.appraisalAccess }),
         ...(data.feedback360 !== undefined && { feedback360: data.feedback360 }),
         ...(data.trainingEnrollment !== undefined && { trainingEnrollment: data.trainingEnrollment }),
+
+        // Support & Communication
         ...(data.helpDesk !== undefined && { helpDesk: data.helpDesk }),
-        ...(data.employeeDirectory !== undefined && { employeeDirectory: data.employeeDirectory }),
+        ...(data.grievanceSubmission !== undefined && { grievanceSubmission: data.grievanceSubmission }),
         ...(data.holidayCalendar !== undefined && { holidayCalendar: data.holidayCalendar }),
         ...(data.policyDocuments !== undefined && { policyDocuments: data.policyDocuments }),
-        ...(data.grievanceSubmission !== undefined && { grievanceSubmission: data.grievanceSubmission }),
-        ...(data.loginMethod !== undefined && { loginMethod: data.loginMethod }),
-        ...(data.passwordMinLength !== undefined && { passwordMinLength: data.passwordMinLength }),
-        ...(data.passwordComplexity !== undefined && { passwordComplexity: data.passwordComplexity }),
-        ...(data.sessionTimeoutMinutes !== undefined && { sessionTimeoutMinutes: data.sessionTimeoutMinutes }),
-        ...(data.mfaRequired !== undefined && { mfaRequired: data.mfaRequired }),
+        ...(data.announcementBoard !== undefined && { announcementBoard: data.announcementBoard }),
+
+        // Manager Self-Service (MSS)
+        ...(data.mssViewTeam !== undefined && { mssViewTeam: data.mssViewTeam }),
+        ...(data.mssApproveLeave !== undefined && { mssApproveLeave: data.mssApproveLeave }),
+        ...(data.mssApproveAttendance !== undefined && { mssApproveAttendance: data.mssApproveAttendance }),
+        ...(data.mssViewTeamAttendance !== undefined && { mssViewTeamAttendance: data.mssViewTeamAttendance }),
+
+        // Mobile Behavior
+        ...(data.mobileOfflinePunch !== undefined && { mobileOfflinePunch: data.mobileOfflinePunch }),
+        ...(data.mobileSyncRetryMinutes !== undefined && { mobileSyncRetryMinutes: data.mobileSyncRetryMinutes }),
+        ...(data.mobileLocationAccuracy !== undefined && { mobileLocationAccuracy: data.mobileLocationAccuracy }),
+
+        updatedBy: userId ?? null,
       },
     });
+
+    await invalidateESSConfig(companyId);
+    return config;
   }
 
   // ────────────────────────────────────────────────────────────────────

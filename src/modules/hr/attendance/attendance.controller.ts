@@ -16,6 +16,8 @@ import {
   createRosterSchema,
   updateRosterSchema,
   overtimeRulesSchema,
+  approveOvertimeRequestSchema,
+  rejectOvertimeRequestSchema,
   populateMonthSchema,
   createDeviceSchema,
   updateDeviceSchema,
@@ -311,8 +313,57 @@ export class AttendanceController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const rules = await attendanceService.updateOvertimeRules(companyId, parsed.data);
+    const rules = await attendanceService.updateOvertimeRules(companyId, parsed.data, req.user?.id);
     res.json(createSuccessResponse(rules, 'Overtime rules updated'));
+  });
+
+  // ── Overtime Requests ──────────────────────────────────────────────
+
+  listOvertimeRequests = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const opts: any = { page, limit };
+    if (req.query.status) opts.status = req.query.status as string;
+    if (req.query.employeeId) opts.employeeId = req.query.employeeId as string;
+    if (req.query.dateFrom) opts.dateFrom = req.query.dateFrom as string;
+    if (req.query.dateTo) opts.dateTo = req.query.dateTo as string;
+
+    const result = await attendanceService.listOvertimeRequests(companyId, opts);
+    res.json(createPaginatedResponse(result.requests, result.page, result.limit, result.total, 'Overtime requests retrieved'));
+  });
+
+  approveOvertimeRequest = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = approveOvertimeRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await attendanceService.approveOvertimeRequest(companyId, req.params.id!, userId, parsed.data.approvalNotes);
+    res.json(createSuccessResponse(result, 'Overtime request approved'));
+  });
+
+  rejectOvertimeRequest = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = rejectOvertimeRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await attendanceService.rejectOvertimeRequest(companyId, req.params.id!, userId, parsed.data.approvalNotes);
+    res.json(createSuccessResponse(result, 'Overtime request rejected'));
   });
 
   // ── Biometric Devices ────────────────────────────────────────────────

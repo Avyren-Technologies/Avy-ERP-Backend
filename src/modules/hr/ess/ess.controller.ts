@@ -57,7 +57,7 @@ export class ESSController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const config = await essService.updateESSConfig(companyId, parsed.data);
+    const config = await essService.updateESSConfig(companyId, parsed.data, req.user?.id);
     res.json(createSuccessResponse(config, 'ESS config updated'));
   });
 

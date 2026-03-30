@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
+import { requireModuleEnabled } from '../../../shared/middleware/config-enforcement.middleware';
 import { attendanceController as controller } from './attendance.controller';
 
 const router = Router();
+
+// ── Module Enforcement ──────────────────────────────────────────────
+router.use(requireModuleEnabled('attendance'));
 
 // ── Attendance Rules (must be before :id to avoid "rules" matching as an ID) ──
 router.get('/attendance/rules', requirePermissions(['hr:read']), controller.getRules);
@@ -42,6 +46,11 @@ router.delete('/rosters/:id', requirePermissions(['hr:delete']), controller.dele
 // ── Overtime Rules ────────────────────────────────────────────────────
 router.get('/overtime-rules', requirePermissions(['hr:read']), controller.getOvertimeRules);
 router.patch('/overtime-rules', requirePermissions(['hr:update']), controller.updateOvertimeRules);
+
+// ── Overtime Requests ────────────────────────────────────────────────
+router.get('/overtime-requests', requirePermissions(['hr:read']), controller.listOvertimeRequests);
+router.patch('/overtime-requests/:id/approve', requirePermissions(['hr:approve']), controller.approveOvertimeRequest);
+router.patch('/overtime-requests/:id/reject', requirePermissions(['hr:approve']), controller.rejectOvertimeRequest);
 
 // ── Biometric Devices ────────────────────────────────────────────────
 router.get('/biometric-devices', requirePermissions(['hr:read']), controller.listDevices);

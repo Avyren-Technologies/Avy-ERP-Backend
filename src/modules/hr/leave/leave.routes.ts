@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
+import { requireModuleEnabled } from '../../../shared/middleware/config-enforcement.middleware';
 import { leaveController as controller } from './leave.controller';
 
 const router = Router();
+
+// ── Module Enforcement ──────────────────────────────────────────────
+router.use(requireModuleEnabled('leave'));
 
 // ── Leave Types ─────────────────────────────────────────────────────
 router.get('/leave-types', requirePermissions(['hr:read', 'ess:view-leave']), controller.listLeaveTypes);

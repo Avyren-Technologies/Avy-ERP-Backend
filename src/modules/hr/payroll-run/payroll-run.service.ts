@@ -449,6 +449,26 @@ export class PayrollRunService {
       attendanceByEmployee.get(rec.employeeId)!.push(rec);
     }
 
+    // Batch-fetch ALL approved OT requests for the company/month
+    const allOtRequests = await platformPrisma.overtimeRequest.findMany({
+      where: {
+        companyId,
+        status: 'APPROVED',
+        date: { gte: monthStart, lt: monthEnd },
+      },
+      select: {
+        employeeId: true,
+        requestedHours: true,
+        appliedMultiplier: true,
+        multiplierSource: true,
+      },
+    });
+    const otRequestsByEmployee = new Map<string, typeof allOtRequests>();
+    for (const req of allOtRequests) {
+      if (!otRequestsByEmployee.has(req.employeeId)) otRequestsByEmployee.set(req.employeeId, []);
+      otRequestsByEmployee.get(req.employeeId)!.push(req);
+    }
+
     // C1: Batch-fetch ALL approved leave requests for the month
     const allLeaveRequests = await platformPrisma.leaveRequest.findMany({
       where: {
@@ -531,7 +551,6 @@ export class PayrollRunService {
 
       let presentDays = 0;
       let lopDays = 0;
-      let otHours = 0;
 
       for (const rec of attendanceRecords) {
         const dateStr = rec.date.toISOString().slice(0, 10);
@@ -554,7 +573,6 @@ export class PayrollRunService {
         } else if (rec.status === 'ABSENT') {
           lopDays++;
         }
-        if (rec.overtimeHours) otHours += Number(rec.overtimeHours);
       }
 
       // C1: For approved leave days without attendance records, add to presentDays
@@ -609,27 +627,86 @@ export class PayrollRunService {
         grossEarnings += round(reimbursementTotal);
       }
 
-      // Overtime
+      // Overtime — use APPROVED OvertimeRequests with granular multipliers
       let overtimeAmount = 0;
-      if (otHours > 0 && otRule) {
+      let otHours = 0;
+      const empOtRequests = otRequestsByEmployee.get(emp.id) ?? [];
+      if (empOtRequests.length > 0 && otRule) {
         // C4: Use pfInclusion components for basic/PF wage calculation instead of string matching
         let basicAmount = 0;
-        for (const [code, amount] of Object.entries(components)) {
-          if (pfInclusionCodes.has(code)) {
-            basicAmount += amount;
+        if (components) {
+          for (const [code, amount] of Object.entries(components)) {
+            if (pfInclusionCodes.has(code)) {
+              basicAmount += amount;
+            }
           }
         }
         // Fallback: if no pfInclusion components matched, use string matching
-        if (basicAmount === 0) {
+        if (basicAmount === 0 && components) {
           const basicComponent = Object.entries(components).find(([code]) =>
             code.toLowerCase().includes('basic')
           );
           basicAmount = basicComponent ? basicComponent[1] : monthlyGross;
         }
+        if (basicAmount === 0) basicAmount = monthlyGross;
+
         const basicPerDay = basicAmount / totalWorkingDays;
         // L1: Use fullDayThresholdHours instead of hardcoded 8
         const ratePerHour = basicPerDay / workHoursPerDay;
-        overtimeAmount = round(otHours * ratePerHour * Number(otRule.rateMultiplier));
+
+        // Group OT requests by multiplier source and apply per-group multiplier
+        const otBySource = new Map<string, { hours: number; multiplier: number }>();
+        for (const otReq of empOtRequests) {
+          const hours = Number(otReq.requestedHours);
+          const source = otReq.multiplierSource;
+
+          // Determine the effective multiplier for this source from OT rule
+          let effectiveMultiplier: number;
+          switch (source) {
+            case 'WEEKEND':
+              effectiveMultiplier = otRule.weekendMultiplier ? Number(otRule.weekendMultiplier) : Number(otRule.weekdayMultiplier);
+              break;
+            case 'HOLIDAY':
+              effectiveMultiplier = otRule.holidayMultiplier ? Number(otRule.holidayMultiplier) : Number(otRule.weekdayMultiplier);
+              break;
+            case 'NIGHT_SHIFT':
+              effectiveMultiplier = otRule.nightShiftMultiplier ? Number(otRule.nightShiftMultiplier) : Number(otRule.weekdayMultiplier);
+              break;
+            case 'WEEKDAY':
+            default:
+              effectiveMultiplier = Number(otRule.weekdayMultiplier);
+              break;
+          }
+
+          const existing = otBySource.get(source);
+          if (existing) {
+            existing.hours += hours;
+          } else {
+            otBySource.set(source, { hours, multiplier: effectiveMultiplier });
+          }
+          otHours += hours;
+        }
+
+        // Enforce weekly/monthly caps if enforceCaps is true
+        if (otRule.enforceCaps) {
+          if (otRule.monthlyCapHours) {
+            const monthlyCap = Number(otRule.monthlyCapHours);
+            if (otHours > monthlyCap) {
+              // Scale down proportionally
+              const scaleFactor = monthlyCap / otHours;
+              for (const group of otBySource.values()) {
+                group.hours = round(group.hours * scaleFactor);
+              }
+              otHours = monthlyCap;
+            }
+          }
+        }
+
+        // Calculate amount per group and sum
+        for (const group of otBySource.values()) {
+          overtimeAmount += round(group.hours * ratePerHour * group.multiplier);
+        }
+
         grossEarnings += overtimeAmount;
       }
 

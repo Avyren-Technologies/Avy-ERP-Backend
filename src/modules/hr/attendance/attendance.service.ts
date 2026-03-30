@@ -1,8 +1,17 @@
-import { Prisma, AttendanceStatus, AttendanceSource } from '@prisma/client';
+import { Prisma, AttendanceStatus, AttendanceSource, OTMultiplierSource, OvertimeRequestStatus } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
-import { invalidateAttendanceRules } from '../../../shared/utils/config-cache';
+import {
+  invalidateAttendanceRules,
+  invalidateOvertimeRules,
+  getCachedOvertimeRules,
+  getCachedAttendanceRules,
+  getCachedCompanySettings,
+} from '../../../shared/utils/config-cache';
+import { resolvePolicy, type EvaluationContext } from '../../../shared/services/policy-resolver.service';
+import { resolveAttendanceStatus, type ShiftInfo, type AttendanceRulesInput } from '../../../shared/services/attendance-status-resolver.service';
+import { validateLocationConstraints } from '../../../shared/services/location-validator.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -29,6 +38,13 @@ interface OverrideListOptions extends ListOptions {
 interface HolidayListOptions extends ListOptions {
   year?: number;
   type?: string;
+}
+
+interface OvertimeRequestListOptions extends ListOptions {
+  status?: string;
+  employeeId?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export class AttendanceService {
@@ -120,41 +136,167 @@ export class AttendanceService {
     // Verify employee belongs to company
     const employee = await platformPrisma.employee.findUnique({
       where: { id: data.employeeId },
-      select: { id: true, companyId: true, shiftId: true },
+      select: {
+        id: true,
+        companyId: true,
+        shiftId: true,
+        employeeTypeId: true,
+        locationId: true,
+      },
     });
     if (!employee || employee.companyId !== companyId) {
       throw ApiError.badRequest('Employee not found in this company');
     }
 
     // Check for duplicate record on same date
+    const attendanceDate = new Date(data.date);
     const existing = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date: { employeeId: data.employeeId, date: new Date(data.date) } },
+      where: { employeeId_date: { employeeId: data.employeeId, date: attendanceDate } },
     });
     if (existing) {
       throw ApiError.conflict('Attendance record already exists for this employee on this date');
     }
 
-    // Calculate worked hours and detect late/early exit
-    const { workedHours, isLate, lateMinutes, isEarlyExit, earlyMinutes } =
-      await this.calculateAttendanceMetrics(companyId, data, employee.shiftId);
+    // ── Step 1: Location Validation (fail fast) ──
+    const locationId = data.locationId ?? employee.locationId ?? null;
+    if (locationId) {
+      const locationResult = await validateLocationConstraints(locationId, {
+        latitude: data.checkInLatitude,
+        longitude: data.checkInLongitude,
+        source: data.source ?? 'MANUAL',
+        selfieUrl: data.checkInPhotoUrl,
+      });
+      if (!locationResult.valid) {
+        throw ApiError.badRequest(`Location constraint violated: ${locationResult.reason}`);
+      }
+    }
 
-    return platformPrisma.attendanceRecord.create({
+    // ── Step 2: Build Evaluation Context ──
+    const effectiveShiftId = data.shiftId ?? employee.shiftId ?? null;
+    const dateStr = attendanceDate.toISOString().split('T')[0]!;
+
+    // Check if date is a holiday
+    const holiday = await platformPrisma.holidayCalendar.findFirst({
+      where: {
+        companyId,
+        date: attendanceDate,
+      },
+      select: { name: true },
+    });
+
+    // Check if date is a week-off using default roster
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+      select: { weekOff1: true, weekOff2: true },
+    });
+    const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dow = dayOfWeek[attendanceDate.getDay()];
+    const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
+
+    const evaluationContext: EvaluationContext = {
+      employeeId: data.employeeId,
+      shiftId: effectiveShiftId,
+      locationId,
+      date: attendanceDate,
+      isHoliday: !!holiday,
+      isWeekOff,
+      ...(holiday?.name && { holidayName: holiday.name }),
+      ...(roster && { rosterPattern: `${roster.weekOff1 ?? ''}${roster.weekOff2 ? '/' + roster.weekOff2 : ''}` }),
+    };
+
+    // ── Step 3: Resolve Policy ──
+    const { policy, trace } = await resolvePolicy(companyId, evaluationContext);
+
+    // ── Step 4: Get company timezone ──
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+
+    // ── Step 5: Fetch shift info for status resolver ──
+    let shiftInfo: ShiftInfo | null = null;
+    if (effectiveShiftId) {
+      const shift = await platformPrisma.companyShift.findUnique({
+        where: { id: effectiveShiftId },
+        select: { startTime: true, endTime: true, isCrossDay: true, shiftType: true },
+      });
+      if (shift) {
+        shiftInfo = {
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          isCrossDay: shift.isCrossDay,
+        };
+      }
+    }
+
+    // ── Step 6: Fetch attendance rules for status resolver ──
+    const rules = await getCachedAttendanceRules(companyId);
+    const rulesInput: AttendanceRulesInput = {
+      lopAutoDeduct: rules.lopAutoDeduct,
+      autoMarkAbsentIfNoPunch: rules.autoMarkAbsentIfNoPunch,
+      autoHalfDayEnabled: rules.autoHalfDayEnabled,
+      lateDeductionType: rules.lateDeductionType,
+      lateDeductionValue: rules.lateDeductionValue ? Number(rules.lateDeductionValue) : null,
+      earlyExitDeductionType: rules.earlyExitDeductionType,
+      earlyExitDeductionValue: rules.earlyExitDeductionValue ? Number(rules.earlyExitDeductionValue) : null,
+      ignoreLateOnLeaveDay: rules.ignoreLateOnLeaveDay,
+      ignoreLateOnHoliday: rules.ignoreLateOnHoliday,
+      ignoreLateOnWeekOff: rules.ignoreLateOnWeekOff,
+    };
+
+    // ── Step 7: Resolve Attendance Status ──
+    const punchIn = data.punchIn ? new Date(data.punchIn) : null;
+    const punchOut = data.punchOut ? new Date(data.punchOut) : null;
+
+    const statusResult = resolveAttendanceStatus(
+      punchIn,
+      punchOut,
+      shiftInfo,
+      policy,
+      evaluationContext,
+      rulesInput,
+      companyTimezone,
+    );
+
+    // ── Step 8: Create attendance record with resolved values ──
+    const record = await platformPrisma.attendanceRecord.create({
       data: {
         companyId,
         employeeId: data.employeeId,
-        date: new Date(data.date),
-        shiftId: n(data.shiftId) ?? n(employee.shiftId),
-        punchIn: data.punchIn ? new Date(data.punchIn) : null,
-        punchOut: data.punchOut ? new Date(data.punchOut) : null,
-        workedHours,
-        status: data.status,
+        date: attendanceDate,
+        shiftId: effectiveShiftId,
+        punchIn,
+        punchOut,
+        workedHours: statusResult.workedHours,
+        status: statusResult.status as AttendanceStatus,
         source: data.source,
-        isLate,
-        lateMinutes,
-        isEarlyExit,
-        earlyMinutes,
+        isLate: statusResult.isLate,
+        lateMinutes: statusResult.lateMinutes || null,
+        isEarlyExit: statusResult.isEarlyExit,
+        earlyMinutes: statusResult.earlyMinutes || null,
+        overtimeHours: statusResult.overtimeHours > 0 ? statusResult.overtimeHours : null,
         remarks: n(data.remarks),
-        locationId: n(data.locationId),
+        locationId,
+        checkInLatitude: data.checkInLatitude ?? null,
+        checkInLongitude: data.checkInLongitude ?? null,
+        checkInPhotoUrl: data.checkInPhotoUrl ?? null,
+
+        // Resolved policy snapshot
+        appliedGracePeriodMinutes: policy.gracePeriodMinutes,
+        appliedFullDayThresholdHours: policy.fullDayThresholdHours,
+        appliedHalfDayThresholdHours: policy.halfDayThresholdHours,
+        appliedBreakDeductionMinutes: policy.breakDeductionMinutes,
+        appliedPunchMode: policy.punchMode as any,
+        appliedLateDeduction: statusResult.appliedLateDeduction,
+        appliedEarlyExitDeduction: statusResult.appliedEarlyExitDeduction,
+
+        // Resolution trace & context
+        resolutionTrace: trace,
+        evaluationContext: {
+          isHoliday: evaluationContext.isHoliday,
+          isWeekOff: evaluationContext.isWeekOff,
+          holidayName: evaluationContext.holidayName ?? null,
+          rosterPattern: evaluationContext.rosterPattern ?? null,
+        },
+        finalStatusReason: statusResult.finalStatusReason,
       },
       include: {
         employee: {
@@ -170,6 +312,104 @@ export class AttendanceService {
         shift: { select: { id: true, name: true, startTime: true, endTime: true } },
       },
     });
+
+    // ── Step 9: OT Processing ──
+    if (statusResult.overtimeHours > 0) {
+      await this.processOvertimeForRecord(companyId, record, statusResult.overtimeHours, evaluationContext, employee.employeeTypeId ?? null, shiftInfo);
+    }
+
+    return record;
+  }
+
+  /**
+   * Process overtime for a newly created attendance record.
+   * Checks eligibility, applies thresholds, selects multiplier, and creates OT request.
+   */
+  private async processOvertimeForRecord(
+    companyId: string,
+    record: any,
+    overtimeHours: number,
+    context: EvaluationContext,
+    employeeTypeId: string | null,
+    shiftInfo: ShiftInfo | null,
+  ) {
+    const otRule = await getCachedOvertimeRules(companyId);
+
+    // Check eligibility: if eligibleTypeIds is set, employee type must be in the list
+    if (otRule.eligibleTypeIds) {
+      const eligibleIds = otRule.eligibleTypeIds as string[];
+      if (Array.isArray(eligibleIds) && eligibleIds.length > 0) {
+        if (!employeeTypeId || !eligibleIds.includes(employeeTypeId)) {
+          logger.info(`Employee ${record.employeeId} not eligible for OT (type ${employeeTypeId} not in eligible list)`);
+          return;
+        }
+      }
+    }
+
+    // Check minimum OT minutes
+    const otMinutes = overtimeHours * 60;
+    if (otMinutes < otRule.minimumOtMinutes) {
+      logger.info(`OT ${otMinutes}min below minimum ${otRule.minimumOtMinutes}min for employee ${record.employeeId}`);
+      return;
+    }
+
+    // Apply daily cap if enforceCaps is true
+    let cappedHours = overtimeHours;
+    if (otRule.enforceCaps && otRule.dailyCapHours) {
+      const dailyCap = Number(otRule.dailyCapHours);
+      if (cappedHours > dailyCap) {
+        cappedHours = dailyCap;
+      }
+    }
+
+    // Determine multiplier source based on context
+    let multiplierSource: OTMultiplierSource;
+    let appliedMultiplier: number;
+
+    if (context.isHoliday) {
+      multiplierSource = 'HOLIDAY';
+      appliedMultiplier = otRule.holidayMultiplier ? Number(otRule.holidayMultiplier) : Number(otRule.weekdayMultiplier);
+    } else if (context.isWeekOff) {
+      multiplierSource = 'WEEKEND';
+      appliedMultiplier = otRule.weekendMultiplier ? Number(otRule.weekendMultiplier) : Number(otRule.weekdayMultiplier);
+    } else if (shiftInfo && shiftInfo.isCrossDay) {
+      // Night shift detection: cross-day shifts are considered night shifts
+      multiplierSource = 'NIGHT_SHIFT';
+      appliedMultiplier = otRule.nightShiftMultiplier ? Number(otRule.nightShiftMultiplier) : Number(otRule.weekdayMultiplier);
+    } else {
+      multiplierSource = 'WEEKDAY';
+      appliedMultiplier = Number(otRule.weekdayMultiplier);
+    }
+
+    // Determine status based on approval requirements
+    const status: OvertimeRequestStatus = otRule.approvalRequired ? 'PENDING' : 'APPROVED';
+
+    // Create the OT request
+    const otRequest = await platformPrisma.overtimeRequest.create({
+      data: {
+        attendanceRecordId: record.id,
+        companyId,
+        employeeId: record.employeeId,
+        overtimeRuleId: otRule.id,
+        date: record.date,
+        requestedHours: cappedHours,
+        appliedMultiplier,
+        multiplierSource,
+        status,
+        requestedBy: record.employeeId,
+        ...(status === 'APPROVED' && {
+          approvedBy: 'SYSTEM',
+          approvedAt: new Date(),
+          approvalNotes: 'Auto-approved (approvalRequired=false)',
+        }),
+      },
+    });
+
+    logger.info(
+      `OT request created [employee=${record.employeeId}, hours=${cappedHours}, multiplier=${appliedMultiplier}x (${multiplierSource}), status=${status}]`,
+    );
+
+    return otRequest;
   }
 
   async updateRecord(companyId: string, id: string, data: any) {
@@ -926,7 +1166,7 @@ export class AttendanceService {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // Overtime Rules
+  // Overtime Rules (enhanced — 20 fields per spec Screen 5)
   // ────────────────────────────────────────────────────────────────────
 
   async getOvertimeRules(companyId: string) {
@@ -935,43 +1175,224 @@ export class AttendanceService {
     });
 
     if (!rules) {
+      logger.info(`OvertimeRule missing for company ${companyId}, auto-seeding defaults`);
       rules = await platformPrisma.overtimeRule.create({
-        data: {
-          companyId,
-          rateMultiplier: 1.5,
-          thresholdMinutes: 30,
-          autoIncludePayroll: false,
-          approvalRequired: true,
-        },
+        data: { companyId },
       });
     }
 
     return rules;
   }
 
-  async updateOvertimeRules(companyId: string, data: any) {
-    return platformPrisma.overtimeRule.upsert({
+  async updateOvertimeRules(companyId: string, data: any, userId?: string) {
+    const rules = await platformPrisma.overtimeRule.upsert({
       where: { companyId },
       create: {
         companyId,
-        eligibleTypeIds: data.eligibleTypeIds ?? Prisma.JsonNull,
-        rateMultiplier: data.rateMultiplier ?? 1.5,
-        thresholdMinutes: n(data.thresholdMinutes),
-        monthlyCap: n(data.monthlyCap),
-        weeklyCap: n(data.weeklyCap),
-        autoIncludePayroll: data.autoIncludePayroll ?? false,
-        approvalRequired: data.approvalRequired ?? true,
+        ...data,
+        eligibleTypeIds: data.eligibleTypeIds !== undefined ? (data.eligibleTypeIds ?? Prisma.JsonNull) : Prisma.JsonNull,
+        updatedBy: userId ?? null,
       },
       update: {
+        // Eligibility
         ...(data.eligibleTypeIds !== undefined && { eligibleTypeIds: data.eligibleTypeIds ?? Prisma.JsonNull }),
-        ...(data.rateMultiplier !== undefined && { rateMultiplier: data.rateMultiplier }),
-        ...(data.thresholdMinutes !== undefined && { thresholdMinutes: n(data.thresholdMinutes) }),
-        ...(data.monthlyCap !== undefined && { monthlyCap: n(data.monthlyCap) }),
-        ...(data.weeklyCap !== undefined && { weeklyCap: n(data.weeklyCap) }),
-        ...(data.autoIncludePayroll !== undefined && { autoIncludePayroll: data.autoIncludePayroll }),
+
+        // Calculation Basis
+        ...(data.calculationBasis !== undefined && { calculationBasis: data.calculationBasis }),
+        ...(data.thresholdMinutes !== undefined && { thresholdMinutes: data.thresholdMinutes }),
+        ...(data.minimumOtMinutes !== undefined && { minimumOtMinutes: data.minimumOtMinutes }),
+        ...(data.includeBreaksInOT !== undefined && { includeBreaksInOT: data.includeBreaksInOT }),
+
+        // Rate Multipliers
+        ...(data.weekdayMultiplier !== undefined && { weekdayMultiplier: data.weekdayMultiplier }),
+        ...(data.weekendMultiplier !== undefined && { weekendMultiplier: n(data.weekendMultiplier) }),
+        ...(data.holidayMultiplier !== undefined && { holidayMultiplier: n(data.holidayMultiplier) }),
+        ...(data.nightShiftMultiplier !== undefined && { nightShiftMultiplier: n(data.nightShiftMultiplier) }),
+
+        // Caps
+        ...(data.dailyCapHours !== undefined && { dailyCapHours: n(data.dailyCapHours) }),
+        ...(data.weeklyCapHours !== undefined && { weeklyCapHours: n(data.weeklyCapHours) }),
+        ...(data.monthlyCapHours !== undefined && { monthlyCapHours: n(data.monthlyCapHours) }),
+        ...(data.enforceCaps !== undefined && { enforceCaps: data.enforceCaps }),
+        ...(data.maxContinuousOtHours !== undefined && { maxContinuousOtHours: n(data.maxContinuousOtHours) }),
+
+        // Approval & Payroll
         ...(data.approvalRequired !== undefined && { approvalRequired: data.approvalRequired }),
+        ...(data.autoIncludePayroll !== undefined && { autoIncludePayroll: data.autoIncludePayroll }),
+
+        // Comp-Off
+        ...(data.compOffEnabled !== undefined && { compOffEnabled: data.compOffEnabled }),
+        ...(data.compOffExpiryDays !== undefined && { compOffExpiryDays: n(data.compOffExpiryDays) }),
+
+        // Rounding
+        ...(data.roundingStrategy !== undefined && { roundingStrategy: data.roundingStrategy }),
+
+        updatedBy: userId ?? null,
       },
     });
+
+    await invalidateOvertimeRules(companyId);
+    return rules;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Overtime Requests (approval workflow)
+  // ────────────────────────────────────────────────────────────────────
+
+  async listOvertimeRequests(companyId: string, options: OvertimeRequestListOptions = {}) {
+    const { page = 1, limit = 25, status, employeeId, dateFrom, dateTo } = options;
+    const offset = (page - 1) * limit;
+
+    const where: any = { companyId };
+    if (status) where.status = status;
+    if (employeeId) where.employeeId = employeeId;
+    if (dateFrom || dateTo) {
+      where.date = {};
+      if (dateFrom) where.date.gte = new Date(dateFrom);
+      if (dateTo) where.date.lte = new Date(dateTo);
+    }
+
+    const [requests, total] = await Promise.all([
+      platformPrisma.overtimeRequest.findMany({
+        where,
+        include: {
+          employee: {
+            select: {
+              id: true,
+              employeeId: true,
+              firstName: true,
+              lastName: true,
+              department: { select: { id: true, name: true } },
+              designation: { select: { id: true, name: true } },
+            },
+          },
+          attendanceRecord: {
+            select: {
+              id: true,
+              date: true,
+              punchIn: true,
+              punchOut: true,
+              workedHours: true,
+              overtimeHours: true,
+              shift: { select: { id: true, name: true } },
+            },
+          },
+        },
+        skip: offset,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      platformPrisma.overtimeRequest.count({ where }),
+    ]);
+
+    return { requests, total, page, limit };
+  }
+
+  async approveOvertimeRequest(companyId: string, id: string, userId: string, notes?: string) {
+    const request = await platformPrisma.overtimeRequest.findUnique({
+      where: { id },
+    });
+
+    if (!request || request.companyId !== companyId) {
+      throw ApiError.notFound('Overtime request not found');
+    }
+    if (request.status !== 'PENDING') {
+      throw ApiError.badRequest(`Cannot approve: request is already ${request.status}`);
+    }
+
+    // Fetch employee salary for OT amount calculation
+    const salary = await platformPrisma.employeeSalary.findFirst({
+      where: { employeeId: request.employeeId, isCurrent: true },
+      select: { monthlyGross: true, annualCtc: true, components: true },
+    });
+
+    // Calculate amount based on employee salary + applied multiplier
+    let calculatedAmount: number | null = null;
+    if (salary) {
+      const monthlyGross = Number(salary.monthlyGross ?? 0) || Number(salary.annualCtc) / 12;
+      const components = salary.components as Record<string, number> | null;
+
+      // Use basic component or fall back to monthly gross
+      let basicAmount = 0;
+      if (components) {
+        const basicEntry = Object.entries(components).find(([code]) =>
+          code.toLowerCase().includes('basic')
+        );
+        basicAmount = basicEntry ? basicEntry[1] : monthlyGross;
+      } else {
+        basicAmount = monthlyGross;
+      }
+
+      // Fetch attendance rules for full day threshold
+      const attendanceRules = await getCachedAttendanceRules(companyId);
+      const workHoursPerDay = attendanceRules.fullDayThresholdHours
+        ? Number(attendanceRules.fullDayThresholdHours)
+        : 8;
+
+      const totalWorkingDays = 26; // Standard assumption
+      const ratePerHour = (basicAmount / totalWorkingDays) / workHoursPerDay;
+      calculatedAmount = Math.round(Number(request.requestedHours) * ratePerHour * Number(request.appliedMultiplier) * 100) / 100;
+    }
+
+    const updated = await platformPrisma.overtimeRequest.update({
+      where: { id },
+      data: {
+        status: 'APPROVED',
+        approvedBy: userId,
+        approvedAt: new Date(),
+        approvalNotes: notes ?? null,
+        calculatedAmount,
+      },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    logger.info(`Overtime request ${id} approved by ${userId}, amount: ${calculatedAmount}`);
+    return updated;
+  }
+
+  async rejectOvertimeRequest(companyId: string, id: string, userId: string, notes: string) {
+    const request = await platformPrisma.overtimeRequest.findUnique({
+      where: { id },
+    });
+
+    if (!request || request.companyId !== companyId) {
+      throw ApiError.notFound('Overtime request not found');
+    }
+    if (request.status !== 'PENDING') {
+      throw ApiError.badRequest(`Cannot reject: request is already ${request.status}`);
+    }
+
+    const updated = await platformPrisma.overtimeRequest.update({
+      where: { id },
+      data: {
+        status: 'REJECTED',
+        approvedBy: userId,
+        approvedAt: new Date(),
+        approvalNotes: notes,
+      },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    logger.info(`Overtime request ${id} rejected by ${userId}, reason: ${notes}`);
+    return updated;
   }
 
   // ────────────────────────────────────────────────────────────────────

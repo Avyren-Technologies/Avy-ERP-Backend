@@ -5,6 +5,9 @@ import {
   PunchRounding,
   RoundingDirection,
   DeductionType,
+  OTCalculationBasis,
+  OvertimeRequestStatus,
+  LocationAccuracy,
 } from '@prisma/client';
 
 // ── Attendance Records ────────────────────────────────────────────────
@@ -158,8 +161,6 @@ export const processCompOffSchema = z.object({
   year: z.number().int().min(2020).max(2099),
 });
 
-// ── Overtime Rules ────────────────────────────────────────────────────
-
 // ── Biometric Devices ────────────────────────────────────────────────
 
 export const createDeviceSchema = z.object({
@@ -203,14 +204,49 @@ export const assignRotationSchema = z.object({
   employeeIds: z.array(z.string().min(1)).min(1),
 });
 
-// ── Overtime Rules ────────────────────────────────────────────────────
+// ── Overtime Rules (20 fields — spec Screen 5) ──────────────────────
 
 export const overtimeRulesSchema = z.object({
-  eligibleTypeIds: z.array(z.string()).optional(),
-  rateMultiplier: z.number().min(0.1).max(10),
+  // Eligibility
+  eligibleTypeIds: z.array(z.string()).nullable().optional(), // null = all eligible
+
+  // Calculation Basis
+  calculationBasis: z.nativeEnum(OTCalculationBasis).optional(),
   thresholdMinutes: z.number().int().min(0).optional(),
-  monthlyCap: z.number().min(0).optional(),
-  weeklyCap: z.number().min(0).optional(),
-  autoIncludePayroll: z.boolean().optional(),
+  minimumOtMinutes: z.number().int().min(0).optional(),
+  includeBreaksInOT: z.boolean().optional(),
+
+  // Rate Multipliers
+  weekdayMultiplier: z.number().min(0.01).max(10).optional(),
+  weekendMultiplier: z.number().min(0.01).max(10).nullable().optional(),
+  holidayMultiplier: z.number().min(0.01).max(10).nullable().optional(),
+  nightShiftMultiplier: z.number().min(0.01).max(10).nullable().optional(),
+
+  // Caps
+  dailyCapHours: z.number().min(0).nullable().optional(),
+  weeklyCapHours: z.number().min(0).nullable().optional(),
+  monthlyCapHours: z.number().min(0).nullable().optional(),
+  enforceCaps: z.boolean().optional(),
+  maxContinuousOtHours: z.number().min(0).nullable().optional(),
+
+  // Approval & Payroll
   approvalRequired: z.boolean().optional(),
+  autoIncludePayroll: z.boolean().optional(),
+
+  // Comp-Off
+  compOffEnabled: z.boolean().optional(),
+  compOffExpiryDays: z.number().int().min(1).nullable().optional(),
+
+  // Rounding
+  roundingStrategy: z.nativeEnum(RoundingStrategy).optional(),
+});
+
+// ── OT Request Approval / Rejection ──────────────────────────────────
+
+export const approveOvertimeRequestSchema = z.object({
+  approvalNotes: z.string().optional(),
+});
+
+export const rejectOvertimeRequestSchema = z.object({
+  approvalNotes: z.string().min(1, 'Rejection reason is required'),
 });

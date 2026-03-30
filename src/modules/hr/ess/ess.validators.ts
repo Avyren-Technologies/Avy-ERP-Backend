@@ -1,34 +1,62 @@
 import { z } from 'zod';
+import { LocationAccuracy } from '@prisma/client';
 
-// ── ESS Config ──────────────────────────────────────────────────────
+// ── ESS Config (36 fields — spec Screen 6) ──────────────────────────
 
 export const essConfigSchema = z.object({
+  // Payroll & Tax
   viewPayslips: z.boolean().optional(),
+  downloadPayslips: z.boolean().optional(),
   downloadForm16: z.boolean().optional(),
+  viewSalaryStructure: z.boolean().optional(),
+  itDeclaration: z.boolean().optional(),
+
+  // Leave
   leaveApplication: z.boolean().optional(),
   leaveBalanceView: z.boolean().optional(),
-  itDeclaration: z.boolean().optional(),
+  leaveCancellation: z.boolean().optional(),
+
+  // Attendance
   attendanceView: z.boolean().optional(),
   attendanceRegularization: z.boolean().optional(),
-  reimbursementClaims: z.boolean().optional(),
+  viewShiftSchedule: z.boolean().optional(),
+  shiftSwapRequest: z.boolean().optional(),
+  wfhRequest: z.boolean().optional(),
+
+  // Profile & Documents
   profileUpdate: z.boolean().optional(),
   documentUpload: z.boolean().optional(),
+  employeeDirectory: z.boolean().optional(),
+  viewOrgChart: z.boolean().optional(),
+
+  // Financial
+  reimbursementClaims: z.boolean().optional(),
   loanApplication: z.boolean().optional(),
   assetView: z.boolean().optional(),
+
+  // Performance & Development
   performanceGoals: z.boolean().optional(),
   appraisalAccess: z.boolean().optional(),
   feedback360: z.boolean().optional(),
   trainingEnrollment: z.boolean().optional(),
+
+  // Support & Communication
   helpDesk: z.boolean().optional(),
-  employeeDirectory: z.boolean().optional(),
+  grievanceSubmission: z.boolean().optional(),
   holidayCalendar: z.boolean().optional(),
   policyDocuments: z.boolean().optional(),
-  grievanceSubmission: z.boolean().optional(),
-  loginMethod: z.enum(['PASSWORD', 'SSO', 'OTP']).optional(),
-  passwordMinLength: z.number().int().min(6).max(32).optional(),
-  passwordComplexity: z.boolean().optional(),
-  sessionTimeoutMinutes: z.number().int().min(5).max(1440).optional(),
-  mfaRequired: z.boolean().optional(),
+  announcementBoard: z.boolean().optional(),
+
+  // Manager Self-Service (MSS)
+  mssViewTeam: z.boolean().optional(),
+  mssApproveLeave: z.boolean().optional(),
+  mssApproveAttendance: z.boolean().optional(),
+  mssViewTeamAttendance: z.boolean().optional(),
+
+  // Mobile Behavior
+  mobileOfflinePunch: z.boolean().optional(),
+  mobileSyncRetryMinutes: z.number().int().min(1).max(60).optional(),
+  mobileLocationAccuracy: z.nativeEnum(LocationAccuracy).optional(),
 });
 
 // ── Approval Workflows ──────────────────────────────────────────────
