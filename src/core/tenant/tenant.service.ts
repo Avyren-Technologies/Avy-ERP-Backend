@@ -1,4 +1,11 @@
 import { Prisma, TenantStatus, CompanySize } from '@prisma/client';
+import {
+  DEFAULT_ROLES, DEFAULT_DEPARTMENTS, DEFAULT_GRADES, DEFAULT_EMPLOYEE_TYPES,
+  DEFAULT_DESIGNATIONS, DEFAULT_LEAVE_TYPES, DEFAULT_SALARY_COMPONENTS,
+  DEFAULT_LOAN_POLICIES, DEFAULT_ASSET_CATEGORIES, DEFAULT_GRIEVANCE_CATEGORIES,
+  DEFAULT_APPROVAL_WORKFLOWS, DEFAULT_NOTIFICATION_TEMPLATES, DEFAULT_NOTIFICATION_RULES,
+  DEFAULT_TAX_CONFIG, DEFAULT_ROSTERS, getDefaultHolidays,
+} from '../../shared/constants/company-defaults';
 import { platformPrisma } from '../../config/database';
 import { cacheRedis, scanAndDelete } from '../../config/redis';
 import { ApiError } from '../../shared/errors';
@@ -394,35 +401,259 @@ export class TenantService {
         },
       });
 
-      // Also create a default "Employee" role with ESS permissions
-      await tx.role.create({
+      // ── Seed company defaults (roles, org structure, leave, holidays, payroll, etc.) ──
+      // All records are editable by company admin — none are system-locked.
+
+      // Default roles (Employee + Manager)
+      for (const role of DEFAULT_ROLES) {
+        await tx.role.create({
+          data: { tenantId: tenant.id, ...role },
+        });
+      }
+
+      // Departments
+      for (const dept of DEFAULT_DEPARTMENTS) {
+        await tx.department.create({
+          data: { companyId: company.id, ...dept },
+        });
+      }
+
+      // Grades
+      for (const grade of DEFAULT_GRADES) {
+        await tx.grade.create({
+          data: { companyId: company.id, ...grade },
+        });
+      }
+
+      // Employee Types
+      for (const et of DEFAULT_EMPLOYEE_TYPES) {
+        await tx.employeeType.create({
+          data: { companyId: company.id, ...et },
+        });
+      }
+
+      // Designations (no department/grade linking — admin can configure later)
+      for (const desig of DEFAULT_DESIGNATIONS) {
+        await tx.designation.create({
+          data: { companyId: company.id, ...desig },
+        });
+      }
+
+      // Leave Types
+      for (const lt of DEFAULT_LEAVE_TYPES) {
+        const leaveType = await tx.leaveType.create({
+          data: { companyId: company.id, ...lt },
+        });
+        // Create company-wide leave policy for each type
+        await tx.leavePolicy.create({
+          data: {
+            companyId: company.id,
+            leaveTypeId: leaveType.id,
+            assignmentLevel: 'company',
+          },
+        });
+      }
+
+      // Holidays (current year)
+      const currentYear = new Date().getFullYear();
+      const holidays = getDefaultHolidays(currentYear);
+      for (const h of holidays) {
+        await tx.holidayCalendar.create({
+          data: {
+            companyId: company.id,
+            name: h.name,
+            date: new Date(h.date),
+            type: h.type,
+            year: currentYear,
+            description: h.description,
+          },
+        });
+      }
+
+      // Salary Components
+      for (const sc of DEFAULT_SALARY_COMPONENTS) {
+        await tx.salaryComponent.create({
+          data: {
+            companyId: company.id,
+            name: sc.name,
+            code: sc.code,
+            type: sc.type,
+            calculationMethod: sc.calculationMethod,
+            formulaValue: (sc as any).formulaValue ?? null,
+            taxable: sc.taxable,
+            exemptionSection: (sc as any).exemptionSection ?? null,
+            exemptionLimit: (sc as any).exemptionLimit ?? null,
+            pfInclusion: sc.pfInclusion ?? false,
+            esiInclusion: sc.esiInclusion ?? false,
+            gratuityInclusion: (sc as any).gratuityInclusion ?? false,
+            bonusInclusion: (sc as any).bonusInclusion ?? false,
+            showOnPayslip: (sc as any).showOnPayslip ?? true,
+            payslipOrder: sc.payslipOrder,
+          },
+        });
+      }
+
+      // Loan Policies
+      for (const lp of DEFAULT_LOAN_POLICIES) {
+        await tx.loanPolicy.create({
+          data: { companyId: company.id, ...lp },
+        });
+      }
+
+      // Asset Categories
+      for (const ac of DEFAULT_ASSET_CATEGORIES) {
+        await tx.assetCategory.create({
+          data: { companyId: company.id, ...ac },
+        });
+      }
+
+      // Grievance Categories
+      for (const gc of DEFAULT_GRIEVANCE_CATEGORIES) {
+        await tx.grievanceCategory.create({
+          data: { companyId: company.id, ...gc },
+        });
+      }
+
+      // Approval Workflows
+      for (const aw of DEFAULT_APPROVAL_WORKFLOWS) {
+        await tx.approvalWorkflow.create({
+          data: { companyId: company.id, ...aw },
+        });
+      }
+
+      // Notification Templates + Rules
+      for (const tmpl of DEFAULT_NOTIFICATION_TEMPLATES) {
+        const template = await tx.notificationTemplate.create({
+          data: {
+            companyId: company.id,
+            name: tmpl.name,
+            subject: tmpl.subject,
+            body: tmpl.body,
+            channel: tmpl.channel,
+          },
+        });
+        // Link notification rule if one exists for this template
+        const rule = DEFAULT_NOTIFICATION_RULES.find(r => r.templateName === tmpl.name);
+        if (rule) {
+          await tx.notificationRule.create({
+            data: {
+              companyId: company.id,
+              triggerEvent: rule.triggerEvent,
+              templateId: template.id,
+              recipientRole: rule.recipientRole,
+              channel: rule.channel,
+            },
+          });
+        }
+      }
+
+      // Attendance Rule (singleton)
+      await tx.attendanceRule.create({
         data: {
-          tenantId: tenant.id,
-          name: 'Employee',
-          description: 'Standard employee with ESS self-service access',
-          permissions: [
-            'ess:view-payslips', 'ess:view-leave', 'ess:apply-leave',
-            'ess:view-attendance', 'ess:regularize-attendance', 'ess:view-holidays',
-            'ess:it-declaration', 'ess:view-directory', 'ess:view-profile',
-            'ess:download-form16', 'ess:view-goals', 'ess:submit-appraisal',
-            'ess:submit-feedback',
-          ],
-          isSystem: true,
+          companyId: company.id,
+          dayBoundaryTime: '00:00',
+          halfDayThresholdHours: 4,
+          fullDayThresholdHours: 8,
+          lateArrivalsAllowed: 3,
+          gracePeriodMinutes: 15,
+          earlyExitMinutes: 15,
+          lopAutoDeduct: true,
+          missingPunchAlert: true,
+          selfieRequired: false,
+          gpsRequired: false,
         },
       });
 
-      // Create a default "Manager" role with team management permissions
-      await tx.role.create({
+      // Overtime Rule (singleton)
+      await tx.overtimeRule.create({
         data: {
-          tenantId: tenant.id,
-          name: 'Manager',
-          description: 'Team manager with ESS + team management + approvals',
-          permissions: [
-            'ess:*', 'hr:read', 'hr:approve', 'reports:read',
-          ],
-          isSystem: true,
+          companyId: company.id,
+          rateMultiplier: 1.5,
+          thresholdMinutes: 30,
+          monthlyCap: 40,
+          weeklyCap: 10,
+          autoIncludePayroll: false,
+          approvalRequired: true,
         },
       });
+
+      // ESS Config (singleton — enable all standard features)
+      await tx.eSSConfig.create({
+        data: {
+          companyId: company.id,
+          viewPayslips: true,
+          downloadForm16: true,
+          leaveApplication: true,
+          leaveBalanceView: true,
+          itDeclaration: true,
+          attendanceView: true,
+          attendanceRegularization: true,
+          reimbursementClaims: true,
+          profileUpdate: true,
+          documentUpload: true,
+          loanApplication: true,
+          assetView: true,
+          performanceGoals: true,
+          appraisalAccess: true,
+          feedback360: true,
+          trainingEnrollment: true,
+          helpDesk: true,
+          employeeDirectory: true,
+          holidayCalendar: true,
+          policyDocuments: true,
+          grievanceSubmission: true,
+          loginMethod: 'PASSWORD',
+          passwordMinLength: 8,
+          passwordComplexity: true,
+          sessionTimeoutMinutes: 30,
+          mfaRequired: false,
+        },
+      });
+
+      // Statutory Configs (PF, ESI, Gratuity, Bonus) — use Prisma model defaults
+      await tx.pFConfig.create({ data: { companyId: company.id } });
+      await tx.eSIConfig.create({ data: { companyId: company.id } });
+      await tx.gratuityConfig.create({ data: { companyId: company.id } });
+      await tx.bonusConfig.create({ data: { companyId: company.id } });
+
+      // Tax Config (FY 2025-26 Indian slabs)
+      await tx.taxConfig.create({
+        data: {
+          companyId: company.id,
+          defaultRegime: DEFAULT_TAX_CONFIG.defaultRegime,
+          newRegimeSlabs: DEFAULT_TAX_CONFIG.newRegimeSlabs,
+          oldRegimeSlabs: DEFAULT_TAX_CONFIG.oldRegimeSlabs,
+          cessRate: DEFAULT_TAX_CONFIG.cessRate,
+        },
+      });
+
+      // Rosters
+      for (const roster of DEFAULT_ROSTERS) {
+        await tx.roster.create({
+          data: {
+            companyId: company.id,
+            name: roster.name,
+            pattern: roster.pattern,
+            weekOff1: roster.weekOff1,
+            weekOff2: roster.weekOff2,
+            effectiveFrom: new Date(),
+            isDefault: roster.isDefault,
+          },
+        });
+      }
+
+      // Cost Centres (one per department — created after departments)
+      const departments = await tx.department.findMany({ where: { companyId: company.id } });
+      for (const dept of departments) {
+        await tx.costCentre.create({
+          data: {
+            companyId: company.id,
+            code: `CC-${dept.code}`,
+            name: `${dept.name} Cost Centre`,
+            departmentId: dept.id,
+          },
+        });
+      }
 
       // ── 10. Users + TenantUser bridge ─────────────────────────
       if (payload.users.length > 0) {

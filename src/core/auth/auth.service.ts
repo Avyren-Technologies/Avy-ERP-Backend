@@ -12,6 +12,7 @@ import {
   createRedisPattern,
 } from '../../shared/utils';
 import { logger } from '../../config/logger';
+import { expandPermissionsWithInheritance, suppressByModules } from '../../shared/constants/permissions';
 import {
   LoginRequest,
   RegisterRequest,
@@ -87,8 +88,8 @@ export class AuthService {
 
     const tenantId = user.company?.tenant?.id;
 
-    // Fetch permissions dynamically from RBAC system
-    const permissions = await this.getUserPermissions(user.id, tenantId);
+    // Fetch permissions dynamically from RBAC system, then expand + suppress
+    const permissions = await this.getExpandedPermissions(user.id, tenantId, user.companyId);
 
     // Load enabled feature toggles
     let featureToggles: string[] = [];
@@ -560,6 +561,35 @@ export class AuthService {
 
     // Fetch permissions from TenantUser→Role (with Redis caching inside rbacService)
     return rbacService.getUserPermissions(userId, resolvedTenantId);
+  }
+
+  /**
+   * Get permissions with full expansion (inheritance) and module suppression.
+   * Used at login time so the frontend receives the SAME permissions
+   * that the auth middleware would compute on subsequent requests.
+   */
+  private async getExpandedPermissions(userId: string, tenantId?: string, companyId?: string | null): Promise<string[]> {
+    const raw = await this.getUserPermissions(userId, tenantId);
+    if (raw.includes('*')) return ['*'];
+
+    // 1. Expand by inheritance
+    const expanded = expandPermissionsWithInheritance(raw);
+
+    // 2. Suppress by active company modules
+    if (companyId) {
+      const company = await platformPrisma.company.findUnique({
+        where: { id: companyId },
+        select: { selectedModuleIds: true },
+      });
+      const activeModuleIds: string[] = company?.selectedModuleIds
+        ? (Array.isArray(company.selectedModuleIds)
+          ? company.selectedModuleIds as string[]
+          : JSON.parse(company.selectedModuleIds as string))
+        : [];
+      return suppressByModules(expanded, activeModuleIds);
+    }
+
+    return expanded;
   }
 
   // Cache user data
