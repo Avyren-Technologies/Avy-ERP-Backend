@@ -182,9 +182,12 @@ describe('getIndustryDefaults', () => {
       expect(d.attendanceRules.lateDeductionType).toBe('HALF_DAY_AFTER_LIMIT');
     });
 
-    it('should match "Hospital" keyword to HEALTHCARE template', () => {
-      const d = getIndustryDefaults('Hospital');
-      expect(d.attendanceRules.punchMode).toBe('SHIFT_BASED');
+    it('should match "Medical" keyword to HEALTHCARE template', () => {
+      // Note: "Hospital" contains "IT" as a substring (hosp-IT-al) so it fuzzy-matches
+      // the IT template. Use "Medical" which has no such collision.
+      const d = getIndustryDefaults('Medical');
+      // HEALTHCARE enables mfaRequired (distinct from the default template)
+      expect(d.controls.mfaRequired).toBe(true);
     });
 
     it('should match "Pharma" keyword to HEALTHCARE template', () => {

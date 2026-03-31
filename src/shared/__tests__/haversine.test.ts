@@ -43,11 +43,11 @@ describe('haversineDistance', () => {
       expect(dist).toBeLessThan(1_158_000);
     });
 
-    it('should compute Bangalore to Chennai as approximately 350 km', () => {
+    it('should compute Bangalore to Chennai as approximately 290 km', () => {
       const dist = haversineDistance(BANGALORE, CHENNAI);
-      // Actual ~335 km
-      expect(dist).toBeGreaterThan(330_000);
-      expect(dist).toBeLessThan(340_000);
+      // Actual straight-line ~290 km
+      expect(dist).toBeGreaterThan(285_000);
+      expect(dist).toBeLessThan(295_000);
     });
 
     it('should be symmetric (A→B == B→A)', () => {

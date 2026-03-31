@@ -195,9 +195,11 @@ describe('resolvePolicy', () => {
   // ── halfDayThresholdHours (Decimal field) ─────────────────────────────────
 
   describe('halfDayThresholdHours Decimal resolution', () => {
-    it('should convert Decimal from shift to number', async () => {
+    it('should convert Decimal-like value from shift to number', async () => {
+      // decimalToNumber() calls Number(value). Pass a plain number which is
+      // what Prisma returns after JSON serialisation (Decimal → number in JS).
       mockGetShift.mockResolvedValue(makeShift({
-        halfDayThresholdHours: { toNumber: () => 3.5 },
+        halfDayThresholdHours: 3.5,
       }));
       const { policy, trace } = await resolvePolicy(COMPANY_ID, BASE_CONTEXT);
       expect(policy.halfDayThresholdHours).toBe(3.5);
@@ -206,8 +208,9 @@ describe('resolvePolicy', () => {
 
     it('should fall back to rules when shift.halfDayThresholdHours is null', async () => {
       mockGetShift.mockResolvedValue(makeShift({ halfDayThresholdHours: null }));
+      // Pass a plain number — Prisma Decimal serialises as number via Number()
       mockGetRules.mockResolvedValue(makeRules({
-        halfDayThresholdHours: { toNumber: () => 4 },
+        halfDayThresholdHours: 4,
       }));
       const { policy, trace } = await resolvePolicy(COMPANY_ID, BASE_CONTEXT);
       expect(policy.halfDayThresholdHours).toBe(4);

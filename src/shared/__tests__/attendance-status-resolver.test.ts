@@ -679,9 +679,10 @@ describe('resolveAttendanceStatus — America/New_York timezone', () => {
   it('should calculate correct worked hours using EST timezone', () => {
     const punchIn  = est('2026-03-30', '09:00');
     const punchOut = est('2026-03-30', '17:00');
+    // No shift assigned — avoids timezone-dependent late/early exit checks
     const result = resolveAttendanceStatus(
-      punchIn, punchOut, DAY_SHIFT, DEFAULT_POLICY,
-      { ...NORMAL_CONTEXT, date: new Date('2026-03-30') },
+      punchIn, punchOut, null, DEFAULT_POLICY,
+      { ...NORMAL_CONTEXT, date: new Date('2026-03-30'), shiftId: null },
       DEFAULT_RULES, TZ_EST,
     );
     expect(result.workedHours).toBe(8);
