@@ -647,8 +647,9 @@ export class ESSController {
       return;
     }
 
-    const members = await essService.getTeamMembers(companyId, managerId);
-    res.json(createSuccessResponse(members, 'Team members retrieved'));
+    const { page, limit } = getPaginationParams(req.query);
+    const result = await essService.getTeamMembers(companyId, managerId, { page, limit });
+    res.json(createPaginatedResponse(result.reportees, result.page, result.limit, result.total, 'Team members retrieved'));
   });
 
   getPendingManagerApprovals = asyncHandler(async (req: Request, res: Response) => {

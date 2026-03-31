@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { logger } from '../../../config/logger';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -224,6 +225,58 @@ export class PerformanceService {
       throw ApiError.badRequest('Only CALIBRATION cycles can be published');
     }
 
+    // Bell curve enforcement check
+    const bellCurve = cycle.bellCurve as Record<string, number> | null;
+    if (bellCurve && typeof bellCurve === 'object') {
+      // Get actual rating distribution via groupBy
+      const ratingGroups = await platformPrisma.appraisalEntry.groupBy({
+        by: ['finalRating'],
+        _count: { _all: true },
+        where: { companyId, cycleId: id, finalRating: { not: null } },
+      });
+
+      const totalRated = ratingGroups.reduce((sum, g) => sum + g._count._all, 0);
+
+      if (totalRated > 0 && cycle.forcedDistribution) {
+        const ratingScale = cycle.ratingScale;
+        const actualDistribution: Record<number, number> = {};
+        for (let r = 1; r <= ratingScale; r++) actualDistribution[r] = 0;
+
+        for (const group of ratingGroups) {
+          if (group.finalRating !== null) {
+            const bucket = Math.min(ratingScale, Math.max(1, Math.round(Number(group.finalRating))));
+            actualDistribution[bucket] = (actualDistribution[bucket] ?? 0) + group._count._all;
+          }
+        }
+
+        // Compare actual vs target distribution within +/- 10% tolerance
+        const TOLERANCE = 10;
+        const violations: string[] = [];
+
+        for (const [ratingKey, targetPercent] of Object.entries(bellCurve)) {
+          const bucket = Number(ratingKey.replace(/^R/, ''));
+          if (isNaN(bucket) || bucket < 1 || bucket > ratingScale) continue;
+
+          const actualCount = actualDistribution[bucket] ?? 0;
+          const actualPercent = Math.round((actualCount / totalRated) * 100);
+          const diff = Math.abs(actualPercent - Number(targetPercent));
+
+          if (diff > TOLERANCE) {
+            violations.push(`Rating ${bucket}: actual ${actualPercent}% vs target ${targetPercent}% (diff ${diff}%)`);
+          }
+        }
+
+        if (violations.length > 0) {
+          throw ApiError.badRequest(
+            `Rating distribution does not match bell curve targets. Recalibrate before publishing. Violations: ${violations.join('; ')}`
+          );
+        }
+      } else if (totalRated > 0 && !cycle.forcedDistribution) {
+        // Soft warning — log but allow publishing
+        logger.warn(`Cycle ${id}: bell curve configured but forcedDistribution is off. Publishing without enforcement.`);
+      }
+    }
+
     return platformPrisma.appraisalCycle.update({
       where: { id },
       data: { status: 'PUBLISHED' },
@@ -309,6 +362,11 @@ export class PerformanceService {
       throw ApiError.badRequest('Appraisal cycle not found in this company');
     }
 
+    // Goal locking: prevent goal creation if cycle is not in DRAFT status
+    if (cycle.status !== 'DRAFT') {
+      throw ApiError.badRequest('Goals are locked — appraisal cycle is no longer in DRAFT status');
+    }
+
     // Validate parentGoalId if provided
     if (data.parentGoalId) {
       const parentGoal = await platformPrisma.goal.findUnique({ where: { id: data.parentGoalId } });
@@ -354,6 +412,20 @@ export class PerformanceService {
       throw ApiError.notFound('Goal not found');
     }
 
+    // Goal locking: check if the linked cycle is still in DRAFT status
+    const cycle = await platformPrisma.appraisalCycle.findUnique({ where: { id: goal.cycleId } });
+    if (cycle && cycle.status !== 'DRAFT') {
+      // Only achievedValue and selfRating are updatable when cycle is not DRAFT
+      const ALLOWED_FIELDS_WHEN_LOCKED = new Set(['achievedValue', 'selfRating']);
+      const attemptedFields = Object.keys(data).filter(
+        (key) => data[key] !== undefined && !ALLOWED_FIELDS_WHEN_LOCKED.has(key)
+      );
+
+      if (attemptedFields.length > 0) {
+        throw ApiError.badRequest('Goals are locked — appraisal cycle is no longer in DRAFT status');
+      }
+    }
+
     return platformPrisma.goal.update({
       where: { id },
       data: {
@@ -368,6 +440,7 @@ export class PerformanceService {
         ...(data.weightage !== undefined && { weightage: data.weightage }),
         ...(data.level !== undefined && { level: data.level }),
         ...(data.status !== undefined && { status: data.status }),
+        ...(data.selfRating !== undefined && { selfRating: data.selfRating }),
       },
       include: {
         employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
@@ -627,66 +700,106 @@ export class PerformanceService {
     });
   }
 
-  async getCalibrationView(companyId: string, cycleId: string) {
+  async getCalibrationView(companyId: string, cycleId: string, options: ListOptions = {}) {
+    const { page = 1, limit = 50 } = options;
+    const offset = (page - 1) * limit;
+
     // Verify cycle
     const cycle = await platformPrisma.appraisalCycle.findUnique({ where: { id: cycleId } });
     if (!cycle || cycle.companyId !== companyId) {
       throw ApiError.notFound('Appraisal cycle not found');
     }
 
-    // Get all entries with final or manager ratings
-    const entries = await platformPrisma.appraisalEntry.findMany({
-      where: { companyId, cycleId },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            employeeId: true,
-            firstName: true,
-            lastName: true,
-            department: { select: { id: true, name: true } },
+    const ratingScale = cycle.ratingScale;
+
+    // Use groupBy to aggregate rating distribution at DB level (avoids N+1 / memory explosion)
+    const [ratingGroups, totalEntries, ratedEntries, totalRated] = await Promise.all([
+      platformPrisma.appraisalEntry.groupBy({
+        by: ['finalRating'],
+        _count: { _all: true },
+        where: {
+          companyId,
+          cycleId,
+          OR: [
+            { finalRating: { not: null } },
+            { managerRating: { not: null } },
+          ],
+        },
+      }),
+      platformPrisma.appraisalEntry.count({ where: { companyId, cycleId } }),
+      // Paginated entry list for the calibration table
+      platformPrisma.appraisalEntry.findMany({
+        where: {
+          companyId,
+          cycleId,
+          OR: [
+            { finalRating: { not: null } },
+            { managerRating: { not: null } },
+          ],
+        },
+        include: {
+          employee: {
+            select: {
+              id: true,
+              employeeId: true,
+              firstName: true,
+              lastName: true,
+              department: { select: { id: true, name: true } },
+            },
           },
         },
-      },
-    });
+        skip: offset,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      platformPrisma.appraisalEntry.count({
+        where: {
+          companyId,
+          cycleId,
+          OR: [
+            { finalRating: { not: null } },
+            { managerRating: { not: null } },
+          ],
+        },
+      }),
+    ]);
 
-    // Build bell curve distribution: count entries per rating bucket
-    const ratingScale = cycle.ratingScale;
+    // Build distribution from groupBy results
     const distribution: Record<number, number> = {};
     for (let r = 1; r <= ratingScale; r++) {
       distribution[r] = 0;
     }
 
-    const ratedEntries: any[] = [];
-    for (const entry of entries) {
-      const rating = entry.finalRating ?? entry.managerRating;
-      if (rating !== null && rating !== undefined) {
-        const bucket = Math.min(ratingScale, Math.max(1, Math.round(Number(rating))));
-        distribution[bucket] = (distribution[bucket] ?? 0) + 1;
-        ratedEntries.push({
-          id: entry.id,
-          employee: entry.employee,
-          selfRating: entry.selfRating,
-          managerRating: entry.managerRating,
-          finalRating: entry.finalRating,
-          status: entry.status,
-        });
+    for (const group of ratingGroups) {
+      if (group.finalRating !== null) {
+        const bucket = Math.min(ratingScale, Math.max(1, Math.round(Number(group.finalRating))));
+        distribution[bucket] = (distribution[bucket] ?? 0) + group._count._all;
       }
     }
 
-    const totalRated = ratedEntries.length;
     const distributionPercent: Record<number, number> = {};
     for (const [bucket, count] of Object.entries(distribution)) {
       distributionPercent[Number(bucket)] = totalRated > 0 ? Math.round((count / totalRated) * 100) : 0;
     }
 
+    const entries = ratedEntries.map((entry) => ({
+      id: entry.id,
+      employee: entry.employee,
+      selfRating: entry.selfRating,
+      managerRating: entry.managerRating,
+      finalRating: entry.finalRating,
+      status: entry.status,
+    }));
+
     return {
       cycle: { id: cycle.id, name: cycle.name, ratingScale, bellCurve: cycle.bellCurve },
-      totalEntries: entries.length,
+      totalEntries,
       totalRated,
       distribution,
       distributionPercent,
-      entries: ratedEntries,
+      entries,
+      page,
+      limit,
     };
   }
 

@@ -315,6 +315,12 @@ export class ESSService {
     const currentStep = request.currentStep;
     const totalSteps = steps.length;
 
+    // Role-based approval validation: check if the current step has an approverRole restriction
+    const stepConfig = steps.find((s: any) => s.stepOrder === currentStep);
+    if (stepConfig && stepConfig.approverRole) {
+      await this.validateApproverRole(companyId, request.requesterId, userId, stepConfig.approverRole);
+    }
+
     // Build step history entry
     const historyEntry = {
       step: currentStep,
@@ -358,6 +364,97 @@ export class ESSService {
         workflow: { select: { id: true, name: true, triggerEvent: true } },
       },
     });
+  }
+
+  /**
+   * Validates that the approver has the correct role for the current workflow step.
+   * - MANAGER: approver must be the requester's reporting manager (or an active delegate)
+   * - HR: approver must have an HR-related role/permission
+   * - If no matching role found, falls back to allowing (backwards compatible)
+   */
+  private async validateApproverRole(
+    companyId: string,
+    requesterId: string,
+    approverId: string,
+    approverRole: string,
+  ) {
+    const normalizedRole = approverRole.toUpperCase();
+
+    if (normalizedRole === 'MANAGER') {
+      // Check if the approver is the requester's reporting manager
+      const requester = await platformPrisma.employee.findFirst({
+        where: {
+          OR: [{ id: requesterId }, { user: { id: requesterId } }],
+          companyId,
+        },
+        select: { id: true, reportingManagerId: true },
+      });
+
+      if (requester && requester.reportingManagerId) {
+        // Get the approver's employee record
+        const approverEmployee = await platformPrisma.employee.findFirst({
+          where: {
+            OR: [{ id: approverId }, { user: { id: approverId } }],
+            companyId,
+          },
+          select: { id: true },
+        });
+
+        if (approverEmployee) {
+          // Direct manager check
+          if (approverEmployee.id === requester.reportingManagerId) {
+            return; // Valid — approver is the reporting manager
+          }
+
+          // Check if approver is an active delegate for the reporting manager
+          const activeDelegates = await this.getActiveDelegates(companyId, requester.reportingManagerId);
+          if (activeDelegates.includes(approverEmployee.id) || activeDelegates.includes(approverId)) {
+            return; // Valid — approver is a delegate for the manager
+          }
+        }
+
+        throw ApiError.badRequest(
+          'This approval step requires the reporting manager. You are not authorized to approve this request.'
+        );
+      }
+      // If no requester found or no manager set, fall through (backwards compatible)
+      logger.warn(`Approval role validation: could not verify MANAGER role for requester ${requesterId}, allowing fallback`);
+    } else if (normalizedRole === 'HR') {
+      // Check if the approver's user has HR-related permissions via TenantUser -> Role
+      const approverUser = await platformPrisma.user.findFirst({
+        where: {
+          OR: [{ id: approverId }, { employee: { id: approverId } }],
+        },
+        select: {
+          id: true,
+          role: true,
+          tenantUsers: {
+            include: {
+              role: { select: { permissions: true } },
+            },
+          },
+        },
+      });
+
+      if (approverUser) {
+        // Check tenant-scoped roles for HR permissions
+        for (const tu of approverUser.tenantUsers) {
+          const permissions = tu.role.permissions as string[];
+          const hasHrPermission = Array.isArray(permissions) && permissions.some(
+            (p: string) => p === '*' || p.startsWith('hr:') || p === 'hr'
+          );
+          if (hasHrPermission) return; // Valid
+        }
+
+        // Also allow if user's base role is COMPANY_ADMIN (they implicitly have HR access)
+        if (approverUser.role === 'COMPANY_ADMIN') return;
+      }
+
+      throw ApiError.badRequest(
+        'This approval step requires HR personnel. You are not authorized to approve this request.'
+      );
+    }
+    // For any other approverRole value (or no match), allow (backwards compatible)
   }
 
   async rejectRequest(companyId: string, requestId: string, userId: string, note: string) {
@@ -557,6 +654,105 @@ export class ESSService {
         data: data.data ?? Prisma.JsonNull,
       },
     });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Auto-Escalation (intended for cron job invocation)
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Finds approval requests where the current step has been PENDING longer than
+   * the step's configured `slaHours`. If the workflow step has `autoEscalate: true`,
+   * advances the request to the next step. Can be called by a cron job.
+   */
+  async checkAndEscalateApprovals() {
+    const now = new Date();
+
+    // Find all pending/in-progress approval requests
+    const pendingRequests = await platformPrisma.approvalRequest.findMany({
+      where: {
+        status: { in: ['PENDING', 'IN_PROGRESS'] },
+      },
+      include: {
+        workflow: true,
+      },
+    });
+
+    let escalatedCount = 0;
+
+    for (const request of pendingRequests) {
+      try {
+        const steps = request.workflow.steps as any[];
+        const currentStepConfig = steps.find((s: any) => s.stepOrder === request.currentStep);
+
+        if (!currentStepConfig || !currentStepConfig.slaHours || !currentStepConfig.autoEscalate) {
+          continue; // No SLA or auto-escalation configured for this step
+        }
+
+        // Determine when the current step started
+        const stepHistory = (request.stepHistory as any[]) ?? [];
+        const lastStepEntry = stepHistory
+          .filter((h: any) => h.step === request.currentStep - 1)
+          .sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
+
+        const stepStartedAt = lastStepEntry ? new Date(lastStepEntry.at) : request.createdAt;
+        const elapsedHours = (now.getTime() - stepStartedAt.getTime()) / (1000 * 60 * 60);
+
+        if (elapsedHours < currentStepConfig.slaHours) {
+          continue; // SLA not yet breached
+        }
+
+        // SLA breached — escalate to next step
+        const totalSteps = steps.length;
+        const historyEntry = {
+          step: request.currentStep,
+          action: 'auto_escalate',
+          by: 'system',
+          at: now.toISOString(),
+          note: `Auto-escalated after ${Math.round(elapsedHours)}h (SLA: ${currentStepConfig.slaHours}h)`,
+        };
+
+        const updatedHistory = [...stepHistory, historyEntry];
+
+        if (request.currentStep >= totalSteps) {
+          // Last step breached — auto-approve the request
+          await platformPrisma.approvalRequest.update({
+            where: { id: request.id },
+            data: {
+              status: 'APPROVED',
+              stepHistory: updatedHistory,
+            },
+          });
+
+          await this.onApprovalComplete(request.companyId, request.entityType, request.entityId, 'APPROVED');
+
+          logger.info(
+            `Auto-escalation: request ${request.id} auto-approved (final step SLA breached after ${Math.round(elapsedHours)}h)`
+          );
+        } else {
+          // Advance to next step
+          await platformPrisma.approvalRequest.update({
+            where: { id: request.id },
+            data: {
+              currentStep: request.currentStep + 1,
+              status: 'IN_PROGRESS',
+              stepHistory: updatedHistory,
+            },
+          });
+
+          logger.info(
+            `Auto-escalation: request ${request.id} advanced from step ${request.currentStep} to ${request.currentStep + 1} (SLA breached after ${Math.round(elapsedHours)}h)`
+          );
+        }
+
+        escalatedCount++;
+      } catch (error) {
+        logger.error(`Auto-escalation failed for request ${request.id}:`, error);
+      }
+    }
+
+    logger.info(`Auto-escalation check complete: ${escalatedCount} request(s) escalated out of ${pendingRequests.length} pending`);
+    return { escalated: escalatedCount, checked: pendingRequests.length };
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1353,28 +1549,38 @@ export class ESSService {
   // MSS Manager Self-Service
   // ────────────────────────────────────────────────────────────────────
 
-  async getTeamMembers(companyId: string, managerId: string) {
-    const reportees = await platformPrisma.employee.findMany({
-      where: {
-        companyId,
-        reportingManagerId: managerId,
-        status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED'] },
-      },
-      select: {
-        id: true,
-        employeeId: true,
-        firstName: true,
-        lastName: true,
-        profilePhotoUrl: true,
-        department: { select: { id: true, name: true } },
-        designation: { select: { id: true, name: true } },
-        status: true,
-        joiningDate: true,
-      },
-      orderBy: { firstName: 'asc' },
-    });
+  async getTeamMembers(companyId: string, managerId: string, options: ListOptions = {}) {
+    const { page = 1, limit = 25 } = options;
+    const offset = (page - 1) * limit;
 
-    return reportees;
+    const where: Prisma.EmployeeWhereInput = {
+      companyId,
+      reportingManagerId: managerId,
+      status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED'] },
+    };
+
+    const [reportees, total] = await Promise.all([
+      platformPrisma.employee.findMany({
+        where,
+        select: {
+          id: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+          profilePhotoUrl: true,
+          department: { select: { id: true, name: true } },
+          designation: { select: { id: true, name: true } },
+          status: true,
+          joiningDate: true,
+        },
+        skip: offset,
+        take: limit,
+        orderBy: { firstName: 'asc' },
+      }),
+      platformPrisma.employee.count({ where }),
+    ]);
+
+    return { reportees, total, page, limit };
   }
 
   async getPendingApprovals(companyId: string, managerId: string) {

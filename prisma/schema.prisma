@@ -2776,6 +2776,8 @@ model ApprovalRequest {
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
 
+  @@index([companyId, status])
+  @@index([companyId, status, entityType])
   @@map("approval_requests")
 }
 
@@ -2899,6 +2901,8 @@ model Goal {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  @@index([cycleId, employeeId])
+  @@index([companyId, level])
   @@map("goals")
 }
 
@@ -2926,6 +2930,8 @@ model AppraisalEntry {
   updatedAt            DateTime             @updatedAt
 
   @@unique([cycleId, employeeId])
+  @@index([cycleId, status])
+  @@index([companyId, cycleId])
   @@map("appraisal_entries")
 }
 
@@ -2950,6 +2956,7 @@ model Feedback360 {
   updatedAt      DateTime       @updatedAt
 
   @@unique([cycleId, employeeId, raterId])
+  @@index([cycleId, employeeId])
   @@map("feedback_360")
 }
 

@@ -52,5 +52,41 @@ export async function seedCompanyConfigs(companyId: string, industryType?: strin
     }),
   ]);
 
+  // ── Seed default breaks for existing shifts (if shifts exist but have no breaks) ──
+  try {
+    const shifts = await platformPrisma.companyShift.findMany({
+      where: { companyId },
+      include: { breaks: { select: { id: true } } },
+    });
+
+    for (const shift of shifts) {
+      if (shift.breaks.length === 0) {
+        await platformPrisma.shiftBreak.createMany({
+          data: [
+            {
+              shiftId: shift.id,
+              name: 'Lunch Break',
+              type: 'FIXED',
+              startTime: '12:30',
+              duration: 30,
+              isPaid: false,
+            },
+            {
+              shiftId: shift.id,
+              name: 'Tea Break',
+              type: 'FLEXIBLE',
+              startTime: null,
+              duration: 15,
+              isPaid: true,
+            },
+          ],
+        });
+      }
+    }
+  } catch (breakErr) {
+    // Non-fatal — breaks are optional enrichment
+    logger.warn(`Failed to seed shift breaks (companyId=${companyId}): ${breakErr}`);
+  }
+
   logger.info(`Company configs seeded successfully (companyId=${companyId}, industryType=${industryType ?? 'default'})`);
 }

@@ -297,7 +297,8 @@ export class PerformanceController {
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
     const cycleId = req.params.cycleId!;
-    const view = await performanceService.getCalibrationView(companyId, cycleId);
+    const { page, limit } = getPaginationParams(req.query);
+    const view = await performanceService.getCalibrationView(companyId, cycleId, { page, limit });
     res.json(createSuccessResponse(view, 'Calibration view retrieved'));
   });
 
