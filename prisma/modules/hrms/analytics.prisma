@@ -1,0 +1,234 @@
+// ==========================================
+// HRMS — Analytics & Precomputed Tables
+// ==========================================
+// Models: EmployeeAnalyticsDaily, AttendanceAnalyticsDaily, PayrollAnalyticsMonthly,
+//         AttritionMetricsMonthly, AnalyticsAlert, AnalyticsAuditLog
+
+model EmployeeAnalyticsDaily {
+  id              String   @id @default(cuid())
+  companyId       String
+  date            DateTime @db.Date
+  version         Int      @default(1)
+  computedAt      DateTime @default(now())
+
+  // Headcount Metrics
+  totalHeadcount  Int
+  activeCount     Int
+  probationCount  Int
+  noticeCount     Int
+  separatedCount  Int
+
+  // Movement Metrics
+  joinersCount    Int
+  leaversCount    Int
+  transfersCount  Int
+  promotionsCount Int
+
+  // Breakdowns
+  byDepartment    Json
+  byLocation      Json
+  byGrade         Json
+  byEmployeeType  Json
+  byGender        Json
+  byAgeBand       Json
+  byTenureBand    Json
+
+  // Derived Metrics
+  avgSpanOfControl Float?
+  vacancyRate      Float?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, date, version])
+  @@index([companyId, date])
+  @@map("employee_analytics_daily")
+}
+
+model AttendanceAnalyticsDaily {
+  id              String   @id @default(cuid())
+  companyId       String
+  date            DateTime @db.Date
+  version         Int      @default(1)
+  computedAt      DateTime @default(now())
+
+  // Attendance Counts
+  totalEmployees  Int
+  presentCount    Int
+  absentCount     Int
+  lateCount       Int
+  halfDayCount    Int
+  onLeaveCount    Int
+  weekOffCount    Int
+  holidayCount    Int
+
+  // Hours & Cost
+  avgWorkedHours     Float
+  totalOvertimeHours Float
+  totalOvertimeCost  Float?
+
+  // Quality Metrics
+  productivityIndex      Float
+  avgLateMinutes         Float
+  lateThresholdBreaches  Int
+  regularizationCount    Int
+  missedPunchCount       Int
+
+  // Breakdowns
+  byDepartment Json
+  byLocation   Json
+  byShift      Json
+  bySource     Json
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, date, version])
+  @@index([companyId, date])
+  @@map("attendance_analytics_daily")
+}
+
+model PayrollAnalyticsMonthly {
+  id         String   @id @default(cuid())
+  companyId  String
+  month      Int
+  year       Int
+  version    Int      @default(1)
+  computedAt DateTime @default(now())
+
+  // Core Payroll
+  employeeCount      Int
+  totalGrossEarnings Float
+  totalDeductions    Float
+  totalNetPay        Float
+  totalEmployerCost  Float
+
+  // Statutory Components
+  totalPFEmployee       Float
+  totalPFEmployer       Float
+  totalESIEmployee      Float
+  totalESIEmployer      Float
+  totalPT               Float
+  totalTDS              Float
+  totalLWFEmployee      Float
+  totalLWFEmployer      Float
+  totalGratuityProvision Float
+
+  // CTC Metrics
+  avgCTC    Float
+  medianCTC Float
+
+  // Exception & Variance
+  exceptionCount        Int
+  varianceFromLastMonth Float?
+
+  // Loan & Bonus
+  totalLoanOutstanding  Float
+  activeLoanCount       Int
+  totalSalaryHolds      Int
+  totalBonusDisbursed   Float
+  totalIncentivesPaid   Float
+
+  // Breakdowns
+  byDepartment Json
+  byLocation   Json
+  byGrade      Json
+  byCTCBand    Json
+  byComponent  Json
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, month, year, version])
+  @@index([companyId, year, month])
+  @@map("payroll_analytics_monthly")
+}
+
+model AttritionMetricsMonthly {
+  id         String   @id @default(cuid())
+  companyId  String
+  month      Int
+  year       Int
+  version    Int      @default(1)
+  computedAt DateTime @default(now())
+
+  // Attrition Rates
+  attritionRate      Float
+  voluntaryRate      Float
+  involuntaryRate    Float
+  earlyAttritionRate Float
+
+  // Exit Counts
+  totalExits      Int
+  voluntaryExits  Int
+  involuntaryExits Int
+  retirements     Int
+  earlyExits      Int
+
+  // Exit Analysis
+  avgTenureAtExit      Float
+  exitReasonBreakdown  Json
+  wouldRecommendAvg    Float?
+  flightRiskEmployees  Json
+
+  // F&F Metrics
+  pendingFnFCount       Int
+  totalFnFAmount        Float
+  avgFnFProcessingDays  Float
+
+  // Breakdowns
+  byDepartment     Json
+  byGrade          Json
+  byTenureBand     Json
+  bySeparationType Json
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, month, year, version])
+  @@index([companyId, year, month])
+  @@map("attrition_metrics_monthly")
+}
+
+model AnalyticsAlert {
+  id          String   @id @default(cuid())
+  companyId   String
+  dashboard   String
+  type        String
+  severity    String
+  status      String   @default("ACTIVE")
+  title       String
+  description String
+  metadata    Json?
+
+  // Acknowledgement
+  acknowledgedBy String?
+  acknowledgedAt DateTime?
+
+  // Resolution
+  resolvedBy String?
+  resolvedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status, severity])
+  @@index([companyId, dashboard])
+  @@map("analytics_alerts")
+}
+
+model AnalyticsAuditLog {
+  id           String   @id @default(cuid())
+  companyId    String
+  userId       String
+  action       String
+  dashboard    String?
+  reportType   String?
+  filters      Json?
+  exportFormat String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([companyId, userId, createdAt])
+  @@index([companyId, action, createdAt])
+  @@map("analytics_audit_logs")
+}
