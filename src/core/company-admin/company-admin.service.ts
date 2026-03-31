@@ -862,6 +862,13 @@ export class CompanyAdminService {
           createdAt: true,
           updatedAt: true,
           employeeId: true,
+          tenantUsers: {
+            select: {
+              roleId: true,
+              role: { select: { id: true, name: true } },
+            },
+            take: 1,
+          },
         },
         skip: offset,
         take: limit,
@@ -870,7 +877,18 @@ export class CompanyAdminService {
       platformPrisma.user.count({ where }),
     ]);
 
-    return { users, total, page, limit };
+    // Flatten tenantUser role info into each user for frontend consumption
+    const enriched = users.map((u) => {
+      const tu = u.tenantUsers[0];
+      return {
+        ...u,
+        tenantUsers: undefined,
+        roleId: tu?.role?.id ?? null,
+        roleName: tu?.role?.name ?? null,
+      };
+    });
+
+    return { users: enriched, total, page, limit };
   }
 
   async createUser(companyId: string, tenantId: string, data: any) {
@@ -941,9 +959,20 @@ export class CompanyAdminService {
 
     logger.info(`User created by company admin: ${result.id} (${result.email}) for company ${companyId}`);
 
-    // Return without password
+    // Return without password, include role info
     const { password: _, ...userWithoutPassword } = result;
-    return userWithoutPassword;
+
+    // Fetch the assigned role name for the response
+    const tenantUser = await platformPrisma.tenantUser.findFirst({
+      where: { userId: result.id },
+      select: { role: { select: { id: true, name: true } } },
+    });
+
+    return {
+      ...userWithoutPassword,
+      roleId: tenantUser?.role?.id ?? null,
+      roleName: tenantUser?.role?.name ?? null,
+    };
   }
 
   async getUser(companyId: string, userId: string) {
@@ -979,11 +1008,21 @@ export class CompanyAdminService {
       throw ApiError.notFound('User not found');
     }
 
-    return user;
+    // Flatten tenantUser role info for frontend
+    const tu = user.tenantUsers[0];
+    return {
+      ...user,
+      tenantUsers: undefined,
+      roleId: tu?.role?.id ?? null,
+      roleName: tu?.role?.name ?? null,
+    };
   }
 
   async updateUser(companyId: string, userId: string, data: any) {
-    const user = await platformPrisma.user.findUnique({ where: { id: userId } });
+    const user = await platformPrisma.user.findUnique({
+      where: { id: userId },
+      include: { company: { include: { tenant: { select: { id: true } } } } },
+    });
 
     if (!user || user.companyId !== companyId) {
       throw ApiError.notFound('User not found');
@@ -1020,7 +1059,26 @@ export class CompanyAdminService {
       },
     });
 
-    return updated;
+    // Handle role assignment if roleId is provided
+    if (data.role) {
+      const tenantId = user.company?.tenant?.id;
+      if (tenantId) {
+        const { rbacService } = await import('../rbac/rbac.service');
+        await rbacService.assignRole(tenantId, userId, data.role);
+      }
+    }
+
+    // Return with role info
+    const tenantUser = await platformPrisma.tenantUser.findFirst({
+      where: { userId },
+      select: { role: { select: { id: true, name: true } } },
+    });
+
+    return {
+      ...updated,
+      roleId: tenantUser?.role?.id ?? null,
+      roleName: tenantUser?.role?.name ?? null,
+    };
   }
 
   async updateUserStatus(companyId: string, userId: string, isActive: boolean) {
@@ -1050,7 +1108,17 @@ export class CompanyAdminService {
 
     logger.info(`User ${userId} status updated to ${isActive ? 'active' : 'inactive'} by company admin (company: ${companyId})`);
 
-    return updated;
+    // Include role info
+    const tenantUser = await platformPrisma.tenantUser.findFirst({
+      where: { userId },
+      select: { role: { select: { id: true, name: true } } },
+    });
+
+    return {
+      ...updated,
+      roleId: tenantUser?.role?.id ?? null,
+      roleName: tenantUser?.role?.name ?? null,
+    };
   }
 
   // ────────────────────────────────────────────────────────────────────

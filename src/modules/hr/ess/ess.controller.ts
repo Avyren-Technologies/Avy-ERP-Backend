@@ -5,6 +5,16 @@ import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError } from '../../../shared/errors';
 import { platformPrisma } from '../../../config/database';
 import {
+  getCachedAttendanceRules,
+  getCachedCompanySettings,
+} from '../../../shared/utils/config-cache';
+import { resolvePolicy, type EvaluationContext } from '../../../shared/services/policy-resolver.service';
+import {
+  resolveAttendanceStatus,
+  type AttendanceRulesInput,
+  type ShiftInfo,
+} from '../../../shared/services/attendance-status-resolver.service';
+import {
   essConfigSchema,
   createWorkflowSchema,
   updateWorkflowSchema,
@@ -1066,8 +1076,82 @@ export class ESSController {
     }
 
     const now = new Date();
-    const diffMs = now.getTime() - new Date(existing.punchIn).getTime();
-    const workedHours = parseFloat((diffMs / 3_600_000).toFixed(2));
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+
+    const employee = await platformPrisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { shiftId: true, locationId: true },
+    });
+    const effectiveShiftId = existing.shiftId ?? employee?.shiftId ?? null;
+    const effectiveLocationId = existing.locationId ?? employee?.locationId ?? null;
+
+    const holiday = await platformPrisma.holidayCalendar.findFirst({
+      where: {
+        companyId,
+        date: today,
+      },
+      select: { name: true },
+    });
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+      select: { weekOff1: true, weekOff2: true },
+    });
+    const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dow = dayOfWeek[today.getDay()];
+    const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
+
+    const evaluationContext: EvaluationContext = {
+      employeeId,
+      shiftId: effectiveShiftId,
+      locationId: effectiveLocationId,
+      date: today,
+      isHoliday: !!holiday,
+      isWeekOff,
+      ...(holiday?.name && { holidayName: holiday.name }),
+      ...(roster && { rosterPattern: `${roster.weekOff1 ?? ''}${roster.weekOff2 ? '/' + roster.weekOff2 : ''}` }),
+    };
+
+    const { policy, trace } = await resolvePolicy(companyId, evaluationContext);
+
+    let shiftInfo: ShiftInfo | null = null;
+    if (effectiveShiftId) {
+      const shift = await platformPrisma.companyShift.findUnique({
+        where: { id: effectiveShiftId },
+        select: { startTime: true, endTime: true, isCrossDay: true },
+      });
+      if (shift) {
+        shiftInfo = {
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          isCrossDay: shift.isCrossDay,
+        };
+      }
+    }
+
+    const rules = await getCachedAttendanceRules(companyId);
+    const rulesInput: AttendanceRulesInput = {
+      lopAutoDeduct: rules.lopAutoDeduct,
+      autoMarkAbsentIfNoPunch: rules.autoMarkAbsentIfNoPunch,
+      autoHalfDayEnabled: rules.autoHalfDayEnabled,
+      lateDeductionType: rules.lateDeductionType,
+      lateDeductionValue: rules.lateDeductionValue ? Number(rules.lateDeductionValue) : null,
+      earlyExitDeductionType: rules.earlyExitDeductionType,
+      earlyExitDeductionValue: rules.earlyExitDeductionValue ? Number(rules.earlyExitDeductionValue) : null,
+      ignoreLateOnLeaveDay: rules.ignoreLateOnLeaveDay,
+      ignoreLateOnHoliday: rules.ignoreLateOnHoliday,
+      ignoreLateOnWeekOff: rules.ignoreLateOnWeekOff,
+    };
+
+    const statusResult = resolveAttendanceStatus(
+      existing.punchIn,
+      now,
+      shiftInfo,
+      policy,
+      evaluationContext,
+      rulesInput,
+      companyTimezone,
+    );
 
     // Geofence validation for checkout
     let geoStatus = existing.geoStatus || 'NO_LOCATION';
@@ -1089,11 +1173,32 @@ export class ESSController {
       where: { id: existing.id },
       data: {
         punchOut: now,
-        workedHours,
+        workedHours: statusResult.workedHours,
+        status: statusResult.status as any,
+        isLate: statusResult.isLate,
+        lateMinutes: statusResult.lateMinutes || null,
+        isEarlyExit: statusResult.isEarlyExit,
+        earlyMinutes: statusResult.earlyMinutes || null,
+        overtimeHours: statusResult.overtimeHours > 0 ? statusResult.overtimeHours : null,
         checkOutLatitude: latitude ?? null,
         checkOutLongitude: longitude ?? null,
         checkOutPhotoUrl: photoUrl ?? null,
         geoStatus,
+        appliedGracePeriodMinutes: policy.gracePeriodMinutes,
+        appliedFullDayThresholdHours: policy.fullDayThresholdHours,
+        appliedHalfDayThresholdHours: policy.halfDayThresholdHours,
+        appliedBreakDeductionMinutes: policy.breakDeductionMinutes,
+        appliedPunchMode: policy.punchMode as any,
+        appliedLateDeduction: statusResult.appliedLateDeduction,
+        appliedEarlyExitDeduction: statusResult.appliedEarlyExitDeduction,
+        resolutionTrace: trace,
+        evaluationContext: {
+          isHoliday: evaluationContext.isHoliday,
+          isWeekOff: evaluationContext.isWeekOff,
+          holidayName: evaluationContext.holidayName ?? null,
+          rosterPattern: evaluationContext.rosterPattern ?? null,
+        },
+        finalStatusReason: statusResult.finalStatusReason,
       },
       include: { shift: true, location: true },
     });
