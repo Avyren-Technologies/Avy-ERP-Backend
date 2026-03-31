@@ -14,6 +14,33 @@ function formatDate(d: Date | null | undefined): string {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+/**
+ * Build month/year filter for PayrollRun queries.
+ * Handles same-year and cross-year date ranges.
+ */
+function buildPayrollRunDateFilter(dateFrom: Date, dateTo: Date): Record<string, unknown> {
+  const startMonth = dateFrom.getMonth() + 1;
+  const startYear = dateFrom.getFullYear();
+  const endMonth = dateTo.getMonth() + 1;
+  const endYear = dateTo.getFullYear();
+
+  if (startYear === endYear) {
+    return { year: startYear, month: { gte: startMonth, lte: endMonth } };
+  }
+
+  const conditions: Record<string, unknown>[] = [
+    { year: startYear, month: { gte: startMonth } },
+  ];
+
+  for (let y = startYear + 1; y < endYear; y++) {
+    conditions.push({ year: y });
+  }
+
+  conditions.push({ year: endYear, month: { lte: endMonth } });
+
+  return { OR: conditions };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // R16: PF ECR Report (EPFO Electronic Challan-cum-Return)
 // ═══════════════════════════════════════════════════════════════
@@ -30,7 +57,7 @@ export async function generatePFECRReport(
     where: {
       companyId: scope.companyId,
       status: { in: ['APPROVED', 'DISBURSED'] },
-      year: { gte: dateFrom.getFullYear(), lte: dateTo.getFullYear() },
+      ...buildPayrollRunDateFilter(dateFrom, dateTo),
     },
   });
 
@@ -156,7 +183,7 @@ export async function generateESIChallanReport(
     where: {
       companyId: scope.companyId,
       status: { in: ['APPROVED', 'DISBURSED'] },
-      year: { gte: dateFrom.getFullYear(), lte: dateTo.getFullYear() },
+      ...buildPayrollRunDateFilter(dateFrom, dateTo),
     },
   });
 
@@ -255,7 +282,7 @@ export async function generatePTReport(
     where: {
       companyId: scope.companyId,
       status: { in: ['APPROVED', 'DISBURSED'] },
-      year: { gte: dateFrom.getFullYear(), lte: dateTo.getFullYear() },
+      ...buildPayrollRunDateFilter(dateFrom, dateTo),
     },
   });
 
@@ -367,7 +394,7 @@ export async function generateTDSSummaryReport(
     where: {
       companyId: scope.companyId,
       status: { in: ['APPROVED', 'DISBURSED'] },
-      year: { gte: dateFrom.getFullYear(), lte: dateTo.getFullYear() },
+      ...buildPayrollRunDateFilter(dateFrom, dateTo),
     },
     orderBy: [{ year: 'asc' }, { month: 'asc' }],
   });

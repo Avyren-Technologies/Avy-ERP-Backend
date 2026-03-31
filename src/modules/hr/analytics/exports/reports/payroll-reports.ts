@@ -19,6 +19,35 @@ function jsonObj(val: unknown): Record<string, number> {
   return val as Record<string, number>;
 }
 
+/**
+ * Build month/year filter for PayrollRun queries.
+ * Handles same-year and cross-year date ranges.
+ */
+function buildPayrollRunDateFilter(dateFrom: Date, dateTo: Date): Record<string, unknown> {
+  const startMonth = dateFrom.getMonth() + 1;
+  const startYear = dateFrom.getFullYear();
+  const endMonth = dateTo.getMonth() + 1;
+  const endYear = dateTo.getFullYear();
+
+  if (startYear === endYear) {
+    return { year: startYear, month: { gte: startMonth, lte: endMonth } };
+  }
+
+  // Cross-year: use OR conditions
+  const conditions: Record<string, unknown>[] = [
+    { year: startYear, month: { gte: startMonth } },
+  ];
+
+  // Middle years (all months)
+  for (let y = startYear + 1; y < endYear; y++) {
+    conditions.push({ year: y });
+  }
+
+  conditions.push({ year: endYear, month: { lte: endMonth } });
+
+  return { OR: conditions };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // R11: Salary Register (5 sheets!)
 // ═══════════════════════════════════════════════════════════════
@@ -36,7 +65,7 @@ export async function generateSalaryRegister(
     where: {
       companyId: scope.companyId,
       status: { in: ['APPROVED', 'DISBURSED'] },
-      year: { gte: dateFrom.getFullYear(), lte: dateTo.getFullYear() },
+      ...buildPayrollRunDateFilter(dateFrom, dateTo),
     },
     orderBy: [{ year: 'desc' }, { month: 'desc' }],
   });
@@ -289,7 +318,7 @@ export async function generateBankTransferFile(
     where: {
       companyId: scope.companyId,
       status: { in: ['APPROVED', 'DISBURSED'] },
-      year: { gte: dateFrom.getFullYear(), lte: dateTo.getFullYear() },
+      ...buildPayrollRunDateFilter(dateFrom, dateTo),
     },
   });
 

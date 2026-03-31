@@ -22,6 +22,34 @@ import { normalizeFilters } from '../filters-normalizer';
 
 type SettledResult<T> = { status: 'fulfilled'; value: T } | { status: 'rejected'; reason: unknown };
 
+// ─── Tenure Estimation ───
+
+/**
+ * Estimate avg tenure (in months) from tenure band distribution.
+ * Uses midpoint of each band for weighted average.
+ */
+function estimateAvgTenure(byTenureBand: { label: string; count: number }[]): number {
+  const midpoints: Record<string, number> = {
+    '<6 months': 3,
+    '6-12 months': 9,
+    '1-2 years': 18,
+    '2-3 years': 30,
+    '3-5 years': 48,
+    '5-10 years': 90,
+    '10+ years': 144,
+  };
+
+  let totalWeighted = 0;
+  let totalCount = 0;
+  for (const { label, count } of byTenureBand) {
+    const mid = midpoints[label] ?? 36; // fallback ~3 years
+    totalWeighted += mid * count;
+    totalCount += count;
+  }
+
+  return totalCount > 0 ? Math.round((totalWeighted / totalCount) * 10) / 10 : 0;
+}
+
 // ─── Dashboard Orchestrator ───
 
 class DashboardOrchestratorService {
@@ -185,10 +213,15 @@ class DashboardOrchestratorService {
 
     const totalHeadcount = headcount?.totalHeadcount ?? 0;
 
+    // Compute avg tenure from tenure distribution
+    const tenureData = demographics?.tenure?.data ?? [];
+    const tenureBand = tenureData.map((d) => ({ label: d.label, count: d.value }));
+    const avgTenure = estimateAvgTenure(tenureBand);
+
     const kpis: KPICard[] = [
       this.buildKPI('total_employees', 'Total Employees', totalHeadcount, 'number', 'workforce:employeeDirectory'),
       this.buildKPI('joiners', 'Joiners (This Period)', headcount?.joinersCount ?? 0, 'number', 'workforce:employeeDirectory'),
-      this.buildKPI('avg_tenure', 'Avg Tenure (Months)', 'N/A', 'text', 'workforce:employeeDirectory'),
+      this.buildKPI('avg_tenure', 'Avg Tenure (Months)', avgTenure, 'number', 'workforce:employeeDirectory'),
       this.buildKPI('vacancy_rate', 'On Notice', headcount?.noticeCount ?? 0, 'number', 'attrition:exitDetail'),
     ];
 
@@ -218,15 +251,17 @@ class DashboardOrchestratorService {
     const partialFailures: string[] = [];
 
     const trendFilters = this.extendFiltersForDays(filters, 30);
-    const [summaryResult, trendResult, productivityResult] = await Promise.allSettled([
+    const [summaryResult, trendResult, productivityResult, otRecordsResult] = await Promise.allSettled([
       analyticsService.getAttendanceSummary(filters, scope),
       analyticsService.getAttendanceTrend(trendFilters, scope),
       analyticsService.getProductivityIndex(trendFilters, scope),
+      analyticsService.getAttendanceRecords(trendFilters, scope),
     ]);
 
     const summary = this.unwrapSettled(summaryResult, 'attendanceSummary', partialFailures);
     const trend = this.unwrapSettled(trendResult, 'attendanceTrend', partialFailures);
     const productivity = this.unwrapSettled(productivityResult, 'productivityIndex', partialFailures);
+    const otRecords = this.unwrapSettled(otRecordsResult, 'overtimeRecords', partialFailures);
 
     const kpis: KPICard[] = [
       this.buildKPI('attendance_percent', 'Today Attendance %', summary?.attendancePercent ?? 0, 'percentage', 'attendance:register'),
@@ -235,13 +270,16 @@ class DashboardOrchestratorService {
       this.buildKPI('productivity_index', 'Productivity Index', summary?.productivityIndex ?? 0, 'number', 'attendance:register'),
     ];
 
-    // OT trend from attendance data
-    const otTrend: TrendSeries | null = trend
+    // OT trend from actual overtime hours (not attendance rate)
+    const otTrend: TrendSeries | null = otRecords
       ? {
           key: 'overtime_trend',
-          label: 'Overtime Trend',
-          chartType: 'area',
-          data: trend.data,
+          label: 'Overtime Hours',
+          chartType: 'bar',
+          data: otRecords.map((r: any) => ({
+            date: r.date.toISOString().split('T')[0],
+            value: r.totalOvertimeHours ?? 0,
+          })),
         }
       : null;
 

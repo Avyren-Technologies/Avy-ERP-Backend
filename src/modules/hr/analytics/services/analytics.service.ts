@@ -263,6 +263,20 @@ class AnalyticsService {
     };
   }
 
+  async getAttendanceRecords(filters: DashboardFilters, scope: DataScope): Promise<any[]> {
+    const where = this.buildScopeWhere(filters, scope);
+
+    return platformPrisma.attendanceAnalyticsDaily.findMany({
+      where: {
+        ...where,
+        date: { gte: new Date(filters.dateFrom), lte: new Date(filters.dateTo) },
+      },
+      orderBy: { date: 'asc' },
+      distinct: ['date'],
+      select: { date: true, totalOvertimeHours: true },
+    });
+  }
+
   // ─── Leave ───
 
   async getLeaveUtilization(

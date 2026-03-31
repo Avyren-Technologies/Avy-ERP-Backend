@@ -291,11 +291,33 @@ class AnalyticsController {
   // ── GET /analytics/reports/catalog ──────────────────────────────────
 
   getReportCatalog = asyncHandler(async (req: Request, res: Response) => {
-    const catalog: Record<string, Array<{ key: string; title: string; sheetNames: string[]; description: string }>> = {};
+    const CATEGORY_META: Record<string, { icon: string; color: string; label: string }> = {
+      Workforce: { icon: 'users', color: '#6366F1', label: 'Workforce Reports' },
+      Attendance: { icon: 'clock', color: '#10B981', label: 'Attendance Reports' },
+      Leave: { icon: 'calendar-off', color: '#F59E0B', label: 'Leave Reports' },
+      Payroll: { icon: 'indian-rupee', color: '#3B82F6', label: 'Payroll Reports' },
+      Statutory: { icon: 'shield', color: '#8B5CF6', label: 'Statutory Reports' },
+      Performance: { icon: 'target', color: '#EC4899', label: 'Performance Reports' },
+      Attrition: { icon: 'user-minus', color: '#EF4444', label: 'Attrition Reports' },
+      Compliance: { icon: 'shield-check', color: '#14B8A6', label: 'Compliance Reports' },
+    };
+
+    const catalog: Record<
+      string,
+      {
+        meta: { icon: string; color: string; label: string };
+        reports: Array<{ key: string; title: string; sheetNames: string[]; description: string }>;
+      }
+    > = {};
 
     for (const [_key, def] of Object.entries(REPORT_DEFINITIONS)) {
-      if (!catalog[def.category]) catalog[def.category] = [];
-      catalog[def.category]!.push({
+      if (!catalog[def.category]) {
+        catalog[def.category] = {
+          meta: CATEGORY_META[def.category] ?? { icon: 'file', color: '#6B7280', label: def.category },
+          reports: [],
+        };
+      }
+      catalog[def.category]!.reports.push({
         key: def.key,
         title: def.title,
         sheetNames: def.sheetNames,
