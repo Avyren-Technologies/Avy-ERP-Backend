@@ -60,7 +60,7 @@ router.patch('/it-declarations/:id/verify', requirePermissions(['hr:update']), c
 router.patch('/it-declarations/:id/lock', requirePermissions(['hr:update']), controller.lockDeclaration);
 
 // ── ESS Dashboard (unified payload) ─────────────────────────────────
-router.get('/ess/dashboard', requirePermissions(['hr:read']), controller.getDashboard);
+router.get('/ess/dashboard', requirePermissions(['hr:read', 'ess:view-dashboard', 'ess:view-profile']), controller.getDashboard);
 
 // ── ESS Self-Service (Employee-facing, feature gated) ───────────────
 router.get('/ess/my-profile', requireESSFeature('profileUpdate'), requirePermissions(['hr:read', 'ess:view-profile']), controller.getMyProfile);
