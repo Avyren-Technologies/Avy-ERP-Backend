@@ -8,6 +8,9 @@ const router = Router();
 // ── Module Enforcement ──────────────────────────────────────────────
 router.use(requireModuleEnabled('ess'));
 
+// ── Admin endpoints: no requireESSFeature gating — admins can configure ESS
+// ── even when specific features are disabled for employees
+
 // ── ESS Config (admin-facing) ───────────────────────────────────────
 router.get('/ess-config', requirePermissions(['hr:read']), controller.getESSConfig);
 router.patch('/ess-config', requirePermissions(['hr:update']), controller.updateESSConfig);

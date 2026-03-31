@@ -27,6 +27,7 @@ import {
   policyDocumentSchema,
   essExpenseClaimSchema,
   essLoanApplicationSchema,
+  fileGrievanceSchema,
 } from './ess.validators';
 
 /** Haversine distance in metres between two lat/lng points. */
@@ -407,14 +408,11 @@ export class ESSController {
 
   // ── ESS Self-Service ──────────────────────────────────────────────
 
-  /** Resolve employeeId from authenticated user or optional query param (admin override).
+  /** Resolve employeeId from authenticated user's JWT or DB lookup.
    *  Performs DB lookup as fallback if JWT doesn't contain employeeId (e.g., employee
    *  was linked after last login). Auto-links user→employee by email match if found. */
   private async resolveEmployeeId(req: Request): Promise<string | null> {
-    // 1. Explicit query param (admin viewing another employee's data)
-    if (req.query.employeeId) return req.query.employeeId as string;
-
-    // 2. From JWT token (set during login if user was already linked)
+    // 1. From JWT token (set during login if user was already linked)
     if ((req.user as any)?.employeeId) return (req.user as any).employeeId;
 
     // 3. Fallback: look up User → Employee link from DB
@@ -456,9 +454,8 @@ export class ESSController {
     return null;
   }
 
-  /** Resolve managerId from query param or authenticated user's employee link. */
+  /** Resolve managerId from authenticated user's employee link. */
   private async resolveManagerId(req: Request): Promise<string | null> {
-    if (req.query.managerId) return req.query.managerId as string;
     return this.resolveEmployeeId(req);
   }
 
@@ -599,7 +596,10 @@ export class ESSController {
     const employeeId = await this.resolveEmployeeId(req);
     if (!employeeId) throw ApiError.badRequest(ESSController.NOT_LINKED_MSG);
 
-    const grievance = await essService.fileGrievance(employeeId, companyId, req.body);
+    const parsed = fileGrievanceSchema.safeParse(req.body);
+    if (!parsed.success) throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+
+    const grievance = await essService.fileGrievance(employeeId, companyId, parsed.data);
     res.status(201).json(createSuccessResponse(grievance, 'Grievance filed'));
   });
 

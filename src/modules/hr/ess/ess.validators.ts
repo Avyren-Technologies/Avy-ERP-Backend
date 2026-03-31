@@ -117,17 +117,17 @@ export const createITDeclarationSchema = z.object({
   employeeId: z.string().min(1, 'Employee ID is required'),
   financialYear: z.string().min(1, 'Financial year is required'), // "2025-26"
   regime: z.enum(['OLD', 'NEW']).optional().default('NEW'),
-  section80C: z.any().optional(),
-  section80CCD: z.any().optional(),
-  section80D: z.any().optional(),
-  section80E: z.any().optional(),
-  section80G: z.any().optional(),
-  section80GG: z.any().optional(),
-  section80TTA: z.any().optional(),
-  hraExemption: z.any().optional(),
-  ltaExemption: z.any().optional(),
-  homeLoanInterest: z.any().optional(),
-  otherIncome: z.any().optional(),
+  section80C: z.record(z.string(), z.unknown()).optional(),
+  section80CCD: z.record(z.string(), z.unknown()).optional(),
+  section80D: z.record(z.string(), z.unknown()).optional(),
+  section80E: z.record(z.string(), z.unknown()).optional(),
+  section80G: z.record(z.string(), z.unknown()).optional(),
+  section80GG: z.record(z.string(), z.unknown()).optional(),
+  section80TTA: z.record(z.string(), z.unknown()).optional(),
+  hraExemption: z.record(z.string(), z.unknown()).optional(),
+  ltaExemption: z.record(z.string(), z.unknown()).optional(),
+  homeLoanInterest: z.record(z.string(), z.unknown()).optional(),
+  otherIncome: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const updateITDeclarationSchema = createITDeclarationSchema.partial().omit({
@@ -213,6 +213,14 @@ export const checkOutSchema = z.object({
 
 // ── Profile Update (ESS self-service) ──────────────────────────────
 
+// ── File Grievance ────────────────────────────────────────────────
+
+export const fileGrievanceSchema = z.object({
+  categoryId: z.string().min(1),
+  description: z.string().min(1),
+  isAnonymous: z.boolean().optional().default(false),
+});
+
 // ── Shift Swap ─────────────────────────────────────────────────────
 
 export const shiftSwapSchema = z.object({
@@ -220,6 +228,9 @@ export const shiftSwapSchema = z.object({
   requestedShiftId: z.string().min(1),
   swapDate: z.string().min(1),
   reason: z.string().min(1),
+}).refine(data => new Date(data.swapDate) >= new Date(new Date().toDateString()), {
+  message: 'Swap date must be today or in the future',
+  path: ['swapDate'],
 });
 
 // ── WFH Request ────────────────────────────────────────────────────
@@ -229,6 +240,9 @@ export const wfhRequestSchema = z.object({
   toDate: z.string().min(1),
   days: z.number().min(0.5),
   reason: z.string().min(1),
+}).refine(data => new Date(data.fromDate) <= new Date(data.toDate), {
+  message: 'From date must be before or equal to to date',
+  path: ['toDate'],
 });
 
 // ── Employee Document Upload ───────────────────────────────────────
@@ -237,7 +251,7 @@ export const uploadDocumentSchema = z.object({
   documentType: z.string().min(1),
   documentNumber: z.string().optional(),
   expiryDate: z.string().optional(),
-  fileUrl: z.string().min(1),
+  fileUrl: z.string().url('Must be a valid URL'),
   fileName: z.string().min(1),
 });
 
@@ -247,19 +261,29 @@ export const policyDocumentSchema = z.object({
   title: z.string().min(1),
   category: z.enum(['HR_POLICY', 'LEAVE_POLICY', 'ATTENDANCE_POLICY', 'CODE_OF_CONDUCT', 'SAFETY', 'TRAVEL', 'IT_POLICY', 'OTHER']),
   description: z.string().optional(),
-  fileUrl: z.string().min(1),
+  fileUrl: z.string().url('Must be a valid URL'),
   fileName: z.string().min(1),
   version: z.string().optional(),
 });
 
 // ── Profile Update (ESS self-service) ──────────────────────────────
 
+const addressSchema = z.object({
+  line1: z.string().optional(),
+  line2: z.string().optional(),
+  city: z.string().optional(),
+  district: z.string().optional(),
+  state: z.string().optional(),
+  pin: z.string().optional(),
+  country: z.string().optional(),
+}).optional();
+
 export const updateProfileSchema = z.object({
   personalMobile: z.string().min(1).optional(),
   alternativeMobile: z.string().optional(),
   personalEmail: z.string().email().optional(),
-  currentAddress: z.any().optional(),
-  permanentAddress: z.any().optional(),
+  currentAddress: addressSchema,
+  permanentAddress: addressSchema,
   emergencyContactName: z.string().min(1).optional(),
   emergencyContactRelation: z.string().min(1).optional(),
   emergencyContactMobile: z.string().min(1).optional(),

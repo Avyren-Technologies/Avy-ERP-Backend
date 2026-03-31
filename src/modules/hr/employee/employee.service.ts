@@ -1131,6 +1131,10 @@ export class EmployeeService {
         reportingManagerId: true,
         department: { select: { id: true, name: true } },
         designation: { select: { id: true, name: true } },
+        joiningDate: true,
+        officialEmail: true,
+        status: true,
+        location: { select: { id: true, name: true } },
       },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });

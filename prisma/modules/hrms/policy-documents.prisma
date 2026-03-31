@@ -19,5 +19,6 @@ model PolicyDocument {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  @@index([companyId, isActive])
   @@map("policy_documents")
 }

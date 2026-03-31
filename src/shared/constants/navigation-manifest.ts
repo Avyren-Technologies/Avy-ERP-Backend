@@ -49,7 +49,6 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'ess-wfh', label: 'WFH Request', icon: 'home', requiredPerm: 'ess:request-wfh', path: '/app/company/hr/wfh-requests', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 313 },
   { id: 'ess-documents', label: 'My Documents', icon: 'file-up', requiredPerm: 'ess:upload-document', path: '/app/company/hr/my-documents', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 314 },
   { id: 'ess-policies', label: 'Policy Documents', icon: 'book-open', requiredPerm: 'ess:view-policies', path: '/app/company/hr/policy-documents', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 315 },
-  { id: 'ess-holidays-cal', label: 'Holiday Calendar', icon: 'calendar-heart', requiredPerm: 'ess:view-holidays', path: '/app/company/hr/my-holidays', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 316 },
   { id: 'ess-expense-claims', label: 'My Expenses', icon: 'receipt', requiredPerm: 'ess:claim-expense', path: '/app/company/hr/my-expense-claims', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 317 },
   { id: 'ess-loans', label: 'My Loans', icon: 'banknote', requiredPerm: 'ess:apply-loan', path: '/app/company/hr/my-loans', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 318 },
   { id: 'ess-org-chart', label: 'Org Chart', icon: 'network', requiredPerm: 'ess:view-org-chart', path: '/app/company/hr/org-chart', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 319 },

@@ -2970,9 +2970,22 @@ export class ESSService {
   private async resolveEmployeeIdFromUser(userId: string): Promise<string | null> {
     const user = await platformPrisma.user.findUnique({
       where: { id: userId },
-      select: { employeeId: true },
+      select: { employeeId: true, email: true },
     });
-    return user?.employeeId ?? null;
+    if (user?.employeeId) return user.employeeId;
+
+    // Fallback: try email match
+    const employee = await platformPrisma.employee.findFirst({
+      where: { personalEmail: user?.email ?? '', company: { users: { some: { id: userId } } } },
+      select: { id: true },
+    });
+    if (employee) {
+      // Auto-link for future calls
+      await platformPrisma.user.update({ where: { id: userId }, data: { employeeId: employee.id } });
+      return employee.id;
+    }
+
+    return null;
   }
 
   async getMyShiftSwaps(companyId: string, userId: string) {
@@ -3168,7 +3181,7 @@ export class ESSService {
 
     if (recipientRole === 'HR') {
       const hrUsers = await platformPrisma.user.findMany({
-        where: { companyId, isActive: true },
+        where: { companyId, isActive: true, role: 'COMPANY_ADMIN' },
         select: { email: true },
         take: 5,
       });
