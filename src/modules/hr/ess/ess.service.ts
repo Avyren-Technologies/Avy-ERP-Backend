@@ -1,8 +1,10 @@
 import { Prisma } from '@prisma/client';
+import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
-import { invalidateESSConfig } from '../../../shared/utils/config-cache';
+import { invalidateESSConfig, getCachedCompanySettings } from '../../../shared/utils/config-cache';
+import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -1876,6 +1878,10 @@ export class ESSService {
         myGoals: null,
         pendingApprovals: null,
         teamSummary: null,
+        shiftCalendar: null,
+        weeklyChart: null,
+        leaveDonut: null,
+        monthlyTrend: null,
       };
     }
 
@@ -1890,6 +1896,10 @@ export class ESSService {
       myGoals,
       pendingApprovals,
       teamSummary,
+      shiftCalendar,
+      weeklyChart,
+      leaveDonut,
+      monthlyTrend,
     ] = await Promise.allSettled([
       this.getDashboardAttendanceStatus(companyId, employeeId),
       this.getDashboardLeaveBalance(companyId, employeeId),
@@ -1899,6 +1909,10 @@ export class ESSService {
       this.getDashboardGoalsSummary(companyId, employeeId),
       isManager ? this.getDashboardPendingApprovals(companyId, employeeId) : Promise.resolve(null),
       isManager ? this.getDashboardTeamSummary(companyId, employeeId) : Promise.resolve(null),
+      this.getDashboardShiftCalendar(companyId, employeeId, 14),
+      this.getDashboardWeeklyChart(companyId, employeeId, 4),
+      this.getDashboardLeaveDonut(companyId, employeeId),
+      this.getDashboardMonthlyTrend(companyId, employeeId, 6),
     ]);
 
     return {
@@ -1911,6 +1925,10 @@ export class ESSService {
       myGoals: this.settledValue(myGoals, 'myGoals'),
       pendingApprovals: this.settledValue(pendingApprovals, 'pendingApprovals'),
       teamSummary: this.settledValue(teamSummary, 'teamSummary'),
+      shiftCalendar: this.settledValue(shiftCalendar, 'shiftCalendar'),
+      weeklyChart: this.settledValue(weeklyChart, 'weeklyChart'),
+      leaveDonut: this.settledValue(leaveDonut, 'leaveDonut'),
+      monthlyTrend: this.settledValue(monthlyTrend, 'monthlyTrend'),
     };
   }
 
@@ -2173,6 +2191,442 @@ export class ESSService {
       absentToday: Math.max(0, totalMembers - presentToday - leaveRequests),
       notCheckedIn,
     };
+  }
+
+  // ── Dashboard helper: Shift Calendar (next N days) ──
+
+  private async getDashboardShiftCalendar(companyId: string, employeeId: string, days: number = 14) {
+    const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+    // Get company timezone
+    const companySettings = await getCachedCompanySettings(companyId);
+    const tz = companySettings.timezone ?? 'Asia/Kolkata';
+    const now = nowInCompanyTimezone(tz);
+    const todayStr = now.toFormat('yyyy-MM-dd');
+
+    // Get employee with default shift
+    const employee = await platformPrisma.employee.findUnique({
+      where: { id: employeeId },
+      select: {
+        shiftId: true,
+        employeeTypeId: true,
+        shift: {
+          select: { id: true, name: true, shiftType: true, startTime: true, endTime: true },
+        },
+      },
+    });
+
+    const defaultShift = employee?.shift ?? null;
+
+    // Build date range
+    const startDate = now.startOf('day');
+    const endDate = startDate.plus({ days: days - 1 });
+    const startJs = startDate.toJSDate();
+    const endJs = endDate.toJSDate();
+
+    // Fetch holidays in range
+    const holidays = await platformPrisma.holidayCalendar.findMany({
+      where: {
+        companyId,
+        date: { gte: startJs, lte: endJs },
+      },
+      select: { date: true, name: true },
+    });
+    const holidayMap = new Map(
+      holidays.map((h) => [DateTime.fromJSDate(h.date).toFormat('yyyy-MM-dd'), h.name]),
+    );
+
+    // Fetch default roster for week-off determination
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+      select: { weekOff1: true, weekOff2: true },
+    });
+
+    // Fetch active shift rotation assignment for this employee
+    const rotationAssignment = await platformPrisma.shiftRotationAssignment.findFirst({
+      where: {
+        companyId,
+        employeeId,
+        schedule: {
+          isActive: true,
+          effectiveFrom: { lte: endJs },
+          OR: [
+            { effectiveTo: null },
+            { effectiveTo: { gte: startJs } },
+          ],
+        },
+      },
+      include: {
+        schedule: {
+          select: {
+            id: true,
+            rotationPattern: true,
+            shifts: true,
+            effectiveFrom: true,
+          },
+        },
+      },
+    });
+
+    // Build calendar entries
+    const calendar: Array<{
+      date: string;
+      dayName: string;
+      shiftName: string | null;
+      shiftType: string | null;
+      startTime: string | null;
+      endTime: string | null;
+      isHoliday: boolean;
+      holidayName?: string;
+      isWeekOff: boolean;
+      isToday: boolean;
+    }> = [];
+
+    // Pre-fetch rotation shifts if applicable
+    let rotationShiftsMap: Map<string, { name: string; shiftType: string; startTime: string; endTime: string }> | null = null;
+    if (rotationAssignment) {
+      const shiftsJson = rotationAssignment.schedule.shifts as Array<{ shiftId: string; weekNumber: number }>;
+      const shiftIds = [...new Set(shiftsJson.map((s) => s.shiftId))];
+      const shifts = await platformPrisma.companyShift.findMany({
+        where: { id: { in: shiftIds } },
+        select: { id: true, name: true, shiftType: true, startTime: true, endTime: true },
+      });
+      rotationShiftsMap = new Map(shifts.map((s) => [s.id, s]));
+    }
+
+    const FULL_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    for (let i = 0; i < days; i++) {
+      const dt = startDate.plus({ days: i });
+      const dateStr = dt.toFormat('yyyy-MM-dd');
+      const jsDate = dt.toJSDate();
+      const dayOfWeek = jsDate.getDay();
+      const dayName = DAY_NAMES[dayOfWeek]!;
+      const fullDayName = FULL_DAY_NAMES[dayOfWeek]!;
+
+      const isHoliday = holidayMap.has(dateStr);
+      const holidayName = holidayMap.get(dateStr);
+      const isWeekOff = fullDayName === roster?.weekOff1 || fullDayName === roster?.weekOff2;
+      const isToday = dateStr === todayStr;
+
+      // Determine shift for this day
+      let shiftName: string | null = null;
+      let shiftType: string | null = null;
+      let shiftStartTime: string | null = null;
+      let shiftEndTime: string | null = null;
+
+      if (rotationAssignment && rotationShiftsMap) {
+        // Determine which shift based on rotation pattern
+        const schedule = rotationAssignment.schedule;
+        const effectiveFrom = DateTime.fromJSDate(schedule.effectiveFrom).startOf('day');
+        const daysSinceStart = Math.floor(dt.diff(effectiveFrom, 'days').days);
+        const shiftsJson = schedule.shifts as Array<{ shiftId: string; weekNumber: number }>;
+
+        if (shiftsJson.length > 0) {
+          let rotationIndex: number;
+          if (schedule.rotationPattern === 'WEEKLY') {
+            const weeksSinceStart = Math.floor(daysSinceStart / 7);
+            rotationIndex = weeksSinceStart % shiftsJson.length;
+          } else if (schedule.rotationPattern === 'FORTNIGHTLY') {
+            const fortnightsSinceStart = Math.floor(daysSinceStart / 14);
+            rotationIndex = fortnightsSinceStart % shiftsJson.length;
+          } else if (schedule.rotationPattern === 'MONTHLY') {
+            const monthsSinceStart = Math.floor(dt.diff(effectiveFrom, 'months').months);
+            rotationIndex = monthsSinceStart % shiftsJson.length;
+          } else {
+            // CUSTOM — use weekNumber to match
+            const weeksSinceStart = Math.floor(daysSinceStart / 7);
+            rotationIndex = weeksSinceStart % shiftsJson.length;
+          }
+
+          const rotationEntry = shiftsJson[rotationIndex];
+          if (rotationEntry) {
+            const shift = rotationShiftsMap.get(rotationEntry.shiftId);
+            if (shift) {
+              shiftName = shift.name;
+              shiftType = shift.shiftType;
+              shiftStartTime = shift.startTime;
+              shiftEndTime = shift.endTime;
+            }
+          }
+        }
+      }
+
+      // Fallback to default shift if no rotation shift resolved
+      if (!shiftName && defaultShift) {
+        shiftName = defaultShift.name;
+        shiftType = defaultShift.shiftType;
+        shiftStartTime = defaultShift.startTime;
+        shiftEndTime = defaultShift.endTime;
+      }
+
+      calendar.push({
+        date: dateStr,
+        dayName,
+        shiftName,
+        shiftType,
+        startTime: shiftStartTime,
+        endTime: shiftEndTime,
+        isHoliday,
+        ...(holidayName && { holidayName }),
+        isWeekOff,
+        isToday,
+      });
+    }
+
+    return calendar;
+  }
+
+  // ── Dashboard helper: Weekly Attendance Chart (last N weeks) ──
+
+  private async getDashboardWeeklyChart(companyId: string, employeeId: string, weeks: number = 4) {
+    const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+    // Get company timezone
+    const companySettings = await getCachedCompanySettings(companyId);
+    const tz = companySettings.timezone ?? 'Asia/Kolkata';
+    const now = nowInCompanyTimezone(tz);
+
+    const totalDays = weeks * 7;
+    const endDate = now.startOf('day');
+    const startDate = endDate.minus({ days: totalDays - 1 });
+    const startJs = startDate.toJSDate();
+    const endJs = endDate.toJSDate();
+
+    // Fetch attendance records for the range
+    const records = await platformPrisma.attendanceRecord.findMany({
+      where: {
+        companyId,
+        employeeId,
+        date: { gte: startJs, lte: endJs },
+      },
+      select: {
+        date: true,
+        workedHours: true,
+        status: true,
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    const recordMap = new Map(
+      records.map((r) => [DateTime.fromJSDate(r.date).toFormat('yyyy-MM-dd'), r]),
+    );
+
+    // Fetch holidays in range
+    const holidays = await platformPrisma.holidayCalendar.findMany({
+      where: {
+        companyId,
+        date: { gte: startJs, lte: endJs },
+      },
+      select: { date: true },
+    });
+    const holidaySet = new Set(
+      holidays.map((h) => DateTime.fromJSDate(h.date).toFormat('yyyy-MM-dd')),
+    );
+
+    // Fetch default roster for week-off determination
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+      select: { weekOff1: true, weekOff2: true },
+    });
+
+    const FULL_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    const chart: Array<{
+      date: string;
+      dayName: string;
+      hoursWorked: number;
+      status: string;
+      isHoliday: boolean;
+      isWeekOff: boolean;
+    }> = [];
+
+    for (let i = 0; i < totalDays; i++) {
+      const dt = startDate.plus({ days: i });
+      const dateStr = dt.toFormat('yyyy-MM-dd');
+      const jsDate = dt.toJSDate();
+      const dayOfWeek = jsDate.getDay();
+      const dayName = DAY_NAMES[dayOfWeek]!;
+      const fullDayName = FULL_DAY_NAMES[dayOfWeek]!;
+
+      const record = recordMap.get(dateStr);
+      const isHoliday = holidaySet.has(dateStr);
+      const isWeekOff = fullDayName === roster?.weekOff1 || fullDayName === roster?.weekOff2;
+
+      chart.push({
+        date: dateStr,
+        dayName,
+        hoursWorked: record?.workedHours ? Number(record.workedHours) : 0,
+        status: record?.status ?? (isHoliday ? 'HOLIDAY' : isWeekOff ? 'WEEK_OFF' : 'NO_RECORD'),
+        isHoliday,
+        isWeekOff,
+      });
+    }
+
+    return chart;
+  }
+
+  // ── Dashboard helper: Leave Donut Chart (current year) ──
+
+  private async getDashboardLeaveDonut(companyId: string, employeeId: string) {
+    const CATEGORY_COLORS: Record<string, string> = {
+      PAID: '#6366F1',        // indigo-500 (primary)
+      UNPAID: '#F59E0B',      // amber-500
+      COMPENSATORY: '#8B5CF6', // violet-500 (accent)
+      STATUTORY: '#10B981',    // emerald-500
+    };
+
+    const currentYear = new Date().getFullYear();
+
+    const balances = await platformPrisma.leaveBalance.findMany({
+      where: { companyId, employeeId, year: currentYear },
+      include: {
+        leaveType: { select: { category: true } },
+      },
+    });
+
+    // Group by category
+    const grouped = new Map<string, { totalEntitled: number; used: number; remaining: number }>();
+
+    for (const b of balances) {
+      const category = b.leaveType.category;
+      const existing = grouped.get(category) ?? { totalEntitled: 0, used: 0, remaining: 0 };
+
+      const entitled = Number(b.openingBalance) + Number(b.accrued) + Number(b.adjusted);
+      const used = Number(b.taken);
+      const remaining = Number(b.balance);
+
+      existing.totalEntitled += entitled;
+      existing.used += used;
+      existing.remaining += remaining;
+      grouped.set(category, existing);
+    }
+
+    const donut: Array<{
+      category: string;
+      totalEntitled: number;
+      used: number;
+      remaining: number;
+      color: string;
+    }> = [];
+
+    for (const [category, data] of grouped) {
+      donut.push({
+        category,
+        totalEntitled: Math.round(data.totalEntitled * 10) / 10,
+        used: Math.round(data.used * 10) / 10,
+        remaining: Math.round(data.remaining * 10) / 10,
+        color: CATEGORY_COLORS[category] ?? '#94A3B8', // slate-400 fallback
+      });
+    }
+
+    // Sort by a consistent order: PAID, UNPAID, COMPENSATORY, STATUTORY
+    const ORDER = ['PAID', 'UNPAID', 'COMPENSATORY', 'STATUTORY'];
+    donut.sort((a, b) => {
+      const aIdx = ORDER.indexOf(a.category);
+      const bIdx = ORDER.indexOf(b.category);
+      return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
+    });
+
+    return donut;
+  }
+
+  // ── Dashboard helper: Monthly Attendance Trend (last N months) ──
+
+  private async getDashboardMonthlyTrend(companyId: string, employeeId: string, months: number = 6) {
+    const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+    // Get company timezone
+    const companySettings = await getCachedCompanySettings(companyId);
+    const tz = companySettings.timezone ?? 'Asia/Kolkata';
+    const now = nowInCompanyTimezone(tz);
+
+    const trend: Array<{
+      month: string;
+      year: number;
+      workingDays: number;
+      presentDays: number;
+      absentDays: number;
+      lateDays: number;
+      attendancePercentage: number;
+    }> = [];
+
+    // Process each month from (months-1) months ago to current month
+    for (let i = months - 1; i >= 0; i--) {
+      const monthDt = now.minus({ months: i }).startOf('month');
+      const monthEnd = monthDt.endOf('month').startOf('day');
+      const monthStartJs = monthDt.toJSDate();
+      const monthEndJs = monthEnd.toJSDate();
+      const monthIdx = monthDt.month - 1; // 0-based for array
+      const year = monthDt.year;
+
+      // Fetch attendance records for this month
+      const records = await platformPrisma.attendanceRecord.findMany({
+        where: {
+          companyId,
+          employeeId,
+          date: { gte: monthStartJs, lte: monthEndJs },
+        },
+        select: {
+          status: true,
+          isLate: true,
+        },
+      });
+
+      // Count holidays in this month
+      const holidayCount = await platformPrisma.holidayCalendar.count({
+        where: {
+          companyId,
+          date: { gte: monthStartJs, lte: monthEndJs },
+        },
+      });
+
+      // Count week-offs in this month
+      const roster = await platformPrisma.roster.findFirst({
+        where: { companyId, isDefault: true },
+        select: { weekOff1: true, weekOff2: true },
+      });
+
+      const FULL_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      let weekOffCount = 0;
+      const totalCalendarDays = monthEnd.day;
+      for (let d = 0; d < totalCalendarDays; d++) {
+        const dayDt = monthDt.plus({ days: d });
+        const dayOfWeek = dayDt.toJSDate().getDay();
+        const fullDayName = FULL_DAY_NAMES[dayOfWeek]!;
+        if (fullDayName === roster?.weekOff1 || fullDayName === roster?.weekOff2) {
+          weekOffCount++;
+        }
+      }
+
+      const workingDays = Math.max(0, totalCalendarDays - holidayCount - weekOffCount);
+
+      const presentDays = records.filter((r) =>
+        ['PRESENT', 'LATE', 'REGULARIZED'].includes(r.status),
+      ).length;
+
+      const absentDays = records.filter((r) =>
+        ['ABSENT', 'LOP'].includes(r.status),
+      ).length;
+
+      const lateDays = records.filter((r) => r.isLate).length;
+
+      const attendancePercentage = workingDays > 0
+        ? Math.round((presentDays / workingDays) * 10000) / 100
+        : 0;
+
+      trend.push({
+        month: MONTH_NAMES[monthIdx]!,
+        year,
+        workingDays,
+        presentDays,
+        absentDays,
+        lateDays,
+        attendancePercentage,
+      });
+    }
+
+    return trend;
   }
 }
 
