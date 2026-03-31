@@ -12,7 +12,7 @@ router.post('/employees', requirePermissions(['hr:create']), employeeController.
 router.get('/employees/probation-due', requirePermissions(['hr:read']), employeeController.listProbationDue);
 
 // ── Org Chart (ORA-10) — MUST be before /:id catch-all ───────────────
-router.get('/employees/org-chart', requirePermissions(['hr:read']), employeeController.getOrgChart);
+router.get('/employees/org-chart', requirePermissions(['hr:read', 'ess:view-org-chart']), employeeController.getOrgChart);
 
 router.get('/employees/:id', requirePermissions(['hr:read', 'ess:view-profile']), employeeController.getEmployee);
 router.patch('/employees/:id', requirePermissions(['hr:update']), employeeController.updateEmployee);

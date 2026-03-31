@@ -1,0 +1,150 @@
+// ==========================================
+// PLATFORM — Billing & Subscriptions
+// ==========================================
+// Models: Subscription, Invoice, Payment, PlatformBillingConfig
+// Enums: UserTier, BillingType, InvoiceType, AmcStatus, PaymentMethod, SubscriptionStatus, InvoiceStatus
+
+// Billing and Subscription
+model Subscription {
+  id                String             @id @default(cuid())
+  tenantId          String             @unique
+  planId            String
+  userTier          UserTier
+  billingType       BillingType        @default(MONTHLY)
+  oneTimeLicenseFee Float?
+  amcAmount         Float?
+  amcDueDate        DateTime?
+  amcStatus         AmcStatus          @default(NOT_APPLICABLE)
+  modules           Json // Enabled modules with pricing
+  status            SubscriptionStatus @default(TRIAL)
+  startDate         DateTime           @default(now())
+  endDate           DateTime?
+  trialEndsAt       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  // Relations
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  subscriptionId String
+  amount         Float
+  status         InvoiceStatus @default(PENDING)
+  dueDate        DateTime
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Billing enhancement fields
+  invoiceNumber      String         @unique @default("")
+  invoiceType        InvoiceType    @default(SUBSCRIPTION)
+  lineItems          Json           @default("[]")
+  subtotal           Float          @default(0)
+  cgst               Float          @default(0)
+  sgst               Float          @default(0)
+  igst               Float          @default(0)
+  totalTax           Float          @default(0)
+  totalAmount        Float          @default(0)
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  paidVia            PaymentMethod?
+  paymentReference   String?
+  sentAt             DateTime?
+  pdfUrl             String?
+  gstNotApplicable   Boolean        @default(false)
+
+  // Relations
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  payments     Payment[]
+
+  @@map("invoices")
+}
+
+// Payment records for invoices
+model Payment {
+  id                   String        @id @default(cuid())
+  invoiceId            String
+  invoice              Invoice       @relation(fields: [invoiceId], references: [id])
+  amount               Float
+  method               PaymentMethod
+  transactionReference String?
+  paidAt               DateTime
+  recordedBy           String
+  notes                String?
+  createdAt            DateTime      @default(now())
+
+  @@map("payments")
+}
+
+// Platform-wide billing configuration
+model PlatformBillingConfig {
+  id                       String   @id @default(cuid())
+  defaultOneTimeMultiplier Float    @default(24)
+  defaultAmcPercentage     Float    @default(18)
+  defaultCgstRate          Float    @default(9)
+  defaultSgstRate          Float    @default(9)
+  defaultIgstRate          Float    @default(18)
+  platformGstin            String?
+  invoicePrefix            String   @default("INV")
+  nextInvoiceSeq           Int      @default(1)
+  updatedAt                DateTime @updatedAt
+
+  @@map("platform_billing_config")
+}
+
+enum UserTier {
+  STARTER // 50-100 users
+  GROWTH // 101-200 users
+  SCALE // 201-500 users
+  ENTERPRISE // 501-1000 users
+  CUSTOM // 1000+ users
+}
+
+enum BillingType {
+  MONTHLY
+  ANNUAL
+  ONE_TIME_AMC
+}
+
+enum InvoiceType {
+  SUBSCRIPTION
+  ONE_TIME_LICENSE
+  AMC
+  PRORATED_ADJUSTMENT
+}
+
+enum AmcStatus {
+  ACTIVE
+  OVERDUE
+  LAPSED
+  NOT_APPLICABLE
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CHEQUE
+  CASH
+  RAZORPAY
+  UPI
+  OTHER
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}

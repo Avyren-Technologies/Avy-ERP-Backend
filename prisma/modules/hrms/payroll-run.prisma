@@ -1,0 +1,241 @@
+// ==========================================
+// HRMS — Payroll Run & Statutory
+// ==========================================
+// Models: PayrollRun, PayrollEntry, Payslip, StatutoryFiling, SalaryHold, SalaryRevision, ArrearEntry
+// Enums: PayrollRunStatus, StatutoryFilingType, StatutoryFilingStatus, SalaryHoldType, RevisionStatus
+
+model PayrollRun {
+  id              String           @id @default(cuid())
+  month           Int // 1-12
+  year            Int
+  status          PayrollRunStatus @default(DRAFT)
+  lockedBy        String? // userId who locked attendance
+  lockedAt        DateTime?
+  computedBy      String?
+  computedAt      DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  disbursedAt     DateTime?
+  totalGross      Decimal?         @db.Decimal(15, 2)
+  totalDeductions Decimal?         @db.Decimal(15, 2)
+  totalNet        Decimal?         @db.Decimal(15, 2)
+  employeeCount   Int?
+  exceptionsCount Int?
+  exceptions      Json? // Array of { employeeId, type, description, resolved }
+  companyId       String
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  entries  PayrollEntry[]
+  payslips Payslip[]
+  holds    SalaryHold[]
+  arrears  ArrearEntry[]
+
+  @@unique([companyId, month, year])
+  @@map("payroll_runs")
+}
+
+model PayrollEntry {
+  id                    String     @id @default(cuid())
+  payrollRunId          String
+  payrollRun            PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee   @relation(fields: [employeeId], references: [id])
+  grossEarnings         Decimal    @db.Decimal(15, 2)
+  totalDeductions       Decimal    @db.Decimal(15, 2)
+  netPay                Decimal    @db.Decimal(15, 2)
+  earnings              Json // { componentCode: amount }
+  deductions            Json // { componentCode: amount }
+  employerContributions Json? // { componentCode: amount }
+  workingDays           Decimal?   @db.Decimal(5, 1)
+  presentDays           Decimal?   @db.Decimal(5, 1)
+  lopDays               Decimal?   @db.Decimal(5, 1)
+  overtimeHours         Decimal?   @db.Decimal(5, 1)
+  overtimeAmount        Decimal?   @db.Decimal(15, 2)
+  pfEmployee            Decimal?   @db.Decimal(15, 2)
+  pfEmployer            Decimal?   @db.Decimal(15, 2)
+  esiEmployee           Decimal?   @db.Decimal(15, 2)
+  esiEmployer           Decimal?   @db.Decimal(15, 2)
+  ptAmount              Decimal?   @db.Decimal(15, 2)
+  tdsAmount             Decimal?   @db.Decimal(15, 2)
+  lwfEmployee           Decimal?   @db.Decimal(15, 2)
+  lwfEmployer           Decimal?   @db.Decimal(15, 2)
+  loanDeduction         Decimal?   @db.Decimal(15, 2)
+  variancePercent       Decimal?   @db.Decimal(5, 2) // vs previous month
+  isException           Boolean    @default(false)
+  exceptionNote         String?
+  companyId             String
+  company               Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@unique([payrollRunId, employeeId])
+  @@map("payroll_entries")
+}
+
+model Payslip {
+  id           String     @id @default(cuid())
+  payrollRunId String
+  payrollRun   PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee   @relation(fields: [employeeId], references: [id])
+  month        Int
+  year         Int
+  pdfUrl       String?
+  emailedAt    DateTime?
+
+  // ── Immutable snapshot (H1) — frozen at generation time ──
+  grossEarnings       Decimal? @db.Decimal(15, 2)
+  totalDeductions     Decimal? @db.Decimal(15, 2)
+  netPay              Decimal? @db.Decimal(15, 2)
+  earnings            Json?    // { componentCode: amount }
+  deductions          Json?    // { componentCode: amount }
+  employerContributions Json?  // { PF_EMPLOYER: x, ESI_EMPLOYER: y }
+  pfEmployee          Decimal? @db.Decimal(15, 2)
+  pfEmployer          Decimal? @db.Decimal(15, 2)
+  esiEmployee         Decimal? @db.Decimal(15, 2)
+  esiEmployer         Decimal? @db.Decimal(15, 2)
+  ptAmount            Decimal? @db.Decimal(15, 2)
+  tdsAmount           Decimal? @db.Decimal(15, 2)
+  lwfEmployee         Decimal? @db.Decimal(15, 2)
+  lwfEmployer         Decimal? @db.Decimal(15, 2)
+  loanDeduction       Decimal? @db.Decimal(15, 2)
+  overtimeAmount      Decimal? @db.Decimal(15, 2)
+  workingDays         Int?
+  presentDays         Decimal? @db.Decimal(5, 1)
+  lopDays             Decimal? @db.Decimal(5, 1)
+  tdsProvisional      Boolean  @default(false) // C3: flag for provisional TDS
+
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([employeeId, month, year])
+  @@map("payslips")
+}
+
+model StatutoryFiling {
+  id        String                @id @default(cuid())
+  type      StatutoryFilingType
+  month     Int?
+  year      Int
+  status    StatutoryFilingStatus @default(PENDING)
+  amount    Decimal?              @db.Decimal(15, 2)
+  fileUrl   String?
+  filedAt   DateTime?
+  filedBy   String?
+  dueDate   DateTime?             @db.Date
+  details   Json? // Filing-specific data
+  companyId String
+  company   Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@map("statutory_filings")
+}
+
+model SalaryHold {
+  id             String         @id @default(cuid())
+  payrollRunId   String
+  payrollRun     PayrollRun     @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee       @relation(fields: [employeeId], references: [id])
+  holdType       SalaryHoldType @default(FULL)
+  reason         String
+  heldComponents Json? // string[] of component codes (for PARTIAL hold)
+  releasedAt     DateTime?
+  releasedBy     String?
+  companyId      String
+  company        Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@map("salary_holds")
+}
+
+model SalaryRevision {
+  id                String         @id @default(cuid())
+  employeeId        String
+  employee          Employee       @relation(fields: [employeeId], references: [id])
+  oldCtc            Decimal        @db.Decimal(15, 2)
+  newCtc            Decimal        @db.Decimal(15, 2)
+  effectiveDate     DateTime       @db.Date
+  incrementPercent  Decimal?       @db.Decimal(5, 2)
+  newComponents     Json? // new breakup
+  arrearsComputed   Boolean        @default(false)
+  totalArrears      Decimal?       @db.Decimal(15, 2)
+  revisionLetterUrl String?
+  status            RevisionStatus @default(DRAFT)
+  approvedBy        String?
+  approvedAt        DateTime?
+  companyId         String
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  arrearEntries ArrearEntry[]
+
+  @@map("salary_revisions")
+}
+
+model ArrearEntry {
+  id           String          @id @default(cuid())
+  payrollRunId String?
+  payrollRun   PayrollRun?     @relation(fields: [payrollRunId], references: [id])
+  revisionId   String?
+  revision     SalaryRevision? @relation(fields: [revisionId], references: [id])
+  employeeId   String
+  employee     Employee        @relation(fields: [employeeId], references: [id])
+  forMonth     Int
+  forYear      Int
+  components   Json // { componentCode: arrearAmount }
+  totalAmount  Decimal         @db.Decimal(15, 2)
+  companyId    String
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@map("arrear_entries")
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  ATTENDANCE_LOCKED
+  EXCEPTIONS_REVIEWED
+  COMPUTED
+  STATUTORY_DONE
+  APPROVED
+  DISBURSED
+  ARCHIVED
+}
+
+enum StatutoryFilingType {
+  PF_ECR
+  ESI_CHALLAN
+  PT_CHALLAN
+  TDS_24Q
+  FORM_16
+  BONUS_STATEMENT
+  GRATUITY_REGISTER
+  LWF_STATEMENT
+}
+
+enum StatutoryFilingStatus {
+  PENDING
+  GENERATED
+  FILED
+  VERIFIED
+}
+
+enum SalaryHoldType {
+  FULL
+  PARTIAL
+}
+
+enum RevisionStatus {
+  DRAFT
+  APPROVED
+  APPLIED
+}

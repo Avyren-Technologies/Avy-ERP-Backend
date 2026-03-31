@@ -1,0 +1,113 @@
+// ==========================================
+// COMPANY ADMIN — Settings & System Controls
+// ==========================================
+// Models: CompanySettings, SystemControls
+// Enums: CurrencyCode, LanguageCode, TimeFormat
+
+// Company Settings — replaces Company.preferences JSON blob
+model CompanySettings {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Locale ──
+  currency     CurrencyCode @default(INR)
+  language     LanguageCode @default(en)
+  timezone     String       @default("Asia/Kolkata")
+  dateFormat   String       @default("DD/MM/YYYY")
+  timeFormat   TimeFormat   @default(TWELVE_HOUR)
+  numberFormat String       @default("en-IN")
+
+  // ── Compliance ──
+  indiaCompliance Boolean @default(true)
+  gdprMode        Boolean @default(false)
+  auditTrail      Boolean @default(true)
+
+  // ── Integrations ──
+  bankIntegration       Boolean @default(false)
+  razorpayEnabled       Boolean @default(false)
+  emailNotifications    Boolean @default(true)
+  whatsappNotifications Boolean @default(false)
+  biometricIntegration  Boolean @default(false)
+  eSignIntegration      Boolean @default(false)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("company_settings")
+}
+
+// System Controls — replaces Company.systemControls JSON blob
+model SystemControls {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Module Enablement (replaces Feature Toggles) ──
+  attendanceEnabled  Boolean @default(true)
+  leaveEnabled       Boolean @default(true)
+  payrollEnabled     Boolean @default(true)
+  essEnabled         Boolean @default(true)
+  performanceEnabled Boolean @default(false)
+  recruitmentEnabled Boolean @default(false)
+  trainingEnabled    Boolean @default(false)
+  mobileAppEnabled   Boolean @default(true)
+  aiChatbotEnabled   Boolean @default(false)
+
+  // ── Production Controls ──
+  ncEditMode Boolean @default(false)
+  loadUnload Boolean @default(false)
+  cycleTime  Boolean @default(false)
+
+  // ── Payroll Controls ──
+  payrollLock           Boolean @default(true)
+  backdatedEntryControl Boolean @default(false)
+
+  // ── Leave Controls ──
+  leaveCarryForward   Boolean @default(true)
+  compOffEnabled      Boolean @default(false)
+  halfDayLeaveEnabled Boolean @default(true)
+
+  // ── Security & Access ──
+  mfaRequired                Boolean @default(false)
+  sessionTimeoutMinutes      Int     @default(30)
+  maxConcurrentSessions      Int     @default(3)
+  passwordMinLength          Int     @default(8)
+  passwordComplexity         Boolean @default(true)
+  accountLockThreshold       Int     @default(5)
+  accountLockDurationMinutes Int     @default(30)
+
+  // ── Audit ──
+  auditLogRetentionDays Int @default(365)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_controls")
+}
+
+enum CurrencyCode {
+  INR
+  USD
+  EUR
+  GBP
+  AED
+}
+
+enum LanguageCode {
+  en
+  hi
+  ta
+  te
+  mr
+  kn
+}
+
+enum TimeFormat {
+  TWELVE_HOUR
+  TWENTY_FOUR_HOUR
+}

@@ -1,0 +1,141 @@
+// ==========================================
+// HRMS — Org Structure
+// ==========================================
+// Models: Department, Designation, Grade, EmployeeType, CostCentre
+// Enums: JobLevel
+
+model Department {
+  id             String       @id @default(cuid())
+  name           String
+  code           String
+  parentId       String?
+  parent         Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+  children       Department[] @relation("DepartmentHierarchy")
+  headEmployeeId String?
+  costCentreCode String?
+  status         String       @default("Active")
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  designations  Designation[]
+  costCentres   CostCentre[]
+  employees     Employee[]
+  goals         Goal[]
+  requisitions  JobRequisition[]   @relation("RequisitionDepartment")
+  transfersFrom              EmployeeTransfer[]          @relation("TransferFromDept")
+  transfersTo                EmployeeTransfer[]          @relation("TransferToDept")
+  productionIncentiveConfigs ProductionIncentiveConfig[]
+
+  @@unique([companyId, code])
+  @@map("departments")
+}
+
+model Designation {
+  id             String      @id @default(cuid())
+  name           String
+  code           String
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  gradeId        String?
+  grade          Grade?      @relation(fields: [gradeId], references: [id])
+  jobLevel       JobLevel?
+  managerialFlag Boolean     @default(false)
+  reportsTo      String?
+  probationDays  Int?
+  status         String      @default("Active")
+  companyId      String
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  employees       Employee[]
+  successionPlans SuccessionPlan[]
+  requisitions    JobRequisition[]    @relation("RequisitionDesignation")
+  transfersFrom   EmployeeTransfer[]  @relation("TransferFromDesig")
+  transfersTo     EmployeeTransfer[]  @relation("TransferToDesig")
+  promotionsFrom  EmployeePromotion[] @relation("PromotionFromDesig")
+  promotionsTo    EmployeePromotion[] @relation("PromotionToDesig")
+
+  @@unique([companyId, code])
+  @@map("designations")
+}
+
+model Grade {
+  id              String   @id @default(cuid())
+  code            String
+  name            String
+  ctcMin          Decimal? @db.Decimal(15, 2)
+  ctcMax          Decimal? @db.Decimal(15, 2)
+  hraPercent      Decimal? @db.Decimal(5, 2)
+  pfTier          String?
+  benefitFlags    Json?
+  probationMonths Int?
+  noticeDays      Int?
+  status          String   @default("Active")
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  designations   Designation[]
+  employees      Employee[]
+  promotionsFrom EmployeePromotion[] @relation("PromotionFromGrade")
+  promotionsTo   EmployeePromotion[] @relation("PromotionToGrade")
+
+  @@unique([companyId, code])
+  @@map("grades")
+}
+
+model EmployeeType {
+  id               String   @id @default(cuid())
+  name             String
+  code             String
+  pfApplicable     Boolean  @default(false)
+  esiApplicable    Boolean  @default(false)
+  ptApplicable     Boolean  @default(false)
+  gratuityEligible Boolean  @default(false)
+  bonusEligible    Boolean  @default(false)
+  status           String   @default("Active")
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  employees Employee[]
+
+  @@unique([companyId, code])
+  @@map("employee_types")
+}
+
+model CostCentre {
+  id            String      @id @default(cuid())
+  code          String
+  name          String
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
+  locationId    String?
+  location      Location?   @relation(fields: [locationId], references: [id])
+  annualBudget  Decimal?    @db.Decimal(15, 2)
+  glAccountCode String?
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  employees Employee[]
+
+  @@unique([companyId, code])
+  @@map("cost_centres")
+}
+
+enum JobLevel {
+  L1
+  L2
+  L3
+  L4
+  L5
+  L6
+  L7
+}

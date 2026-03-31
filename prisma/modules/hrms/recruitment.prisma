@@ -1,0 +1,101 @@
+// ==========================================
+// HRMS — Recruitment
+// ==========================================
+// Models: JobRequisition, Candidate, Interview
+// Enums: RequisitionStatus, CandidateStage, InterviewStatus
+
+model JobRequisition {
+  id             String            @id @default(cuid())
+  title          String
+  designationId  String?
+  designation    Designation?      @relation("RequisitionDesignation", fields: [designationId], references: [id])
+  departmentId   String?
+  department     Department?       @relation("RequisitionDepartment", fields: [departmentId], references: [id])
+  openings       Int               @default(1)
+  description    String?
+  budgetMin      Decimal?          @db.Decimal(15, 2)
+  budgetMax      Decimal?          @db.Decimal(15, 2)
+  targetDate     DateTime?         @db.Date
+  sourceChannels Json? // string[]
+  status         RequisitionStatus @default(DRAFT)
+  approvedBy     String?
+  companyId      String
+  company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  candidates     Candidate[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@map("job_requisitions")
+}
+
+model Candidate {
+  id            String         @id @default(cuid())
+  requisitionId String
+  requisition   JobRequisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  name          String
+  email         String
+  phone         String?
+  source        String? // LinkedIn, Naukri, Referral, Walk-in, Campus
+  currentCtc    Decimal?       @db.Decimal(15, 2)
+  expectedCtc   Decimal?       @db.Decimal(15, 2)
+  resumeUrl     String?
+  stage         CandidateStage @default(APPLIED)
+  rating        Decimal?       @db.Decimal(3, 1)
+  notes         String?
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  interviews    Interview[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("candidates")
+}
+
+model Interview {
+  id             String          @id @default(cuid())
+  candidateId    String
+  candidate      Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  round          String // HR_ROUND, TECHNICAL, FINAL, ASSESSMENT
+  panelists      Json? // string[] of employee names/ids
+  scheduledAt    DateTime
+  duration       Int? // minutes
+  meetingLink    String?
+  feedbackRating Decimal?        @db.Decimal(3, 1)
+  feedbackNotes  String?
+  status         InterviewStatus @default(SCHEDULED)
+  companyId      String
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("interviews")
+}
+
+enum RequisitionStatus {
+  DRAFT
+  OPEN
+  INTERVIEWING
+  OFFERED
+  FILLED
+  CANCELLED
+}
+
+enum CandidateStage {
+  APPLIED
+  SHORTLISTED
+  HR_ROUND
+  TECHNICAL
+  FINAL
+  ASSESSMENT
+  OFFER_SENT
+  HIRED
+  REJECTED
+  ON_HOLD
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}

@@ -33,7 +33,7 @@
       "@/platform/*": ["platform/*"],
       "@/infrastructure/*": ["infrastructure/*"],
       "@/middleware/*": ["middleware/*"],
-      "@/config/*": ["../config/*"]
+      "@/config/*": ["config/*"]
     }
   },
   "include": [

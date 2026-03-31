@@ -1,0 +1,212 @@
+// ==========================================
+// HRMS — Performance Management
+// ==========================================
+// Models: AppraisalCycle, Goal, AppraisalEntry, Feedback360, SkillLibrary, SkillMapping, SuccessionPlan
+// Enums: AppraisalCycleStatus, GoalStatus, AppraisalEntryStatus, RaterType, SuccessorReadiness
+
+model AppraisalCycle {
+  id                  String               @id @default(cuid())
+  name                String
+  frequency           String               @default("ANNUAL") // ANNUAL, SEMI_ANNUAL, QUARTERLY
+  startDate           DateTime             @db.Date
+  endDate             DateTime             @db.Date
+  ratingScale         Int                  @default(5) // 1-5 or 1-10
+  ratingLabels        Json? // ["Poor","Below","Meets","Exceeds","Exceptional"]
+  kraWeightage        Decimal              @default(70) @db.Decimal(5, 2)
+  competencyWeightage Decimal              @default(30) @db.Decimal(5, 2)
+  bellCurve           Json? // { R1: 5, R2: 15, R3: 60, R4: 15, R5: 5 }
+  forcedDistribution  Boolean              @default(false)
+  midYearReview       Boolean              @default(false)
+  midYearMonth        Int?
+  managerEditDays     Int? // days after close managers can revise
+  status              AppraisalCycleStatus @default(DRAFT)
+  companyId           String
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  goals               Goal[]
+  entries             AppraisalEntry[]
+  feedback360         Feedback360[]
+
+  @@map("appraisal_cycles")
+}
+
+model Goal {
+  id            String         @id @default(cuid())
+  cycleId       String
+  cycle         AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employeeId    String?
+  employee      Employee?      @relation(fields: [employeeId], references: [id])
+  departmentId  String?
+  department    Department?    @relation(fields: [departmentId], references: [id])
+  parentGoalId  String?
+  parentGoal    Goal?          @relation("GoalCascade", fields: [parentGoalId], references: [id])
+  childGoals    Goal[]         @relation("GoalCascade")
+  title         String
+  description   String?
+  kpiMetric     String?
+  targetValue   Decimal?       @db.Decimal(10, 2)
+  achievedValue Decimal?       @db.Decimal(10, 2)
+  weightage     Decimal        @db.Decimal(5, 2)
+  level         String         @default("INDIVIDUAL") // COMPANY, DEPARTMENT, INDIVIDUAL
+  status        GoalStatus     @default(DRAFT)
+  selfRating    Int?
+  managerRating Int?
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([cycleId, employeeId])
+  @@index([companyId, level])
+  @@map("goals")
+}
+
+model AppraisalEntry {
+  id                   String               @id @default(cuid())
+  cycleId              String
+  cycle                AppraisalCycle       @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employeeId           String
+  employee             Employee             @relation(fields: [employeeId], references: [id])
+  selfRating           Decimal?             @db.Decimal(3, 1)
+  managerRating        Decimal?             @db.Decimal(3, 1)
+  skipLevelRating      Decimal?             @db.Decimal(3, 1)
+  finalRating          Decimal?             @db.Decimal(3, 1)
+  kraScore             Decimal?             @db.Decimal(5, 2)
+  competencyScore      Decimal?             @db.Decimal(5, 2)
+  selfComments         String?
+  managerComments      String?
+  promotionRecommended Boolean              @default(false)
+  incrementPercent     Decimal?             @db.Decimal(5, 2)
+  status               AppraisalEntryStatus @default(PENDING)
+  publishedAt          DateTime?
+  companyId            String
+  company              Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@unique([cycleId, employeeId])
+  @@index([cycleId, status])
+  @@index([companyId, cycleId])
+  @@map("appraisal_entries")
+}
+
+model Feedback360 {
+  id             String         @id @default(cuid())
+  cycleId        String
+  cycle          AppraisalCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee       @relation("Feedback360Subject", fields: [employeeId], references: [id])
+  raterId        String
+  rater          Employee       @relation("Feedback360Rater", fields: [raterId], references: [id])
+  raterType      RaterType
+  ratings        Json // { dimension: score } e.g. { delivery: 4, communication: 3 }
+  strengths      String?
+  improvements   String?
+  wouldWorkAgain Boolean?
+  isAnonymous    Boolean        @default(true)
+  submittedAt    DateTime?
+  companyId      String
+  company        Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([cycleId, employeeId, raterId])
+  @@index([cycleId, employeeId])
+  @@map("feedback_360")
+}
+
+model SkillLibrary {
+  id          String         @id @default(cuid())
+  name        String
+  category    String // Technical, Soft Skills, Compliance, Domain
+  description String?
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  mappings    SkillMapping[]
+
+  @@unique([companyId, name])
+  @@map("skill_library")
+}
+
+model SkillMapping {
+  id            String       @id @default(cuid())
+  employeeId    String
+  employee      Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  skillId       String
+  skill         SkillLibrary @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  currentLevel  Int          @default(1) // 1-5
+  requiredLevel Int          @default(3)
+  assessedAt    DateTime?
+  assessedBy    String?
+  companyId     String
+  company       Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([employeeId, skillId])
+  @@map("skill_mappings")
+}
+
+model SuccessionPlan {
+  id                        String             @id @default(cuid())
+  criticalRoleTitle         String
+  criticalRoleDesignationId String?
+  criticalRoleDesignation   Designation?       @relation(fields: [criticalRoleDesignationId], references: [id])
+  successorId               String
+  successor                 Employee           @relation(fields: [successorId], references: [id])
+  readiness                 SuccessorReadiness @default(NOT_READY)
+  developmentPlan           String?
+  performanceRating         Decimal?           @db.Decimal(3, 1)
+  potentialRating           Decimal?           @db.Decimal(3, 1)
+  nineBoxPosition           String? // e.g. "Top Talent", "Future Star", "Core Player"
+  companyId                 String
+  company                   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+
+  @@map("succession_plans")
+}
+
+enum AppraisalCycleStatus {
+  DRAFT
+  ACTIVE
+  REVIEW
+  CALIBRATION
+  PUBLISHED
+  CLOSED
+}
+
+enum GoalStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AppraisalEntryStatus {
+  PENDING
+  SELF_REVIEW
+  MANAGER_REVIEW
+  SKIP_LEVEL
+  HR_REVIEW
+  PUBLISHED
+}
+
+enum RaterType {
+  SELF
+  MANAGER
+  PEER
+  SUBORDINATE
+  CROSS_FUNCTION
+  INTERNAL_CUSTOMER
+}
+
+enum SuccessorReadiness {
+  READY_NOW
+  ONE_YEAR
+  TWO_YEARS
+  NOT_READY
+}

@@ -1,0 +1,183 @@
+// ==========================================
+// HRMS — Advanced (Biometric, Shift Rotation, Production Incentive, Data Retention, AI Chat)
+// ==========================================
+// Models: BiometricDevice, ShiftRotationSchedule, ShiftRotationAssignment,
+//         ProductionIncentiveConfig, ProductionIncentiveRecord,
+//         DataRetentionPolicy, DataAccessRequest, ConsentRecord,
+//         ChatConversation, ChatMessage
+
+model BiometricDevice {
+  id              String    @id @default(cuid())
+  name            String
+  brand           String
+  deviceId        String
+  ipAddress       String?
+  port            Int?
+  syncMode        String    @default("PULL") // PUSH, PULL, MANUAL
+  syncIntervalMin Int       @default(5)
+  locationId      String?
+  status          String    @default("ACTIVE") // ACTIVE, INACTIVE, OFFLINE, ERROR
+  lastSyncAt      DateTime?
+  lastSyncStatus  String?
+  enrolledCount   Int       @default(0)
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([companyId, deviceId])
+  @@map("biometric_devices")
+}
+
+model ShiftRotationSchedule {
+  id              String    @id @default(cuid())
+  name            String
+  rotationPattern String    // WEEKLY, FORTNIGHTLY, MONTHLY, CUSTOM
+  shifts          Json      // Array of { shiftId, weekNumber }
+  effectiveFrom   DateTime  @db.Date
+  effectiveTo     DateTime? @db.Date
+  isActive        Boolean   @default(true)
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  assignments ShiftRotationAssignment[]
+
+  @@unique([companyId, name])
+  @@map("shift_rotation_schedules")
+}
+
+model ShiftRotationAssignment {
+  id         String                @id @default(cuid())
+  scheduleId String
+  schedule   ShiftRotationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  companyId  String
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime              @default(now())
+
+  @@unique([scheduleId, employeeId])
+  @@map("shift_rotation_assignments")
+}
+
+model ProductionIncentiveConfig {
+  id              String      @id @default(cuid())
+  name            String
+  incentiveBasis  String      // COMPONENT_WISE, MODEL_WISE, FINISH_PART_WISE
+  calculationCycle String     @default("MONTHLY")
+  slabs           Json        // Array of { minOutput, maxOutput, amount }
+  machineId       String?
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+  isActive        Boolean     @default(true)
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  records ProductionIncentiveRecord[]
+
+  @@map("production_incentive_configs")
+}
+
+model ProductionIncentiveRecord {
+  id              String                    @id @default(cuid())
+  configId        String
+  config          ProductionIncentiveConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee                  @relation(fields: [employeeId], references: [id])
+  periodDate      DateTime                  @db.Date
+  outputUnits     Decimal                   @db.Decimal(10, 2)
+  incentiveAmount Decimal                   @db.Decimal(15, 2)
+  status          String                    @default("COMPUTED") // COMPUTED, APPROVED, MERGED
+  payrollRunId    String?
+  companyId       String
+  company         Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@map("production_incentive_records")
+}
+
+model DataRetentionPolicy {
+  id             String   @id @default(cuid())
+  dataCategory   String
+  retentionYears Int
+  actionAfter    String   @default("ARCHIVE")
+  isActive       Boolean  @default(true)
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([companyId, dataCategory])
+  @@map("data_retention_policies")
+}
+
+model DataAccessRequest {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  requestType String
+  description String?
+  status      String    @default("PENDING")
+  processedBy String?
+  processedAt DateTime?
+  responseUrl String?
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("data_access_requests")
+}
+
+model ConsentRecord {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  consentType String
+  granted     Boolean   @default(false)
+  grantedAt   DateTime?
+  revokedAt   DateTime?
+  ipAddress   String?
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([employeeId, consentType])
+  @@map("consent_records")
+}
+
+model ChatConversation {
+  id          String        @id @default(cuid())
+  employeeId  String
+  employee    Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  channel     String        @default("WEB")
+  status      String        @default("ACTIVE")
+  escalatedTo String?
+  companyId   String
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  messages ChatMessage[]
+
+  @@map("chat_conversations")
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String
+  content        String           @db.Text
+  intent         String?
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+
+  @@map("chat_messages")
+}

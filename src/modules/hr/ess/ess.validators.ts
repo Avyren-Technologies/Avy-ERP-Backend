@@ -145,6 +145,26 @@ export const createDelegateSchema = z.object({
   reason: z.string().optional(),
 });
 
+// ── Expense Claims (ESS) ───────────────────────────────────────────
+
+export const essExpenseClaimSchema = z.object({
+  title: z.string().min(1),
+  amount: z.number().positive(),
+  category: z.enum(['TRAVEL', 'MEDICAL', 'INTERNET', 'FUEL', 'UNIFORM', 'BUSINESS', 'OTHER']),
+  description: z.string().optional(),
+  tripDate: z.string().optional(),
+  receipts: z.array(z.object({ fileName: z.string(), fileUrl: z.string() })).optional(),
+});
+
+// ── Loan Application (ESS) ────────────────────────────────────────
+
+export const essLoanApplicationSchema = z.object({
+  policyId: z.string().min(1),
+  amount: z.number().positive(),
+  tenure: z.number().int().min(1),
+  reason: z.string().optional(),
+});
+
 // ── ESS Self-Service ────────────────────────────────────────────────
 
 export const applyLeaveSchema = z.object({
@@ -189,4 +209,60 @@ export const checkOutSchema = z.object({
   latitude: z.coerce.number().optional(),
   longitude: z.coerce.number().optional(),
   photoUrl: z.string().optional(),
+});
+
+// ── Profile Update (ESS self-service) ──────────────────────────────
+
+// ── Shift Swap ─────────────────────────────────────────────────────
+
+export const shiftSwapSchema = z.object({
+  currentShiftId: z.string().min(1),
+  requestedShiftId: z.string().min(1),
+  swapDate: z.string().min(1),
+  reason: z.string().min(1),
+});
+
+// ── WFH Request ────────────────────────────────────────────────────
+
+export const wfhRequestSchema = z.object({
+  fromDate: z.string().min(1),
+  toDate: z.string().min(1),
+  days: z.number().min(0.5),
+  reason: z.string().min(1),
+});
+
+// ── Employee Document Upload ───────────────────────────────────────
+
+export const uploadDocumentSchema = z.object({
+  documentType: z.string().min(1),
+  documentNumber: z.string().optional(),
+  expiryDate: z.string().optional(),
+  fileUrl: z.string().min(1),
+  fileName: z.string().min(1),
+});
+
+// ── Policy Document ────────────────────────────────────────────────
+
+export const policyDocumentSchema = z.object({
+  title: z.string().min(1),
+  category: z.enum(['HR_POLICY', 'LEAVE_POLICY', 'ATTENDANCE_POLICY', 'CODE_OF_CONDUCT', 'SAFETY', 'TRAVEL', 'IT_POLICY', 'OTHER']),
+  description: z.string().optional(),
+  fileUrl: z.string().min(1),
+  fileName: z.string().min(1),
+  version: z.string().optional(),
+});
+
+// ── Profile Update (ESS self-service) ──────────────────────────────
+
+export const updateProfileSchema = z.object({
+  personalMobile: z.string().min(1).optional(),
+  alternativeMobile: z.string().optional(),
+  personalEmail: z.string().email().optional(),
+  currentAddress: z.any().optional(),
+  permanentAddress: z.any().optional(),
+  emergencyContactName: z.string().min(1).optional(),
+  emergencyContactRelation: z.string().min(1).optional(),
+  emergencyContactMobile: z.string().min(1).optional(),
+  maritalStatus: z.enum(['SINGLE', 'MARRIED', 'DIVORCED', 'WIDOWED']).optional(),
+  bloodGroup: z.string().optional(),
 });

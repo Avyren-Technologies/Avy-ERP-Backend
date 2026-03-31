@@ -1,0 +1,105 @@
+// ==========================================
+// HRMS — Manager Delegation, Transfer & Promotion
+// ==========================================
+// Models: ManagerDelegate, EmployeeTransfer, EmployeePromotion
+// Enums: TransferStatus, PromotionStatus
+
+model ManagerDelegate {
+  id         String   @id @default(cuid())
+  managerId  String
+  manager    Employee @relation("DelegateManager", fields: [managerId], references: [id])
+  delegateId String
+  delegate   Employee @relation("DelegateProxy", fields: [delegateId], references: [id])
+  fromDate   DateTime @db.Date
+  toDate     DateTime @db.Date
+  isActive   Boolean  @default(true)
+  reason     String?
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("manager_delegates")
+}
+
+model EmployeeTransfer {
+  id                String         @id @default(cuid())
+  employeeId        String
+  employee          Employee       @relation(fields: [employeeId], references: [id])
+  fromDepartmentId  String?
+  fromDepartment    Department?    @relation("TransferFromDept", fields: [fromDepartmentId], references: [id])
+  toDepartmentId    String?
+  toDepartment      Department?    @relation("TransferToDept", fields: [toDepartmentId], references: [id])
+  fromDesignationId String?
+  fromDesignation   Designation?   @relation("TransferFromDesig", fields: [fromDesignationId], references: [id])
+  toDesignationId   String?
+  toDesignation     Designation?   @relation("TransferToDesig", fields: [toDesignationId], references: [id])
+  fromLocationId    String?
+  fromLocation      Location?      @relation("TransferFromLoc", fields: [fromLocationId], references: [id])
+  toLocationId      String?
+  toLocation        Location?      @relation("TransferToLoc", fields: [toLocationId], references: [id])
+  fromManagerId     String?
+  toManagerId       String?
+  effectiveDate     DateTime       @db.Date
+  reason            String
+  transferType      String         @default("LATERAL") // LATERAL, RELOCATION, RESTRUCTURING
+  status            TransferStatus @default(REQUESTED)
+  approvedBy        String?
+  approvedAt        DateTime?
+  appliedAt         DateTime?
+  transferLetterUrl String?
+  companyId         String
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@map("employee_transfers")
+}
+
+model EmployeePromotion {
+  id                 String          @id @default(cuid())
+  employeeId         String
+  employee           Employee        @relation(fields: [employeeId], references: [id])
+  fromDesignationId  String?
+  fromDesignation    Designation?    @relation("PromotionFromDesig", fields: [fromDesignationId], references: [id])
+  toDesignationId    String
+  toDesignation      Designation     @relation("PromotionToDesig", fields: [toDesignationId], references: [id])
+  fromGradeId        String?
+  fromGrade          Grade?          @relation("PromotionFromGrade", fields: [fromGradeId], references: [id])
+  toGradeId          String?
+  toGrade            Grade?          @relation("PromotionToGrade", fields: [toGradeId], references: [id])
+  currentCtc         Decimal?        @db.Decimal(15, 2)
+  newCtc             Decimal?        @db.Decimal(15, 2)
+  incrementPercent   Decimal?        @db.Decimal(5, 2)
+  effectiveDate      DateTime        @db.Date
+  reason             String?
+  appraisalEntryId   String? // Link to appraisal where promotionRecommended=true
+  status             PromotionStatus @default(REQUESTED)
+  approvedBy         String?
+  approvedAt         DateTime?
+  appliedAt          DateTime?
+  promotionLetterUrl String?
+  companyId          String
+  company            Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@map("employee_promotions")
+}
+
+enum TransferStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  APPLIED
+  CANCELLED
+}
+
+enum PromotionStatus {
+  RECOMMENDED
+  REQUESTED
+  APPROVED
+  REJECTED
+  APPLIED
+  CANCELLED
+}

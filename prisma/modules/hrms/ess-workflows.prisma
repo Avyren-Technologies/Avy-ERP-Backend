@@ -1,0 +1,198 @@
+// ==========================================
+// HRMS — ESS, Approval Workflows & Notifications
+// ==========================================
+// Models: ESSConfig, ApprovalWorkflow, ApprovalRequest, NotificationTemplate, NotificationRule, ITDeclaration
+// Enums: ApprovalRequestStatus, NotificationChannel, DeclarationStatus
+
+model ESSConfig {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Payroll & Tax ──
+  viewPayslips        Boolean @default(true)
+  downloadPayslips    Boolean @default(true)
+  downloadForm16      Boolean @default(true)
+  viewSalaryStructure Boolean @default(false)
+  itDeclaration       Boolean @default(true)
+
+  // ── Leave ──
+  leaveApplication  Boolean @default(true)
+  leaveBalanceView  Boolean @default(true)
+  leaveCancellation Boolean @default(false)
+
+  // ── Attendance ──
+  attendanceView           Boolean @default(true)
+  attendanceRegularization Boolean @default(false)
+  viewShiftSchedule        Boolean @default(false)
+  shiftSwapRequest         Boolean @default(false)
+  wfhRequest               Boolean @default(false)
+
+  // ── Profile & Documents ──
+  profileUpdate     Boolean @default(false)
+  documentUpload    Boolean @default(false)
+  employeeDirectory Boolean @default(false)
+  viewOrgChart      Boolean @default(false)
+
+  // ── Financial ──
+  reimbursementClaims Boolean @default(false)
+  loanApplication    Boolean @default(false)
+  assetView          Boolean @default(false)
+
+  // ── Performance & Development ──
+  performanceGoals   Boolean @default(false)
+  appraisalAccess    Boolean @default(false)
+  feedback360        Boolean @default(false)
+  trainingEnrollment Boolean @default(false)
+
+  // ── Support & Communication ──
+  helpDesk            Boolean @default(false)
+  grievanceSubmission Boolean @default(false)
+  holidayCalendar     Boolean @default(true)
+  policyDocuments     Boolean @default(false)
+  announcementBoard   Boolean @default(false)
+
+  // ── Manager Self-Service (MSS) ──
+  mssViewTeam           Boolean @default(false)
+  mssApproveLeave       Boolean @default(false)
+  mssApproveAttendance  Boolean @default(false)
+  mssViewTeamAttendance Boolean @default(false)
+
+  // ── Mobile Behavior ──
+  mobileOfflinePunch     Boolean          @default(false)
+  mobileSyncRetryMinutes Int              @default(5)
+  mobileLocationAccuracy LocationAccuracy @default(HIGH)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ess_configs")
+}
+
+model ApprovalWorkflow {
+  id           String   @id @default(cuid())
+  name         String
+  triggerEvent String // LEAVE_APPLICATION, ATTENDANCE_REGULARIZATION, OVERTIME_CLAIM, REIMBURSEMENT, LOAN_APPLICATION, RESIGNATION, PAYROLL_APPROVAL, SALARY_REVISION, JOB_REQUISITION, BONUS_UPLOAD, LEAVE_OVERRIDE, ASSET_ISSUANCE, EMPLOYEE_TRANSFER, EMPLOYEE_PROMOTION
+  steps        Json // Array of { stepOrder, approverRole, approverId?, slaHours, autoEscalate, autoApprove, autoReject }
+  isActive     Boolean  @default(true)
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  requests ApprovalRequest[]
+
+  @@unique([companyId, triggerEvent])
+  @@map("approval_workflows")
+}
+
+model ApprovalRequest {
+  id          String                @id @default(cuid())
+  workflowId  String
+  workflow    ApprovalWorkflow      @relation(fields: [workflowId], references: [id])
+  requesterId String // employeeId or userId who initiated
+  entityType  String // "LeaveRequest", "AttendanceOverride", "LoanRecord", etc.
+  entityId    String // FK to the actual entity
+  currentStep Int                   @default(1)
+  status      ApprovalRequestStatus @default(PENDING)
+  stepHistory Json? // Array of { step, action, by, at, note }
+  data        Json? // Snapshot of request data at time of submission
+  companyId   String
+  company     Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([companyId, status])
+  @@index([companyId, status, entityType])
+  @@map("approval_requests")
+}
+
+model NotificationTemplate {
+  id        String              @id @default(cuid())
+  name      String
+  subject   String? // For email
+  body      String // With tokens: {employee_name}, {leave_days}, {salary_amount}, etc.
+  channel   NotificationChannel @default(EMAIL)
+  isActive  Boolean             @default(true)
+  companyId String
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  rules NotificationRule[]
+
+  @@map("notification_templates")
+}
+
+model NotificationRule {
+  id            String               @id @default(cuid())
+  triggerEvent  String // Same event list as workflows + more: PAYSLIP_PUBLISHED, BIRTHDAY, ANNIVERSARY, etc.
+  templateId    String
+  template      NotificationTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  recipientRole String // EMPLOYEE, MANAGER, HR, FINANCE, IT, ADMIN, ALL
+  channel       NotificationChannel  @default(EMAIL)
+  isActive      Boolean              @default(true)
+  companyId     String
+  company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@map("notification_rules")
+}
+
+model ITDeclaration {
+  id               String            @id @default(cuid())
+  employeeId       String
+  employee         Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  financialYear    String // "2025-26"
+  regime           String            @default("NEW") // OLD or NEW
+  section80C       Json? // { lic, ppf, elss, nsc, homeLoanPrincipal, schoolFees, total }
+  section80CCD     Json? // { npsEmployee, npsAdditional }
+  section80D       Json? // { selfPremium, parentPremium, seniorCitizen }
+  section80E       Json? // { educationLoanInterest }
+  section80G       Json? // { donations }
+  section80GG      Json? // { rentPaid }
+  section80TTA     Json? // { savingsInterest }
+  hraExemption     Json? // { rentPaid, landlordPan, landlordName, cityType }
+  ltaExemption     Json? // { travelCost }
+  homeLoanInterest Json? // { interestAmount, lenderName, lenderPan }
+  otherIncome      Json? // { interestIncome, rentalIncome, otherSources }
+  status           DeclarationStatus @default(DRAFT)
+  submittedAt      DateTime?
+  verifiedBy       String?
+  verifiedAt       DateTime?
+  companyId        String
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([employeeId, financialYear])
+  @@map("it_declarations")
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  ESCALATED
+  AUTO_APPROVED
+  AUTO_REJECTED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+  IN_APP
+  WHATSAPP
+}
+
+enum DeclarationStatus {
+  DRAFT
+  SUBMITTED
+  VERIFIED
+  LOCKED
+}

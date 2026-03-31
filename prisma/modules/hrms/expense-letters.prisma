@@ -1,0 +1,142 @@
+// ==========================================
+// HRMS — Expense, Letters, Grievance & Discipline
+// ==========================================
+// Models: ExpenseClaim, HRLetterTemplate, HRLetter, GrievanceCategory, GrievanceCase, DisciplinaryAction
+// Enums: ClaimStatus, GrievanceStatus, DisciplineActionType
+
+model ExpenseClaim {
+  id          String      @id @default(cuid())
+  employeeId  String
+  employee    Employee    @relation(fields: [employeeId], references: [id])
+  title       String
+  amount      Decimal     @db.Decimal(15, 2)
+  category    String // TRAVEL, MEDICAL, INTERNET, FUEL, UNIFORM, BUSINESS, OTHER
+  receipts    Json? // Array of { fileName, fileUrl }
+  description String?
+  tripDate    DateTime?   @db.Date
+  status      ClaimStatus @default(DRAFT)
+  approvedBy  String?
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  companyId   String
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@map("expense_claims")
+}
+
+model HRLetterTemplate {
+  id           String     @id @default(cuid())
+  type         String // OFFER, APPOINTMENT, CONFIRMATION, EXPERIENCE, RELIEVING, PROMOTION, REVISION, TRANSFER, WARNING, SCN, PIP, SUSPENSION, RESIGNATION_ACCEPTANCE
+  name         String
+  bodyTemplate String     @db.Text // With tokens: {employee_name}, {designation}, etc.
+  isActive     Boolean    @default(true)
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  letters      HRLetter[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@map("hr_letter_templates")
+}
+
+model HRLetter {
+  id            String           @id @default(cuid())
+  templateId    String
+  template      HRLetterTemplate @relation(fields: [templateId], references: [id])
+  employeeId    String
+  employee      Employee         @relation(fields: [employeeId], references: [id])
+  effectiveDate DateTime?        @db.Date
+  pdfUrl        String?
+  eSignStatus       String? // PENDING, SIGNED, DECLINED
+  eSignedAt         DateTime?
+  eSignToken        String?
+  eSignDispatchedAt DateTime?
+  companyId         String
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@map("hr_letters")
+}
+
+model GrievanceCategory {
+  id             String          @id @default(cuid())
+  name           String
+  slaHours       Int             @default(72)
+  autoEscalateTo String? // role or userId
+  companyId      String
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cases          GrievanceCase[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([companyId, name])
+  @@map("grievance_categories")
+}
+
+model GrievanceCase {
+  id          String            @id @default(cuid())
+  employeeId  String?
+  employee    Employee?         @relation(fields: [employeeId], references: [id])
+  categoryId  String
+  category    GrievanceCategory @relation(fields: [categoryId], references: [id])
+  description String
+  isAnonymous Boolean           @default(false)
+  status      GrievanceStatus   @default(OPEN)
+  resolution  String?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  companyId   String
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@map("grievance_cases")
+}
+
+model DisciplinaryAction {
+  id            String               @id @default(cuid())
+  employeeId    String
+  employee      Employee             @relation(fields: [employeeId], references: [id])
+  type          DisciplineActionType
+  charges       String
+  replyDueBy    DateTime?            @db.Date
+  replyReceived String?
+  pipDuration   Int? // days (for PIP)
+  pipOutcome    String? // SUCCESS, PARTIAL, FAILURE
+  status        String               @default("ISSUED") // ISSUED, REPLY_RECEIVED, PIP_ACTIVE, RESOLVED, CLOSED
+  issuedBy      String?
+  companyId     String
+  company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@map("disciplinary_actions")
+}
+
+enum ClaimStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum GrievanceStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+  ESCALATED
+}
+
+enum DisciplineActionType {
+  VERBAL_WARNING
+  WRITTEN_WARNING
+  SHOW_CAUSE
+  PIP
+  SUSPENSION
+  TERMINATION
+}

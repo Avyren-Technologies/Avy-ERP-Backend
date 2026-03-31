@@ -1,0 +1,103 @@
+// ==========================================
+// HRMS — Onboarding, Probation & Bonus Batch
+// ==========================================
+// Models: OnboardingTemplate, OnboardingTask, ProbationReview, BonusBatch, BonusBatchItem
+
+model OnboardingTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  items     Json     // Array of { title, department, description, dueInDays, isMandatory }
+  isDefault Boolean  @default(false)
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks OnboardingTask[]
+
+  @@unique([companyId, name])
+  @@map("onboarding_templates")
+}
+
+model OnboardingTask {
+  id          String              @id @default(cuid())
+  employeeId  String
+  employee    Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  templateId  String?
+  template    OnboardingTemplate? @relation(fields: [templateId], references: [id])
+  title       String
+  department  String
+  description String?
+  dueDate     DateTime?           @db.Date
+  isMandatory Boolean             @default(true)
+  status      String              @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, SKIPPED
+  completedBy String?
+  completedAt DateTime?
+  notes       String?
+  companyId   String
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@map("onboarding_tasks")
+}
+
+model ProbationReview {
+  id               String    @id @default(cuid())
+  employeeId       String
+  employee         Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewDate       DateTime  @db.Date
+  probationEndDate DateTime  @db.Date
+  managerFeedback  String?
+  performanceRating Int?
+  decision         String    @default("PENDING") // PENDING, CONFIRMED, EXTENDED, TERMINATED
+  extensionMonths  Int?
+  newProbationEnd  DateTime? @db.Date
+  decidedBy        String?
+  decidedAt        DateTime?
+  companyId        String
+  company          Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([employeeId, probationEndDate])
+  @@map("probation_reviews")
+}
+
+model BonusBatch {
+  id            String    @id @default(cuid())
+  name          String
+  bonusType     String    // PERFORMANCE, FESTIVE, SPOT, REFERRAL, RETENTION, STATUTORY
+  totalAmount   Decimal?  @db.Decimal(15, 2)
+  employeeCount Int?
+  status        String    @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, MERGED, REJECTED
+  approvedBy    String?
+  approvedAt    DateTime?
+  mergedToRunId String?
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items BonusBatchItem[]
+
+  @@map("bonus_batches")
+}
+
+model BonusBatchItem {
+  id         String     @id @default(cuid())
+  batchId    String
+  batch      BonusBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee   @relation(fields: [employeeId], references: [id])
+  amount     Decimal    @db.Decimal(15, 2)
+  tdsAmount  Decimal?   @db.Decimal(15, 2)
+  netAmount  Decimal?   @db.Decimal(15, 2)
+  remarks    String?
+  companyId  String
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@map("bonus_batch_items")
+}

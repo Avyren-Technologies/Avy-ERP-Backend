@@ -1,0 +1,93 @@
+// ==========================================
+// COMPANY ADMIN — Locations & Contacts
+// ==========================================
+// Models: Location, CompanyContact
+
+// Plants & Branches (Step 10)
+model Location {
+  id                  String   @id @default(cuid())
+  companyId           String
+  name                String
+  code                String
+  facilityType        String
+  customFacilityType  String?
+  status              String   @default("Active")
+  isHQ                Boolean  @default(false)
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  district            String?
+  state               String?
+  pin                 String?
+  country             String?  @default("India")
+  stdCode             String?
+  gstin               String?
+  stateGST            String?
+  contactName         String?
+  contactDesignation  String?
+  contactEmail        String?
+  contactCountryCode  String?  @default("+91")
+  contactPhone        String?
+  geoEnabled          Boolean  @default(false)
+  geoLocationName     String?
+  geoLat              String?
+  geoLng              String?
+  geoRadius           Int      @default(50)
+  geoShape            String?  @default("circle")
+
+  // ── Device & Capture Restrictions ──
+  allowedDevices      DeviceType[]
+  requireSelfie       Boolean? // null = inherit from attendance rules
+  requireLiveLocation Boolean? // null = inherit from attendance rules
+
+  // ── Advanced Geo ──
+  geoPolygon          Json?    // GeoJSON polygon coordinates for non-circular zones
+
+  moduleIds           Json?
+  customModulePricing Json?
+  userTier            String?
+  customUserLimit     String?
+  customTierPrice     String?
+  billingType         String?  @default("monthly")
+  trialDays           Int      @default(0)
+  oneTimeLicenseFee   Float?
+  amcAmount           Float?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // HRMS Relations
+  costCentres CostCentre[]
+  employees   Employee[]
+
+  // Attendance Relations
+  attendanceRecords AttendanceRecord[] @relation("AttendanceLocation")
+
+  // Transfer Relations
+  transfersFrom EmployeeTransfer[] @relation("TransferFromLoc")
+  transfersTo   EmployeeTransfer[] @relation("TransferToLoc")
+
+  @@unique([companyId, code])
+  @@map("locations")
+}
+
+// Key Contacts (Step 9)
+model CompanyContact {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  designation String?
+  department  String?
+  type        String
+  email       String
+  countryCode String   @default("+91")
+  mobile      String
+  linkedin    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_contacts")
+}

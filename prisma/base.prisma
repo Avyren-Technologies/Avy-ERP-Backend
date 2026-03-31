@@ -1,0 +1,15 @@
+// ==========================================
+// Avy ERP — Base Prisma Configuration
+// ==========================================
+// This file contains the generator and datasource blocks.
+// All model files are in prisma/modules/**/*.prisma
+// Run `pnpm prisma:merge` to combine into schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}

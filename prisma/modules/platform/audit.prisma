@@ -1,0 +1,21 @@
+// ==========================================
+// PLATFORM — Audit Logs
+// ==========================================
+// Models: AuditLog
+
+// Audit Logs (Platform level)
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?
+  userAgent  String?
+  timestamp  DateTime @default(now())
+
+  @@map("audit_logs")
+}

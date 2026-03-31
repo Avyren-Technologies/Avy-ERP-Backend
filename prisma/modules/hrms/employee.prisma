@@ -1,0 +1,310 @@
+// ==========================================
+// HRMS — Employee Master
+// ==========================================
+// Models: Employee, EmployeeNominee, EmployeeEducation, EmployeePrevEmployment, EmployeeDocument, EmployeeTimeline
+// Enums: EmployeeStatus, Gender, MaritalStatus, WorkType, PaymentMode, AccountType, TimelineEventType
+
+model Employee {
+  id         String @id @default(cuid())
+  employeeId String
+
+  // Personal Info (Tab 1)
+  firstName        String
+  middleName       String?
+  lastName         String
+  dateOfBirth      DateTime
+  gender           Gender
+  maritalStatus    MaritalStatus?
+  bloodGroup       String?
+  fatherMotherName String?
+  nationality      String         @default("Indian")
+  religion         String?
+  category         String?
+  differentlyAbled Boolean        @default(false)
+  disabilityType   String?
+  profilePhotoUrl  String?        @db.Text
+
+  // Contact Info
+  personalMobile           String
+  alternativeMobile        String?
+  personalEmail            String
+  officialEmail            String?
+  currentAddress           Json?
+  permanentAddress         Json?
+  emergencyContactName     String
+  emergencyContactRelation String
+  emergencyContactMobile   String
+
+  // Professional Details (Tab 2)
+  joiningDate         DateTime
+  employeeTypeId      String
+  employeeType        EmployeeType  @relation(fields: [employeeTypeId], references: [id])
+  departmentId        String
+  department          Department    @relation(fields: [departmentId], references: [id])
+  designationId       String
+  designation         Designation   @relation(fields: [designationId], references: [id])
+  gradeId             String?
+  grade               Grade?        @relation(fields: [gradeId], references: [id])
+  reportingManagerId  String?
+  reportingManager    Employee?     @relation("ReportingManager", fields: [reportingManagerId], references: [id])
+  reportees           Employee[]    @relation("ReportingManager")
+  functionalManagerId String?
+  functionalManager   Employee?     @relation("FunctionalManager", fields: [functionalManagerId], references: [id])
+  functionalReportees Employee[]    @relation("FunctionalManager")
+  workType            WorkType?
+  shiftId             String?
+  shift               CompanyShift? @relation(fields: [shiftId], references: [id])
+  costCentreId        String?
+  costCentre          CostCentre?   @relation(fields: [costCentreId], references: [id])
+  locationId          String?
+  location            Location?     @relation(fields: [locationId], references: [id])
+  noticePeriodDays    Int?
+  probationEndDate    DateTime?
+  confirmationDate    DateTime?
+
+  // Salary (Tab 3)
+  annualCtc       Decimal?     @db.Decimal(15, 2)
+  salaryStructure Json?
+  paymentMode     PaymentMode?
+
+  // Bank (Tab 4)
+  bankAccountNumber String?
+  bankIfscCode      String?
+  bankName          String?
+  bankBranch        String?
+  accountType       AccountType?
+
+  // Statutory IDs
+  panNumber      String?
+  aadhaarNumber  String?
+  uan            String?
+  esiIpNumber    String?
+  passportNumber String?
+  passportExpiry DateTime?
+  drivingLicence String?
+  voterId        String?
+  pran           String?
+
+  // Status
+  status          EmployeeStatus @default(PROBATION)
+  lastWorkingDate DateTime?
+  exitReason      String?
+
+  // Relations
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // User ↔ Employee link (ERP industry standard)
+  user User? @relation("UserEmployee")
+
+  nominees           EmployeeNominee[]
+  education          EmployeeEducation[]
+  previousEmployment EmployeePrevEmployment[]
+  documents          EmployeeDocument[]
+  timeline           EmployeeTimeline[]
+
+  // Attendance & Leave Relations
+  attendanceRecords AttendanceRecord[]
+  overtimeRequests  OvertimeRequest[]
+  leaveBalances     LeaveBalance[]
+  leaveRequests     LeaveRequest[]
+
+  // Payroll Relations
+  salaryRecords EmployeeSalary[]
+  loans         LoanRecord[]
+
+  // Payroll Run & Statutory Relations
+  payrollEntries  PayrollEntry[]
+  payslips        Payslip[]
+  salaryHolds     SalaryHold[]
+  salaryRevisions SalaryRevision[]
+  arrearEntries   ArrearEntry[]
+
+  // ESS Relations
+  itDeclarations ITDeclaration[]
+
+  // Performance Management Relations
+  goals                Goal[]
+  appraisalEntries     AppraisalEntry[]
+  feedback360AsSubject Feedback360[]    @relation("Feedback360Subject")
+  feedback360AsRater   Feedback360[]    @relation("Feedback360Rater")
+  skillMappings        SkillMapping[]
+  successionPlans      SuccessionPlan[]
+
+  // Recruitment, Training, Asset, Expense, Letters, Grievance & Discipline Relations
+  trainingNominations TrainingNomination[]
+  assetAssignments    AssetAssignment[]
+  expenseClaims       ExpenseClaim[]
+  hrLetters           HRLetter[]
+  grievanceCases      GrievanceCase[]
+  disciplinaryActions DisciplinaryAction[]
+
+  // Onboarding, Probation & Bonus Relations
+  onboardingTasks  OnboardingTask[]
+  probationReviews ProbationReview[]
+  bonusBatchItems  BonusBatchItem[]
+
+  // Phase 2 Relations
+  shiftRotationAssignments ShiftRotationAssignment[]
+  productionIncentives     ProductionIncentiveRecord[]
+  dataAccessRequests       DataAccessRequest[]
+  consentRecords           ConsentRecord[]
+  chatConversations        ChatConversation[]
+
+  // Offboarding & F&F Relations
+  exitRequests   ExitRequest[]
+  fnfSettlements FnFSettlement[]
+
+  // Manager Delegation, Transfer & Promotion Relations
+  delegatesAsManager ManagerDelegate[]   @relation("DelegateManager")
+  delegatesAsProxy   ManagerDelegate[]   @relation("DelegateProxy")
+  transfers          EmployeeTransfer[]
+  promotions         EmployeePromotion[]
+
+  // Shift Swap & WFH Relations
+  shiftSwapRequests ShiftSwapRequest[]
+  wfhRequests       WfhRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, employeeId])
+  @@map("employees")
+}
+
+model EmployeeNominee {
+  id           String    @id @default(cuid())
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  name         String
+  relation     String
+  dateOfBirth  DateTime?
+  sharePercent Decimal?  @db.Decimal(5, 2)
+  aadhaar      String?
+  pan          String?
+  address      Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("employee_nominees")
+}
+
+model EmployeeEducation {
+  id             String   @id @default(cuid())
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  qualification  String
+  degree         String?
+  institution    String?
+  university     String?
+  yearOfPassing  Int?
+  marks          String?
+  certificateUrl String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("employee_education")
+}
+
+model EmployeePrevEmployment {
+  id                  String    @id @default(cuid())
+  employeeId          String
+  employee            Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employerName        String
+  designation         String?
+  lastCtc             Decimal?  @db.Decimal(15, 2)
+  joinDate            DateTime?
+  leaveDate           DateTime?
+  reason              String?
+  experienceLetterUrl String?
+  relievingLetterUrl  String?
+  previousPfAccount   String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("employee_prev_employments")
+}
+
+model EmployeeDocument {
+  id             String    @id @default(cuid())
+  employeeId     String
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  documentType   String
+  documentNumber String?
+  expiryDate     DateTime?
+  fileUrl        String
+  fileName       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("employee_documents")
+}
+
+model EmployeeTimeline {
+  id          String            @id @default(cuid())
+  employeeId  String
+  employee    Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  eventType   TimelineEventType
+  title       String
+  description String?
+  eventData   Json?
+  performedBy String?
+  createdAt   DateTime          @default(now())
+
+  @@map("employee_timeline")
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  PROBATION
+  CONFIRMED
+  ON_NOTICE
+  SUSPENDED
+  EXITED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  PREFER_NOT_TO_SAY
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+enum WorkType {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+
+enum PaymentMode {
+  NEFT
+  IMPS
+  CHEQUE
+}
+
+enum AccountType {
+  SAVINGS
+  CURRENT
+}
+
+enum TimelineEventType {
+  JOINED
+  PROBATION_STARTED
+  CONFIRMED
+  PROMOTED
+  TRANSFERRED
+  SALARY_REVISED
+  ONBOARDING_COMPLETE
+  RESIGNED
+  TERMINATED
+  EXITED
+  DOCUMENT_UPLOADED
+  CUSTOM
+}

@@ -1,0 +1,131 @@
+// ==========================================
+// HRMS — Offboarding & F&F
+// ==========================================
+// Models: ExitRequest, ExitClearance, ExitInterview, FnFSettlement
+// Enums: SeparationType, ExitStatus, ClearanceStatus, FnFStatus
+
+model ExitRequest {
+  id                    String          @id @default(cuid())
+  employeeId            String
+  employee              Employee        @relation(fields: [employeeId], references: [id])
+  separationType        SeparationType
+  resignationDate       DateTime?       @db.Date
+  lastWorkingDate       DateTime?       @db.Date
+  noticePeriodDays      Int?
+  noticePeriodWaiver    Boolean         @default(false)
+  waiverAmount          Decimal?        @db.Decimal(15, 2)
+  exitInterviewDone     Boolean         @default(false)
+  exitInterviewNotes    String?
+  knowledgeTransferDone Boolean         @default(false)
+  status                ExitStatus      @default(INITIATED)
+  initiatedBy           String? // userId
+  companyId             String
+  company               Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  clearances            ExitClearance[]
+  exitInterview         ExitInterview?
+  fnfSettlement         FnFSettlement?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@map("exit_requests")
+}
+
+model ExitClearance {
+  id            String          @id @default(cuid())
+  exitRequestId String
+  exitRequest   ExitRequest     @relation(fields: [exitRequestId], references: [id], onDelete: Cascade)
+  department    String // IT, ADMIN, FINANCE, HR, LIBRARY
+  items         Json // Array of { item, status, notes }
+  clearedBy     String?
+  clearedAt     DateTime?
+  status        ClearanceStatus @default(PENDING)
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@map("exit_clearances")
+}
+
+model ExitInterview {
+  id             String      @id @default(cuid())
+  exitRequestId  String      @unique
+  exitRequest    ExitRequest @relation(fields: [exitRequestId], references: [id], onDelete: Cascade)
+  responses      Json // Array of { question, answer }
+  conductedBy    String?
+  conductedAt    DateTime?
+  overallRating  Int? // 1-5 experience rating
+  wouldRecommend Boolean?
+  companyId      String
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@map("exit_interviews")
+}
+
+model FnFSettlement {
+  id                   String      @id @default(cuid())
+  exitRequestId        String      @unique
+  exitRequest          ExitRequest @relation(fields: [exitRequestId], references: [id], onDelete: Cascade)
+  employeeId           String
+  employee             Employee    @relation(fields: [employeeId], references: [id])
+  salaryForWorkedDays  Decimal?    @db.Decimal(15, 2)
+  leaveEncashment      Decimal?    @db.Decimal(15, 2)
+  gratuityAmount       Decimal?    @db.Decimal(15, 2)
+  bonusProRata         Decimal?    @db.Decimal(15, 2)
+  noticePay            Decimal?    @db.Decimal(15, 2) // positive = company pays, negative = employee owes
+  loanRecovery         Decimal?    @db.Decimal(15, 2)
+  assetRecovery        Decimal?    @db.Decimal(15, 2)
+  reimbursementPending Decimal?    @db.Decimal(15, 2)
+  tdsOnFnF             Decimal?    @db.Decimal(15, 2)
+  otherDeductions      Decimal?    @db.Decimal(15, 2)
+  otherEarnings        Decimal?    @db.Decimal(15, 2)
+  totalAmount          Decimal?    @db.Decimal(15, 2)
+  components           Json? // Full breakup detail
+  status               FnFStatus   @default(DRAFT)
+  approvedBy           String?
+  approvedAt           DateTime?
+  paidAt               DateTime?
+  payslipUrl           String?
+  settlementLetterUrl  String?
+  companyId            String
+  company              Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  @@map("fnf_settlements")
+}
+
+enum SeparationType {
+  VOLUNTARY_RESIGNATION
+  RETIREMENT
+  TERMINATION_FOR_CAUSE
+  LAYOFF_RETRENCHMENT
+  DEATH
+  ABSCONDING
+  CONTRACT_END
+}
+
+enum ExitStatus {
+  INITIATED
+  NOTICE_PERIOD
+  CLEARANCE_PENDING
+  CLEARANCE_DONE
+  FNF_COMPUTED
+  FNF_PAID
+  COMPLETED
+}
+
+enum ClearanceStatus {
+  PENDING
+  CLEARED
+  NOT_APPLICABLE
+}
+
+enum FnFStatus {
+  DRAFT
+  COMPUTED
+  APPROVED
+  PAID
+}

@@ -1,0 +1,92 @@
+// ==========================================
+// PLATFORM — Authentication & Authorization
+// ==========================================
+// Models: User, PasswordResetToken, Role, TenantUser
+// Enums: UserRole
+
+// Platform Users (Super-admins and Company-admins)
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String
+  firstName String
+  lastName  String
+  phone     String?
+  role      UserRole  @default(COMPANY_ADMIN)
+  isActive  Boolean   @default(true)
+  lastLogin DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Relations
+  companyId   String?
+  company     Company?             @relation(fields: [companyId], references: [id])
+  resetTokens PasswordResetToken[]
+  tenantUsers TenantUser[]
+
+  // User ↔ Employee link (ERP industry standard)
+  employeeId String?   @unique
+  employee   Employee? @relation("UserEmployee", fields: [employeeId], references: [id])
+
+  @@map("users")
+}
+
+// Password Reset Tokens
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  code      String // 6-digit code (hashed with bcrypt)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// Tenant-scoped custom roles with permissions
+model Role {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  permissions Json // Array of permission strings e.g. ["hr:view", "hr:create"]
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  tenantUsers TenantUser[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+// Bridge: User ↔ Tenant ↔ Role
+model TenantUser {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  roleId    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@map("tenant_users")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+}

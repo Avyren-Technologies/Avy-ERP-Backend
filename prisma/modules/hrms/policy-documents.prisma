@@ -1,0 +1,23 @@
+// ==========================================
+// HRMS — Policy Documents
+// ==========================================
+// Models: PolicyDocument
+
+model PolicyDocument {
+  id          String    @id @default(cuid())
+  title       String
+  category    String    // HR_POLICY, LEAVE_POLICY, ATTENDANCE_POLICY, CODE_OF_CONDUCT, SAFETY, TRAVEL, IT_POLICY, OTHER
+  description String?
+  fileUrl     String
+  fileName    String
+  version     String    @default("1.0")
+  isActive    Boolean   @default(true)
+  publishedAt DateTime?
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  uploadedBy  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("policy_documents")
+}

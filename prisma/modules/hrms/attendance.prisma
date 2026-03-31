@@ -1,0 +1,382 @@
+// ==========================================
+// HRMS — Attendance & Overtime
+// ==========================================
+// Models: AttendanceRecord, AttendanceOverride, AttendanceRule, HolidayCalendar, Roster, OvertimeRule, OvertimeRequest
+// Enums: AttendanceStatus, AttendanceSource, OverrideStatus, PunchMode, RoundingStrategy, PunchRounding, RoundingDirection, DeductionType, LocationAccuracy, DeviceType, OTCalculationBasis, OvertimeRequestStatus, OTMultiplierSource, HolidayType, RosterPattern
+
+model AttendanceRecord {
+  id            String           @id @default(cuid())
+  employeeId    String
+  employee      Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date          DateTime         @db.Date
+  shiftId       String?
+  shift         CompanyShift?    @relation("AttendanceShift", fields: [shiftId], references: [id])
+  punchIn       DateTime?
+  punchOut      DateTime?
+  workedHours   Decimal?         @db.Decimal(5, 2)
+  status        AttendanceStatus @default(PRESENT)
+  source        AttendanceSource @default(MANUAL)
+  isLate        Boolean          @default(false)
+  lateMinutes   Int?
+  isEarlyExit   Boolean          @default(false)
+  earlyMinutes  Int?
+  overtimeHours Decimal?         @db.Decimal(5, 2)
+  remarks       String?
+  locationId    String?
+  location      Location?        @relation("AttendanceLocation", fields: [locationId], references: [id])
+  // Geo-tagging for check-in/check-out
+  checkInLatitude   Float?
+  checkInLongitude  Float?
+  checkOutLatitude  Float?
+  checkOutLongitude Float?
+  checkInPhotoUrl   String?        @db.Text
+  checkOutPhotoUrl  String?        @db.Text
+  geoStatus         String?        // NO_LOCATION, INSIDE_GEOFENCE, OUTSIDE_GEOFENCE
+  // ── Regularization fields (M8) ──
+  isRegularized         Boolean   @default(false)
+  regularizedAt         DateTime?
+  regularizedBy         String?
+  regularizationReason  String?
+  // ── Leave linkage (C1) ──
+  leaveRequestId        String?
+  companyId     String
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  // ── Resolved Policy Snapshot ──
+  appliedGracePeriodMinutes    Int?
+  appliedFullDayThresholdHours Decimal?   @db.Decimal(4, 2)
+  appliedHalfDayThresholdHours Decimal?   @db.Decimal(4, 2)
+  appliedBreakDeductionMinutes Int?
+  appliedPunchMode             PunchMode?
+  appliedLateDeduction         Decimal?   @db.Decimal(10, 2)
+  appliedEarlyExitDeduction    Decimal?   @db.Decimal(10, 2)
+
+  // ── Resolution Trace ──
+  resolutionTrace Json? // { field: "SHIFT" | "LOCATION" | "ATTENDANCE_RULE" | "SYSTEM_DEFAULT" }
+
+  // ── Evaluation Context ──
+  evaluationContext Json? // { isHoliday, isWeekOff, holidayName?, rosterPattern? }
+
+  // ── Status Reasoning ──
+  finalStatusReason String?
+
+  overrides       AttendanceOverride[]
+  overtimeRequest OvertimeRequest?
+
+  @@unique([employeeId, date])
+  @@index([companyId, date])
+  @@index([companyId, status])
+  @@map("attendance_records")
+}
+
+model AttendanceOverride {
+  id                 String           @id @default(cuid())
+  attendanceRecordId String
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  issueType          String // MISSING_PUNCH_IN, MISSING_PUNCH_OUT, ABSENT_OVERRIDE, LATE_OVERRIDE, NO_PUNCH
+  correctedPunchIn   DateTime?
+  correctedPunchOut  DateTime?
+  reason             String
+  requestedBy        String // userId
+  approvedBy         String? // userId
+  status             OverrideStatus   @default(PENDING)
+  payrollImpact      String? // e.g. "LOP reduced by 0.5 day"
+  companyId          String
+  company            Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@map("attendance_overrides")
+}
+
+model AttendanceRule {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Time & Boundary ──
+  dayBoundaryTime String @default("00:00")
+
+  // ── Grace & Tolerance (defaults — shift can override) ──
+  gracePeriodMinutes        Int @default(15)
+  earlyExitToleranceMinutes Int @default(15)
+  maxLateCheckInMinutes     Int @default(240)
+
+  // ── Day Classification Thresholds (defaults — shift can override) ──
+  halfDayThresholdHours Decimal @default(4) @db.Decimal(4, 2)
+  fullDayThresholdHours Decimal @default(8) @db.Decimal(4, 2)
+
+  // ── Late/Early Tracking ──
+  lateArrivalsAllowedPerMonth Int @default(3)
+
+  // ── Deduction Rules ──
+  lopAutoDeduct           Boolean       @default(true)
+  lateDeductionType       DeductionType @default(NONE)
+  lateDeductionValue      Decimal?      @db.Decimal(5, 2)
+  earlyExitDeductionType  DeductionType @default(NONE)
+  earlyExitDeductionValue Decimal?      @db.Decimal(5, 2)
+
+  // ── Punch Interpretation ──
+  punchMode PunchMode @default(FIRST_LAST)
+
+  // ── Auto-Processing ──
+  autoMarkAbsentIfNoPunch  Boolean @default(true)
+  autoHalfDayEnabled       Boolean @default(true)
+  autoAbsentAfterDays      Int     @default(0)
+  regularizationWindowDays Int     @default(7)
+
+  // ── Rounding Rules ──
+  workingHoursRounding       RoundingStrategy  @default(NONE)
+  punchTimeRounding          PunchRounding     @default(NONE)
+  punchTimeRoundingDirection RoundingDirection @default(NEAREST)
+
+  // ── Exception Handling ──
+  ignoreLateOnLeaveDay Boolean @default(true)
+  ignoreLateOnHoliday  Boolean @default(true)
+  ignoreLateOnWeekOff  Boolean @default(true)
+
+  // ── Capture Requirements (defaults — location/shift can override) ──
+  selfieRequired    Boolean @default(false)
+  gpsRequired       Boolean @default(false)
+  missingPunchAlert Boolean @default(true)
+
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("attendance_rules")
+}
+
+model HolidayCalendar {
+  id               String      @id @default(cuid())
+  name             String
+  date             DateTime    @db.Date
+  type             HolidayType @default(COMPANY)
+  branchIds        Json? // string[] of locationIds — null = all branches
+  year             Int
+  description      String?
+  isOptional       Boolean     @default(false)
+  maxOptionalSlots Int? // for restricted holidays
+  companyId        String
+  company          Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@unique([companyId, name, date])
+  @@map("holiday_calendars")
+}
+
+model Roster {
+  id                String        @id @default(cuid())
+  name              String
+  pattern           RosterPattern @default(MON_FRI)
+  weekOff1          String? // e.g. "Saturday"
+  weekOff2          String? // e.g. "Sunday"
+  applicableTypeIds Json? // string[] of employeeTypeIds
+  effectiveFrom     DateTime      @db.Date
+  isDefault         Boolean       @default(false)
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([companyId, name])
+  @@map("rosters")
+}
+
+model OvertimeRule {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // ── Eligibility ──
+  eligibleTypeIds Json? // string[] of employee type IDs; null = all eligible
+
+  // ── Calculation Basis ──
+  calculationBasis  OTCalculationBasis @default(AFTER_SHIFT)
+  thresholdMinutes  Int                @default(30)
+  minimumOtMinutes  Int                @default(30)
+  includeBreaksInOT Boolean            @default(false)
+
+  // ── Rate Multipliers ──
+  weekdayMultiplier    Decimal  @default(1.5) @db.Decimal(3, 2)
+  weekendMultiplier    Decimal?               @db.Decimal(3, 2)
+  holidayMultiplier    Decimal?               @db.Decimal(3, 2)
+  nightShiftMultiplier Decimal?               @db.Decimal(3, 2)
+
+  // ── Caps ──
+  dailyCapHours        Decimal? @db.Decimal(4, 1)
+  weeklyCapHours       Decimal? @db.Decimal(5, 1)
+  monthlyCapHours      Decimal? @db.Decimal(5, 1)
+  enforceCaps          Boolean  @default(false)
+  maxContinuousOtHours Decimal? @db.Decimal(4, 1)
+
+  // ── Approval & Payroll ──
+  approvalRequired   Boolean @default(true)
+  autoIncludePayroll Boolean @default(false)
+
+  // ── Comp-Off ──
+  compOffEnabled    Boolean @default(false)
+  compOffExpiryDays Int?
+
+  // ── Rounding ──
+  roundingStrategy RoundingStrategy @default(NONE)
+
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  overtimeRequests OvertimeRequest[]
+  createdBy        String?
+  updatedBy        String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("overtime_rules")
+}
+
+model OvertimeRequest {
+  id                 String @id @default(cuid())
+  attendanceRecordId String @unique
+  companyId          String
+  employeeId         String
+  overtimeRuleId     String
+
+  date              DateTime              @db.Date
+  requestedHours    Decimal               @db.Decimal(5, 2)
+  appliedMultiplier Decimal               @db.Decimal(3, 2)
+  multiplierSource  OTMultiplierSource
+  calculatedAmount  Decimal?              @db.Decimal(15, 2)
+
+  status        OvertimeRequestStatus @default(PENDING)
+  requestedBy   String
+  approvedBy    String?
+  approvalNotes String?
+  approvedAt    DateTime?
+
+  compOffGranted Boolean @default(false)
+
+  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee         Employee         @relation(fields: [employeeId], references: [id])
+  overtimeRule     OvertimeRule     @relation(fields: [overtimeRuleId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([employeeId, date])
+  @@map("overtime_requests")
+}
+
+// ── Attendance & Leave Enums ──
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  LATE
+  EARLY_EXIT
+  INCOMPLETE
+  ON_LEAVE
+  HOLIDAY
+  WEEK_OFF
+  REGULARIZED
+  LOP
+}
+
+enum AttendanceSource {
+  BIOMETRIC
+  FACE_RECOGNITION
+  MOBILE_GPS
+  WEB_PORTAL
+  MANUAL
+  IOT
+  SMART_CARD
+}
+
+enum OverrideStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PunchMode {
+  FIRST_LAST
+  EVERY_PAIR
+  SHIFT_BASED
+}
+
+enum RoundingStrategy {
+  NONE
+  NEAREST_15
+  NEAREST_30
+  FLOOR_15
+  CEIL_15
+}
+
+enum PunchRounding {
+  NONE
+  NEAREST_5
+  NEAREST_15
+}
+
+enum RoundingDirection {
+  NEAREST
+  UP
+  DOWN
+}
+
+enum DeductionType {
+  NONE
+  HALF_DAY_AFTER_LIMIT
+  PERCENTAGE
+}
+
+enum LocationAccuracy {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum DeviceType {
+  BIOMETRIC
+  MOBILE_GPS
+  WEB_PORTAL
+  SMART_CARD
+  FACE_RECOGNITION
+}
+
+enum OTCalculationBasis {
+  AFTER_SHIFT
+  TOTAL_HOURS
+}
+
+enum OvertimeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+  COMP_OFF_ACCRUED
+}
+
+enum OTMultiplierSource {
+  WEEKDAY
+  WEEKEND
+  HOLIDAY
+  NIGHT_SHIFT
+}
+
+enum HolidayType {
+  NATIONAL
+  REGIONAL
+  COMPANY
+  OPTIONAL
+  RESTRICTED
+}
+
+enum RosterPattern {
+  MON_FRI
+  MON_SAT
+  MON_SAT_ALT
+  CUSTOM
+}

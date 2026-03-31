@@ -1,0 +1,63 @@
+// ==========================================
+// HRMS — Training
+// ==========================================
+// Models: TrainingCatalogue, TrainingNomination
+// Enums: TrainingMode, TrainingNominationStatus
+
+model TrainingCatalogue {
+  id                    String               @id @default(cuid())
+  name                  String
+  type                  String               @default("TECHNICAL") // TECHNICAL, COMPLIANCE, SOFT_SKILLS, ON_THE_JOB, E_LEARNING
+  mode                  TrainingMode         @default(CLASSROOM)
+  duration              String? // "8 hours", "2 days"
+  linkedSkillIds        Json? // string[] -> SkillLibrary ids
+  proficiencyGain       Int                  @default(1)
+  mandatory             Boolean              @default(false)
+  certificationName     String?
+  certificationBody     String?
+  certificationValidity Int? // years
+  vendorProvider        String?
+  costPerHead           Decimal?             @db.Decimal(15, 2)
+  isActive              Boolean              @default(true)
+  companyId             String
+  company               Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  nominations           TrainingNomination[]
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@map("training_catalogues")
+}
+
+model TrainingNomination {
+  id             String                   @id @default(cuid())
+  employeeId     String
+  employee       Employee                 @relation(fields: [employeeId], references: [id])
+  trainingId     String
+  training       TrainingCatalogue        @relation(fields: [trainingId], references: [id])
+  status         TrainingNominationStatus @default(NOMINATED)
+  completionDate DateTime?
+  score          Decimal?                 @db.Decimal(5, 2)
+  certificateUrl String?
+  companyId      String
+  company        Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@map("training_nominations")
+}
+
+enum TrainingMode {
+  ONLINE
+  CLASSROOM
+  WORKSHOP
+  EXTERNAL
+  BLENDED
+  ON_THE_JOB
+}
+
+enum TrainingNominationStatus {
+  NOMINATED
+  ENROLLED
+  COMPLETED
+  CANCELLED
+}

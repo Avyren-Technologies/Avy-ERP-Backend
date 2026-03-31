@@ -45,6 +45,14 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'ess-grievance', label: 'Grievances', icon: 'alert-triangle', requiredPerm: 'ess:raise-grievance', path: '/app/company/hr/my-grievances', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 309 },
   { id: 'ess-training', label: 'My Training', icon: 'graduation-cap', requiredPerm: 'ess:enroll-training', path: '/app/company/hr/my-training', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 310 },
   { id: 'ess-assets', label: 'My Assets', icon: 'package', requiredPerm: 'ess:view-assets', path: '/app/company/hr/my-assets', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 311 },
+  { id: 'ess-shift-swap', label: 'Shift Swap', icon: 'repeat', requiredPerm: 'ess:swap-shift', path: '/app/company/hr/shift-swap', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 312 },
+  { id: 'ess-wfh', label: 'WFH Request', icon: 'home', requiredPerm: 'ess:request-wfh', path: '/app/company/hr/wfh-requests', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 313 },
+  { id: 'ess-documents', label: 'My Documents', icon: 'file-up', requiredPerm: 'ess:upload-document', path: '/app/company/hr/my-documents', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 314 },
+  { id: 'ess-policies', label: 'Policy Documents', icon: 'book-open', requiredPerm: 'ess:view-policies', path: '/app/company/hr/policy-documents', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 315 },
+  { id: 'ess-holidays-cal', label: 'Holiday Calendar', icon: 'calendar-heart', requiredPerm: 'ess:view-holidays', path: '/app/company/hr/my-holidays', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 316 },
+  { id: 'ess-expense-claims', label: 'My Expenses', icon: 'receipt', requiredPerm: 'ess:claim-expense', path: '/app/company/hr/my-expense-claims', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 317 },
+  { id: 'ess-loans', label: 'My Loans', icon: 'banknote', requiredPerm: 'ess:apply-loan', path: '/app/company/hr/my-loans', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 318 },
+  { id: 'ess-org-chart', label: 'Org Chart', icon: 'network', requiredPerm: 'ess:view-org-chart', path: '/app/company/hr/org-chart', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 319 },
   { id: 'ess-helpdesk', label: 'Help & Support', icon: 'support', requiredPerm: null, path: '/app/help', module: null, group: 'My Workspace', roleScope: 'company', sortOrder: 399 },
 
   // ═══════ MANAGER SELF-SERVICE ═══════
@@ -81,6 +89,7 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-analytics-performance', label: 'Performance & Talent', icon: 'target', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/performance', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 457 },
   { id: 'hr-analytics-recruitment', label: 'Recruitment Intelligence', icon: 'user-plus', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/recruitment', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 458 },
   { id: 'hr-analytics-attrition', label: 'Attrition & Retention', icon: 'user-minus', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/attrition', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 459 },
+  { id: 'hr-analytics-reports', label: 'Reports Hub', icon: 'file-text', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/reports', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 460 },
 
   // ═══════ HRMS ═══════
   { id: 'hr-departments', label: 'Departments', icon: 'building', requiredPerm: 'hr:read', path: '/app/company/hr/departments', module: 'hr', group: 'Org Structure', moduleSeparator: 'HRMS', roleScope: 'company', sortOrder: 500 },
@@ -94,6 +103,7 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-att-dash', label: 'Attendance Dashboard', icon: 'calendar-check', requiredPerm: 'hr:read', path: '/app/company/hr/attendance', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 510 },
   { id: 'hr-holidays', label: 'Holiday Calendar', icon: 'calendar', requiredPerm: 'hr:read', path: '/app/company/hr/holidays', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 511 },
   { id: 'hr-rosters', label: 'Rosters', icon: 'calendar-days', requiredPerm: 'hr:read', path: '/app/company/hr/rosters', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 512 },
+  { id: 'hr-att-overrides', label: 'Attendance Overrides', icon: 'clipboard-check', requiredPerm: 'hr:read', path: '/app/company/hr/attendance-overrides', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 512.5 },
   { id: 'hr-att-rules', label: 'Attendance Rules', icon: 'clipboard-list', requiredPerm: 'hr:configure', path: '/app/company/hr/attendance-rules', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 513 },
   { id: 'hr-ot-rules', label: 'Overtime Rules', icon: 'timer', requiredPerm: 'hr:configure', path: '/app/company/hr/overtime-rules', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 514 },
   { id: 'hr-biometric', label: 'Biometric Devices', icon: 'cpu', requiredPerm: 'hr:configure', path: '/app/company/hr/biometric-devices', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 515 },

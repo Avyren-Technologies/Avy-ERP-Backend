@@ -20,6 +20,13 @@ import {
   createDelegateSchema,
   checkInSchema,
   checkOutSchema,
+  updateProfileSchema,
+  shiftSwapSchema,
+  wfhRequestSchema,
+  uploadDocumentSchema,
+  policyDocumentSchema,
+  essExpenseClaimSchema,
+  essLoanApplicationSchema,
 } from './ess.validators';
 
 /** Haversine distance in metres between two lat/lng points. */
@@ -635,6 +642,176 @@ export class ESSController {
     res.json(createSuccessResponse(data, 'Form 16 data retrieved'));
   });
 
+  // ── Profile Edit & Payslip PDF ──────────────────────────────────
+
+  updateMyProfile = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = updateProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const profile = await essService.updateMyProfile(userId, companyId, parsed.data);
+    res.json(createSuccessResponse(profile, 'Profile updated'));
+  });
+
+  downloadPayslipPdf = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const payslipId = req.params.id;
+    if (!payslipId) throw ApiError.badRequest('Payslip ID is required');
+
+    const buffer = await essService.generatePayslipPdf(userId, companyId, payslipId);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="payslip-${payslipId}.pdf"`,
+      'Content-Length': String(buffer.length),
+    });
+    res.send(buffer);
+  });
+
+  // ── Shift Swap ──────────────────────────────────────────────────────
+
+  getMyShiftSwaps = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const swaps = await essService.getMyShiftSwaps(companyId, userId);
+    res.json(createSuccessResponse(swaps, 'Shift swap requests retrieved'));
+  });
+
+  createShiftSwap = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = shiftSwapSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const swap = await essService.createShiftSwap(companyId, userId, parsed.data);
+    res.status(201).json(createSuccessResponse(swap, 'Shift swap request created'));
+  });
+
+  cancelShiftSwap = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const swap = await essService.cancelShiftSwap(companyId, userId, req.params.id!);
+    res.json(createSuccessResponse(swap, 'Shift swap request cancelled'));
+  });
+
+  // ── WFH Requests ──────────────────────────────────────────────────
+
+  getMyWfhRequests = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const requests = await essService.getMyWfhRequests(companyId, userId);
+    res.json(createSuccessResponse(requests, 'WFH requests retrieved'));
+  });
+
+  createWfhRequest = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = wfhRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const wfh = await essService.createWfhRequest(companyId, userId, parsed.data);
+    res.status(201).json(createSuccessResponse(wfh, 'WFH request created'));
+  });
+
+  cancelWfhRequest = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const wfh = await essService.cancelWfhRequest(companyId, userId, req.params.id!);
+    res.json(createSuccessResponse(wfh, 'WFH request cancelled'));
+  });
+
+  // ── Employee Documents ─────────────────────────────────────────────
+
+  getMyDocuments = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const documents = await essService.getMyDocuments(companyId, userId);
+    res.json(createSuccessResponse(documents, 'Documents retrieved'));
+  });
+
+  uploadMyDocument = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = uploadDocumentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const document = await essService.uploadMyDocument(companyId, userId, parsed.data);
+    res.status(201).json(createSuccessResponse(document, 'Document uploaded'));
+  });
+
+  // ── Policy Documents ───────────────────────────────────────────────
+
+  getPolicyDocuments = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const documents = await essService.getPolicyDocuments(companyId);
+    res.json(createSuccessResponse(documents, 'Policy documents retrieved'));
+  });
+
+  createPolicyDocument = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = policyDocumentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const document = await essService.createPolicyDocument(companyId, parsed.data, req.user?.id);
+    res.status(201).json(createSuccessResponse(document, 'Policy document created'));
+  });
+
   // ── MSS Manager Self-Service ──────────────────────────────────────
 
   getTeamMembers = asyncHandler(async (req: Request, res: Response) => {
@@ -922,6 +1099,94 @@ export class ESSController {
     });
 
     res.json(createSuccessResponse(record, 'Checked out successfully'));
+  });
+
+  // ── Holiday Calendar (ESS) ──────────────────────────────────────
+
+  getMyHolidays = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+    const holidays = await essService.getMyHolidays(companyId, year);
+    res.json(createSuccessResponse(holidays, 'Holidays retrieved'));
+  });
+
+  // ── Expense Claims (ESS) ──────────────────────────────────────────
+
+  getMyExpenseClaims = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const claims = await essService.getMyExpenseClaims(companyId, userId);
+    res.json(createSuccessResponse(claims, 'Expense claims retrieved'));
+  });
+
+  createMyExpenseClaim = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = essExpenseClaimSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const claim = await essService.createMyExpenseClaim(companyId, userId, parsed.data);
+    res.status(201).json(createSuccessResponse(claim, 'Expense claim created'));
+  });
+
+  submitMyExpenseClaim = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const claim = await essService.submitMyExpenseClaim(companyId, userId, req.params.id!);
+    res.json(createSuccessResponse(claim, 'Expense claim submitted'));
+  });
+
+  // ── Loan Application (ESS) ────────────────────────────────────────
+
+  getMyLoans = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const loans = await essService.getMyLoans(companyId, userId);
+    res.json(createSuccessResponse(loans, 'Loans retrieved'));
+  });
+
+  getAvailableLoanPolicies = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const policies = await essService.getAvailableLoanPolicies(companyId);
+    res.json(createSuccessResponse(policies, 'Loan policies retrieved'));
+  });
+
+  applyForLoan = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = essLoanApplicationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const loan = await essService.applyForLoan(companyId, userId, parsed.data);
+    res.status(201).json(createSuccessResponse(loan, 'Loan application submitted'));
   });
 
   // ── Dashboard ─────────────────────────────────────────────────────

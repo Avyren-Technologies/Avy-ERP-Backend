@@ -1,0 +1,42 @@
+// ==========================================
+// COMPANY ADMIN — Number Series & IOT Reasons
+// ==========================================
+// Models: NoSeriesConfig, IotReason
+
+// Number Series (Step 12)
+model NoSeriesConfig {
+  id           String   @id @default(cuid())
+  companyId    String
+  code         String
+  linkedScreen String
+  description  String?
+  prefix       String
+  suffix       String?
+  numberCount  Int      @default(5)
+  startNumber  Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, code])
+  @@map("no_series_configs")
+}
+
+// IOT Reasons (Step 13)
+model IotReason {
+  id          String   @id @default(cuid())
+  companyId   String
+  reasonType  String
+  reason      String
+  description String?
+  department  String?
+  planned     Boolean  @default(false)
+  duration    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("iot_reasons")
+}

@@ -154,7 +154,7 @@ export const PERMISSION_MODULES = {
   },
   ess: {
     label: 'Employee Self-Service',
-    actions: ['view-dashboard', 'view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk'],
+    actions: ['view-dashboard', 'view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart'],
   },
   platform: {
     label: 'Platform Administration',
@@ -276,7 +276,9 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
       'ess:view-attendance', 'ess:regularize-attendance', 'ess:view-holidays',
       'ess:it-declaration', 'ess:view-directory', 'ess:view-profile',
       'ess:download-form16', 'ess:view-goals', 'ess:submit-appraisal',
-      'ess:submit-feedback',
+      'ess:submit-feedback', 'ess:swap-shift', 'ess:request-wfh',
+      'ess:upload-document', 'ess:view-policies', 'ess:claim-expense',
+      'ess:apply-loan', 'ess:view-org-chart',
     ],
   },
   'Manager': {

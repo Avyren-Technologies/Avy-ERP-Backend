@@ -1,0 +1,279 @@
+// ==========================================
+// HRMS — Payroll Configuration
+// ==========================================
+// Models: SalaryComponent, SalaryStructure, EmployeeSalary, PFConfig, ESIConfig, PTConfig,
+//         GratuityConfig, BonusConfig, LWFConfig, BankConfig, LoanPolicy, LoanRecord, TaxConfig
+// Enums: ComponentType, CalculationMethod, TaxTreatment, LoanStatus, TaxRegime
+
+model SalaryComponent {
+  id                String            @id @default(cuid())
+  name              String
+  code              String
+  type              ComponentType
+  calculationMethod CalculationMethod @default(FIXED)
+  formula           String? // e.g. "50% of Basic" — plain text formula
+  formulaValue      Decimal?          @db.Decimal(10, 4) // numeric value for % calculations
+  taxable           TaxTreatment      @default(FULLY_TAXABLE)
+  exemptionSection  String? // e.g. "Section 10(13A)" for HRA
+  exemptionLimit    Decimal?          @db.Decimal(15, 2)
+  pfInclusion       Boolean           @default(false)
+  esiInclusion      Boolean           @default(false)
+  bonusInclusion    Boolean           @default(false)
+  gratuityInclusion Boolean           @default(false)
+  showOnPayslip     Boolean           @default(true)
+  payslipOrder      Int?
+  isActive          Boolean           @default(true)
+  companyId         String
+  company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([companyId, code])
+  @@map("salary_components")
+}
+
+model SalaryStructure {
+  id                       String   @id @default(cuid())
+  name                     String
+  code                     String
+  applicableGradeIds       Json? // string[]
+  applicableDesignationIds Json? // string[]
+  applicableTypeIds        Json? // string[] of employeeTypeIds
+  components               Json // Array of { componentId, calculationMethod, value, formula }
+  ctcBasis                 String   @default("CTC") // "CTC" or "TAKE_HOME"
+  isActive                 Boolean  @default(true)
+  companyId                String
+  company                  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  employeeSalaries EmployeeSalary[]
+
+  @@unique([companyId, code])
+  @@map("salary_structures")
+}
+
+model EmployeeSalary {
+  id            String           @id @default(cuid())
+  employeeId    String
+  employee      Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  structureId   String?
+  structure     SalaryStructure? @relation(fields: [structureId], references: [id])
+  annualCtc     Decimal          @db.Decimal(15, 2)
+  monthlyGross  Decimal?         @db.Decimal(15, 2)
+  components    Json // Computed breakup: { componentCode: amount }
+  effectiveFrom DateTime         @db.Date
+  effectiveTo   DateTime?        @db.Date
+  isCurrent     Boolean          @default(true)
+  companyId     String
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@map("employee_salaries")
+}
+
+model PFConfig {
+  id                 String   @id @default(cuid())
+  employeeRate       Decimal  @default(12) @db.Decimal(5, 2) // 12%
+  employerEpfRate    Decimal  @default(3.67) @db.Decimal(5, 2) // 3.67%
+  employerEpsRate    Decimal  @default(8.33) @db.Decimal(5, 2) // 8.33%
+  employerEdliRate   Decimal  @default(0.5) @db.Decimal(5, 2)
+  adminChargeRate    Decimal  @default(0.5) @db.Decimal(5, 2)
+  wageCeiling        Decimal  @default(15000) @db.Decimal(15, 2)
+  vpfEnabled         Boolean  @default(false)
+  excludedComponents Json? // string[] of component codes excluded from PF wage
+  companyId          String   @unique
+  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("pf_configs")
+}
+
+model ESIConfig {
+  id            String   @id @default(cuid())
+  employeeRate  Decimal  @default(0.75) @db.Decimal(5, 2)
+  employerRate  Decimal  @default(3.25) @db.Decimal(5, 2)
+  wageCeiling   Decimal  @default(21000) @db.Decimal(15, 2)
+  excludedWages Json? // string[]
+  companyId     String   @unique
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("esi_configs")
+}
+
+model PTConfig {
+  id                 String   @id @default(cuid())
+  state              String
+  slabs              Json // Array of { fromAmount, toAmount, taxAmount }
+  frequency          String   @default("MONTHLY") // MONTHLY, SEMI_ANNUAL
+  registrationNumber String?
+  companyId          String
+  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([companyId, state])
+  @@map("pt_configs")
+}
+
+model GratuityConfig {
+  id              String   @id @default(cuid())
+  formula         String   @default("(lastBasic * 15 * yearsOfService) / 26")
+  baseSalary      String   @default("Basic") // "Basic" or "Basic + DA"
+  maxAmount       Decimal  @default(2000000) @db.Decimal(15, 2) // ₹20L
+  provisionMethod String   @default("MONTHLY") // MONTHLY, ACTUAL_AT_EXIT
+  trustExists     Boolean  @default(false)
+  companyId       String   @unique
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("gratuity_configs")
+}
+
+model BonusConfig {
+  id                String   @id @default(cuid())
+  wageCeiling       Decimal  @default(7000) @db.Decimal(15, 2)
+  minBonusPercent   Decimal  @default(8.33) @db.Decimal(5, 2)
+  maxBonusPercent   Decimal  @default(20) @db.Decimal(5, 2)
+  eligibilityDays   Int      @default(30) // min working days to qualify
+  calculationPeriod String   @default("APR_MAR") // APR_MAR or JAN_DEC
+  companyId         String   @unique
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("bonus_configs")
+}
+
+model LWFConfig {
+  id             String   @id @default(cuid())
+  state          String
+  employeeAmount Decimal  @db.Decimal(10, 2)
+  employerAmount Decimal  @db.Decimal(10, 2)
+  frequency      String   @default("MONTHLY") // MONTHLY, SEMI_ANNUAL, ANNUAL
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([companyId, state])
+  @@map("lwf_configs")
+}
+
+model BankConfig {
+  id                 String   @id @default(cuid())
+  bankName           String
+  accountNumber      String
+  ifscCode           String
+  branchName         String?
+  paymentMode        String   @default("NEFT") // NEFT, RTGS, IMPS
+  fileFormat         String? // Bank-specific file format identifier
+  autoPushOnApproval Boolean  @default(false)
+  companyId          String   @unique
+  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("bank_configs")
+}
+
+model LoanPolicy {
+  id                    String   @id @default(cuid())
+  name                  String
+  code                  String
+  loanType              String   @default("PERSONAL") // PERSONAL, SALARY_ADVANCE, EMERGENCY, EDUCATION, TRAVEL_ADVANCE, VEHICLE
+  maxAmount             Decimal? @db.Decimal(15, 2)
+  maxTenureMonths       Int?
+  interestRate          Decimal  @default(0) @db.Decimal(5, 2)
+  emiCapPercent         Decimal? @db.Decimal(5, 2) // max % of monthly salary
+  eligibilityTenureDays Int? // min tenure to be eligible
+  eligibleTypeIds       Json? // string[] of employeeTypeIds
+  isActive              Boolean  @default(true)
+  companyId             String
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  loans LoanRecord[]
+
+  @@unique([companyId, code])
+  @@map("loan_policies")
+}
+
+model LoanRecord {
+  id           String     @id @default(cuid())
+  employeeId   String
+  employee     Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  policyId          String
+  policy            LoanPolicy @relation(fields: [policyId], references: [id])
+  loanType          String     @default("PERSONAL")
+  amount            Decimal    @db.Decimal(15, 2)
+  tenure       Int // months
+  emiAmount    Decimal    @db.Decimal(15, 2)
+  interestRate Decimal    @db.Decimal(5, 2)
+  outstanding  Decimal    @db.Decimal(15, 2)
+  disbursedAt  DateTime?
+  status            LoanStatus @default(PENDING)
+  approvedBy        String?
+  isSettled         Boolean    @default(false)
+  settlementClaimId String?
+  companyId         String
+  company           Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@map("loan_records")
+}
+
+model TaxConfig {
+  id                  String    @id @default(cuid())
+  defaultRegime       TaxRegime @default(NEW)
+  oldRegimeSlabs      Json // Array of { fromAmount, toAmount, rate }
+  newRegimeSlabs      Json // Array of { fromAmount, toAmount, rate }
+  declarationDeadline DateTime? @db.Date
+  surchargeRates      Json? // { threshold, rate }[]
+  cessRate            Decimal   @default(4) @db.Decimal(5, 2) // 4% health & education cess
+  companyId           String    @unique
+  company             Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("tax_configs")
+}
+
+enum ComponentType {
+  EARNING
+  DEDUCTION
+  EMPLOYER_CONTRIBUTION
+}
+
+enum CalculationMethod {
+  FIXED
+  PERCENT_OF_BASIC
+  PERCENT_OF_GROSS
+  FORMULA
+}
+
+enum TaxTreatment {
+  FULLY_TAXABLE
+  PARTIALLY_EXEMPT
+  FULLY_EXEMPT
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  ACTIVE
+  CLOSED
+  REJECTED
+}
+
+enum TaxRegime {
+  OLD
+  NEW
+}

@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { MaritalStatus, Prisma } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
@@ -1060,8 +1060,30 @@ export class ESSService {
         }
       }
 
-      // TODO: Queue actual notification delivery (email, SMS, push, etc.)
-      console.log(`[Notification] Event: ${event}, Channel: ${rule.channel}, Recipient: ${rule.recipientRole}, Subject: ${subject}, Body: ${body}`);
+      // Deliver notification based on channel
+      try {
+        if (rule.channel === 'EMAIL') {
+          const recipientEmails = await this.resolveRecipientEmails(companyId, rule.recipientRole, data);
+          if (recipientEmails.length > 0) {
+            const { sendEmail } = await import('@/infrastructure/email/email.service');
+            for (const email of recipientEmails) {
+              await sendEmail(
+                email,
+                subject,
+                `<div style="font-family:sans-serif;padding:20px;max-width:600px;margin:0 auto">${body.replace(/\n/g, '<br>')}</div>`,
+                body
+              );
+            }
+            logger.info(`[Notification:EMAIL] ${event} → ${recipientEmails.length} recipient(s)`);
+          }
+        } else if (rule.channel === 'IN_APP') {
+          logger.info(`[Notification:IN_APP] ${event} → ${rule.recipientRole}: ${subject}`);
+        } else {
+          logger.info(`[Notification:${rule.channel}] ${event} → ${rule.recipientRole}: ${subject} (channel not yet implemented)`);
+        }
+      } catch (err) {
+        logger.error(`[Notification] Failed to deliver ${rule.channel} notification for ${event}:`, err);
+      }
     }
   }
 
@@ -2627,6 +2649,694 @@ export class ESSService {
     }
 
     return trend;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Profile Edit (ESS self-service)
+  // ────────────────────────────────────────────────────────────────────
+
+  async updateMyProfile(userId: string, companyId: string, data: {
+    personalMobile?: string | undefined;
+    alternativeMobile?: string | undefined;
+    personalEmail?: string | undefined;
+    currentAddress?: any;
+    permanentAddress?: any;
+    emergencyContactName?: string | undefined;
+    emergencyContactRelation?: string | undefined;
+    emergencyContactMobile?: string | undefined;
+    maritalStatus?: 'SINGLE' | 'MARRIED' | 'DIVORCED' | 'WIDOWED' | undefined;
+    bloodGroup?: string | undefined;
+  }) {
+    // Resolve employee from user
+    const user = await platformPrisma.user.findUnique({
+      where: { id: userId },
+      select: { employeeId: true, email: true },
+    });
+
+    let employeeId = user?.employeeId ?? null;
+
+    // Fallback: match by email
+    if (!employeeId && user?.email) {
+      const employee = await platformPrisma.employee.findFirst({
+        where: {
+          companyId,
+          status: { not: 'EXITED' },
+          OR: [
+            { officialEmail: user.email },
+            { personalEmail: user.email },
+          ],
+        },
+        select: { id: true },
+      });
+      if (employee) {
+        employeeId = employee.id;
+        await platformPrisma.user.update({
+          where: { id: userId },
+          data: { employeeId: employee.id },
+        });
+      }
+    }
+
+    if (!employeeId) {
+      throw ApiError.badRequest('No linked employee profile');
+    }
+
+    // Verify employee belongs to this company
+    const existing = await platformPrisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { id: true, companyId: true },
+    });
+    if (!existing || existing.companyId !== companyId) {
+      throw ApiError.notFound('Employee not found');
+    }
+
+    const updated = await platformPrisma.employee.update({
+      where: { id: employeeId },
+      data: {
+        ...(data.personalMobile !== undefined && { personalMobile: data.personalMobile }),
+        ...(data.alternativeMobile !== undefined && { alternativeMobile: data.alternativeMobile }),
+        ...(data.personalEmail !== undefined && { personalEmail: data.personalEmail }),
+        ...(data.currentAddress !== undefined && { currentAddress: data.currentAddress ?? Prisma.JsonNull }),
+        ...(data.permanentAddress !== undefined && { permanentAddress: data.permanentAddress ?? Prisma.JsonNull }),
+        ...(data.emergencyContactName !== undefined && { emergencyContactName: data.emergencyContactName }),
+        ...(data.emergencyContactRelation !== undefined && { emergencyContactRelation: data.emergencyContactRelation }),
+        ...(data.emergencyContactMobile !== undefined && { emergencyContactMobile: data.emergencyContactMobile }),
+        ...(data.maritalStatus !== undefined && { maritalStatus: data.maritalStatus as MaritalStatus }),
+        ...(data.bloodGroup !== undefined && { bloodGroup: data.bloodGroup }),
+      },
+      select: {
+        id: true,
+        employeeId: true,
+        firstName: true,
+        lastName: true,
+        personalMobile: true,
+        alternativeMobile: true,
+        personalEmail: true,
+        currentAddress: true,
+        permanentAddress: true,
+        emergencyContactName: true,
+        emergencyContactRelation: true,
+        emergencyContactMobile: true,
+        maritalStatus: true,
+        bloodGroup: true,
+      },
+    });
+
+    return updated;
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Payslip PDF Download
+  // ────────────────────────────────────────────────────────────────────
+
+  async generatePayslipPdf(userId: string, companyId: string, payslipId: string): Promise<Buffer> {
+    // Resolve employee from user
+    const user = await platformPrisma.user.findUnique({
+      where: { id: userId },
+      select: { employeeId: true, email: true },
+    });
+
+    let employeeId = user?.employeeId ?? null;
+
+    if (!employeeId && user?.email) {
+      const employee = await platformPrisma.employee.findFirst({
+        where: {
+          companyId,
+          status: { not: 'EXITED' },
+          OR: [
+            { officialEmail: user.email },
+            { personalEmail: user.email },
+          ],
+        },
+        select: { id: true },
+      });
+      if (employee) employeeId = employee.id;
+    }
+
+    if (!employeeId) {
+      throw ApiError.badRequest('No linked employee profile');
+    }
+
+    // Fetch payslip with employee & company details
+    const payslip = await platformPrisma.payslip.findUnique({
+      where: { id: payslipId },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+            panNumber: true,
+            uan: true,
+            bankName: true,
+            bankAccountNumber: true,
+            department: { select: { name: true } },
+            designation: { select: { name: true } },
+          },
+        },
+        company: {
+          select: { name: true, displayName: true },
+        },
+      },
+    });
+
+    if (!payslip || payslip.companyId !== companyId || payslip.employeeId !== employeeId) {
+      throw ApiError.notFound('Payslip not found');
+    }
+
+    // Import PDFKit dynamically to keep top-level imports lean
+    const PDFDocument = (await import('pdfkit')).default;
+    const { PassThrough } = await import('stream');
+
+    const formatCurrency = (amount: number): string =>
+      new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
+
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    const monthLabel = monthNames[payslip.month - 1] ?? String(payslip.month);
+
+    const companyName = payslip.company?.displayName ?? payslip.company?.name ?? 'Company';
+    const empName = `${payslip.employee.firstName} ${payslip.employee.lastName}`.trim();
+    const empId = payslip.employee.employeeId ?? '—';
+    const deptName = payslip.employee.department?.name ?? '—';
+    const desgName = payslip.employee.designation?.name ?? '—';
+    const panNumber = payslip.employee.panNumber ?? '—';
+    const uanNumber = payslip.employee.uan ?? '—';
+    const bankInfo = payslip.employee.bankName
+      ? `${payslip.employee.bankName} (****${bankAccountLast4Only(payslip.employee.bankAccountNumber) ?? ''})`
+      : '—';
+
+    const earnings: Array<{ label: string; amount: number }> =
+      Array.isArray(payslip.earnings) ? (payslip.earnings as any[]) : [];
+    const deductions: Array<{ label: string; amount: number }> =
+      Array.isArray(payslip.deductions) ? (payslip.deductions as any[]) : [];
+
+    const grossEarnings = typeof payslip.grossEarnings === 'number'
+      ? payslip.grossEarnings
+      : earnings.reduce((sum, e) => sum + (e.amount ?? 0), 0);
+    const totalDeductions = typeof payslip.totalDeductions === 'number'
+      ? payslip.totalDeductions
+      : deductions.reduce((sum, d) => sum + (d.amount ?? 0), 0);
+    const netPay = typeof payslip.netPay === 'number'
+      ? payslip.netPay
+      : grossEarnings - totalDeductions;
+
+    // ── Build PDF ────────────────────────────────────────────────────
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const stream = new PassThrough();
+    doc.pipe(stream);
+
+    // Header
+    doc.font('Helvetica-Bold').fontSize(20).text(companyName, { align: 'center' });
+    doc.moveDown(0.3);
+    doc.font('Helvetica').fontSize(14).text('Payslip', { align: 'center' });
+    doc.font('Helvetica').fontSize(11).text(`${monthLabel} ${payslip.year}`, { align: 'center' });
+    doc.moveDown(1);
+
+    // Divider
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.5);
+
+    // Employee Info
+    const infoStartY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Employee Name:', 50, infoStartY);
+    doc.font('Helvetica').text(empName, 170, infoStartY);
+
+    doc.font('Helvetica-Bold').text('Employee ID:', 50, infoStartY + 18);
+    doc.font('Helvetica').text(empId, 170, infoStartY + 18);
+
+    doc.font('Helvetica-Bold').text('Department:', 50, infoStartY + 36);
+    doc.font('Helvetica').text(deptName, 170, infoStartY + 36);
+
+    doc.font('Helvetica-Bold').text('Designation:', 300, infoStartY);
+    doc.font('Helvetica').text(desgName, 400, infoStartY);
+
+    doc.font('Helvetica-Bold').text('PAN:', 300, infoStartY + 18);
+    doc.font('Helvetica').text(panNumber, 400, infoStartY + 18);
+
+    doc.font('Helvetica-Bold').text('UAN:', 300, infoStartY + 36);
+    doc.font('Helvetica').text(uanNumber, 400, infoStartY + 36);
+
+    doc.font('Helvetica-Bold').text('Bank:', 50, infoStartY + 54);
+    doc.font('Helvetica').text(bankInfo, 170, infoStartY + 54);
+
+    doc.y = infoStartY + 80;
+    doc.moveDown(0.5);
+
+    // Divider
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.5);
+
+    // Two-column header
+    const colLeftX = 50;
+    const colRightX = 300;
+    const colWidth = 245;
+
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.text('Earnings', colLeftX, doc.y);
+    doc.text('Deductions', colRightX, doc.y - doc.currentLineHeight());
+    doc.moveDown(0.5);
+
+    // Divider
+    const tableTopY = doc.y;
+    doc.moveTo(50, tableTopY).lineTo(545, tableTopY).stroke();
+    doc.moveDown(0.3);
+
+    // Table rows
+    const maxRows = Math.max(earnings.length, deductions.length);
+    let rowY = doc.y;
+    doc.font('Helvetica').fontSize(9);
+
+    for (let i = 0; i < maxRows; i++) {
+      if (rowY > 700) {
+        doc.addPage();
+        rowY = 50;
+      }
+
+      if (earnings[i]) {
+        doc.text(earnings[i]!.label ?? '—', colLeftX, rowY, { width: 150 });
+        doc.text(formatCurrency(earnings[i]!.amount ?? 0), colLeftX + 150, rowY, { width: 95, align: 'right' });
+      }
+      if (deductions[i]) {
+        doc.text(deductions[i]!.label ?? '—', colRightX, rowY, { width: 150 });
+        doc.text(formatCurrency(deductions[i]!.amount ?? 0), colRightX + 150, rowY, { width: 95, align: 'right' });
+      }
+
+      rowY += 16;
+    }
+
+    doc.y = rowY + 8;
+
+    // Totals divider
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.5);
+
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Gross Earnings:', colLeftX, doc.y);
+    doc.text(formatCurrency(grossEarnings), colLeftX + 150, doc.y - doc.currentLineHeight(), { width: 95, align: 'right' });
+
+    doc.text('Total Deductions:', colRightX, doc.y - doc.currentLineHeight());
+    doc.text(formatCurrency(totalDeductions), colRightX + 150, doc.y - doc.currentLineHeight(), { width: 95, align: 'right' });
+    doc.moveDown(1);
+
+    // Net Pay
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').fontSize(13).text(`Net Pay: ${formatCurrency(netPay)}`, { align: 'center' });
+    doc.moveDown(1);
+
+    // Footer
+    doc.font('Helvetica').fontSize(8).fillColor('#999999')
+      .text('This is a computer-generated payslip and does not require a signature.', { align: 'center' });
+
+    doc.end();
+
+    // Collect buffer
+    const chunks: Buffer[] = [];
+    return new Promise<Buffer>((resolve, reject) => {
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
+  }
+  // ────────────────────────────────────────────────────────────────────
+  // Shift Swap Requests
+  // ────────────────────────────────────────────────────────────────────
+
+  private async resolveEmployeeIdFromUser(userId: string): Promise<string | null> {
+    const user = await platformPrisma.user.findUnique({
+      where: { id: userId },
+      select: { employeeId: true },
+    });
+    return user?.employeeId ?? null;
+  }
+
+  async getMyShiftSwaps(companyId: string, userId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) return [];
+
+    return platformPrisma.shiftSwapRequest.findMany({
+      where: { employeeId, companyId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createShiftSwap(companyId: string, userId: string, data: {
+    currentShiftId: string;
+    requestedShiftId: string;
+    swapDate: string;
+    reason: string;
+  }) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    return platformPrisma.shiftSwapRequest.create({
+      data: {
+        employeeId,
+        currentShiftId: data.currentShiftId,
+        requestedShiftId: data.requestedShiftId,
+        swapDate: new Date(data.swapDate),
+        reason: data.reason,
+        status: 'PENDING',
+        companyId,
+      },
+    });
+  }
+
+  async cancelShiftSwap(companyId: string, userId: string, id: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    const request = await platformPrisma.shiftSwapRequest.findUnique({ where: { id } });
+    if (!request || request.employeeId !== employeeId || request.companyId !== companyId) {
+      throw ApiError.notFound('Shift swap request not found');
+    }
+    if (request.status !== 'PENDING') {
+      throw ApiError.badRequest('Only pending requests can be cancelled');
+    }
+
+    return platformPrisma.shiftSwapRequest.update({
+      where: { id },
+      data: { status: 'CANCELLED' },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // WFH Requests
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyWfhRequests(companyId: string, userId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) return [];
+
+    return platformPrisma.wfhRequest.findMany({
+      where: { employeeId, companyId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createWfhRequest(companyId: string, userId: string, data: {
+    fromDate: string;
+    toDate: string;
+    days: number;
+    reason: string;
+  }) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    return platformPrisma.wfhRequest.create({
+      data: {
+        employeeId,
+        fromDate: new Date(data.fromDate),
+        toDate: new Date(data.toDate),
+        days: data.days,
+        reason: data.reason,
+        status: 'PENDING',
+        companyId,
+      },
+    });
+  }
+
+  async cancelWfhRequest(companyId: string, userId: string, id: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    const request = await platformPrisma.wfhRequest.findUnique({ where: { id } });
+    if (!request || request.employeeId !== employeeId || request.companyId !== companyId) {
+      throw ApiError.notFound('WFH request not found');
+    }
+    if (request.status !== 'PENDING') {
+      throw ApiError.badRequest('Only pending requests can be cancelled');
+    }
+
+    return platformPrisma.wfhRequest.update({
+      where: { id },
+      data: { status: 'CANCELLED' },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Employee Documents (Self-Service Upload)
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyDocuments(companyId: string, userId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) return [];
+
+    return platformPrisma.employeeDocument.findMany({
+      where: { employeeId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async uploadMyDocument(companyId: string, userId: string, data: {
+    documentType: string;
+    documentNumber?: string | undefined;
+    expiryDate?: string | undefined;
+    fileUrl: string;
+    fileName: string;
+  }) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    return platformPrisma.employeeDocument.create({
+      data: {
+        employeeId,
+        documentType: data.documentType,
+        documentNumber: data.documentNumber ?? null,
+        expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
+        fileUrl: data.fileUrl,
+        fileName: data.fileName ?? null,
+      },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Policy Documents
+  // ────────────────────────────────────────────────────────────────────
+
+  async getPolicyDocuments(companyId: string) {
+    return platformPrisma.policyDocument.findMany({
+      where: { companyId, isActive: true },
+      orderBy: { publishedAt: 'desc' },
+    });
+  }
+
+  async createPolicyDocument(companyId: string, data: {
+    title: string;
+    category: string;
+    description?: string | undefined;
+    fileUrl: string;
+    fileName: string;
+    version?: string | undefined;
+  }, userId?: string | undefined) {
+    return platformPrisma.policyDocument.create({
+      data: {
+        title: data.title,
+        category: data.category,
+        description: data.description ?? null,
+        fileUrl: data.fileUrl,
+        fileName: data.fileName,
+        version: data.version ?? '1.0',
+        isActive: true,
+        publishedAt: new Date(),
+        companyId,
+        uploadedBy: userId ?? null,
+      },
+    });
+  }
+
+  private async resolveRecipientEmails(companyId: string, recipientRole: string, data: any): Promise<string[]> {
+    if (recipientRole === 'EMPLOYEE' && data?.employeeEmail) {
+      return [data.employeeEmail];
+    }
+
+    if (recipientRole === 'MANAGER' && data?.employeeId) {
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: data.employeeId },
+        select: { reportingManager: { select: { officialEmail: true, personalEmail: true } } },
+      });
+      const mgr = employee?.reportingManager;
+      if (mgr?.officialEmail) return [mgr.officialEmail];
+      if (mgr?.personalEmail) return [mgr.personalEmail];
+      return [];
+    }
+
+    if (recipientRole === 'HR') {
+      const hrUsers = await platformPrisma.user.findMany({
+        where: { companyId, isActive: true },
+        select: { email: true },
+        take: 5,
+      });
+      return hrUsers.map((u) => u.email);
+    }
+
+    if (recipientRole === 'ALL') {
+      const users = await platformPrisma.user.findMany({
+        where: { companyId, isActive: true },
+        select: { email: true },
+        take: 50,
+      });
+      return users.map((u) => u.email);
+    }
+
+    return [];
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Holiday Calendar (ESS)
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyHolidays(companyId: string, year?: number) {
+    const targetYear = year ?? new Date().getFullYear();
+    return platformPrisma.holidayCalendar.findMany({
+      where: { companyId, year: targetYear },
+      orderBy: { date: 'asc' },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Expense Claims (ESS)
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyExpenseClaims(companyId: string, userId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) return [];
+
+    return platformPrisma.expenseClaim.findMany({
+      where: { employeeId, companyId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createMyExpenseClaim(companyId: string, userId: string, data: {
+    title: string;
+    amount: number;
+    category: string;
+    description?: string | undefined;
+    tripDate?: string | undefined;
+    receipts?: Array<{ fileName: string; fileUrl: string }> | undefined;
+  }) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    return platformPrisma.expenseClaim.create({
+      data: {
+        employeeId,
+        title: data.title,
+        amount: data.amount,
+        category: data.category,
+        description: data.description ?? null,
+        tripDate: data.tripDate ? new Date(data.tripDate) : null,
+        receipts: data.receipts ?? Prisma.JsonNull,
+        status: 'DRAFT',
+        companyId,
+      },
+    });
+  }
+
+  async submitMyExpenseClaim(companyId: string, userId: string, claimId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    const claim = await platformPrisma.expenseClaim.findUnique({ where: { id: claimId } });
+    if (!claim || claim.employeeId !== employeeId || claim.companyId !== companyId) {
+      throw ApiError.notFound('Expense claim not found');
+    }
+    if (claim.status !== 'DRAFT') {
+      throw ApiError.badRequest('Only DRAFT claims can be submitted');
+    }
+
+    return platformPrisma.expenseClaim.update({
+      where: { id: claimId },
+      data: { status: 'SUBMITTED' },
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Loan Application (ESS)
+  // ────────────────────────────────────────────────────────────────────
+
+  async getMyLoans(companyId: string, userId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) return [];
+
+    return platformPrisma.loanRecord.findMany({
+      where: { employeeId, companyId },
+      include: {
+        policy: { select: { name: true, code: true, loanType: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getAvailableLoanPolicies(companyId: string) {
+    return platformPrisma.loanPolicy.findMany({
+      where: { companyId, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async applyForLoan(companyId: string, userId: string, data: {
+    policyId: string;
+    amount: number;
+    tenure: number;
+    reason?: string | undefined;
+  }) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    const policy = await platformPrisma.loanPolicy.findUnique({
+      where: { id: data.policyId },
+    });
+    if (!policy || policy.companyId !== companyId || !policy.isActive) {
+      throw ApiError.notFound('Loan policy not found or inactive');
+    }
+
+    // Validate amount against policy max
+    if (policy.maxAmount && data.amount > Number(policy.maxAmount)) {
+      throw ApiError.badRequest(`Amount exceeds maximum allowed (${policy.maxAmount})`);
+    }
+
+    // Validate tenure against policy max
+    if (policy.maxTenureMonths && data.tenure > policy.maxTenureMonths) {
+      throw ApiError.badRequest(`Tenure exceeds maximum allowed (${policy.maxTenureMonths} months)`);
+    }
+
+    // Calculate EMI using standard formula
+    const interestRate = Number(policy.interestRate);
+    const monthlyRate = interestRate / 12 / 100;
+    let emiAmount: number;
+    if (monthlyRate > 0) {
+      const factor = Math.pow(1 + monthlyRate, data.tenure);
+      emiAmount = (data.amount * monthlyRate * factor) / (factor - 1);
+    } else {
+      emiAmount = data.amount / data.tenure;
+    }
+    // Round to 2 decimal places
+    emiAmount = Math.round(emiAmount * 100) / 100;
+
+    return platformPrisma.loanRecord.create({
+      data: {
+        employeeId,
+        policyId: data.policyId,
+        loanType: policy.loanType,
+        amount: data.amount,
+        tenure: data.tenure,
+        emiAmount,
+        interestRate,
+        outstanding: data.amount,
+        status: 'PENDING',
+        companyId,
+      },
+      include: {
+        policy: { select: { name: true, code: true, loanType: true } },
+      },
+    });
   }
 }
 

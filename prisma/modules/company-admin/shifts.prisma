@@ -1,0 +1,75 @@
+// ==========================================
+// COMPANY ADMIN — Shifts
+// ==========================================
+// Models: CompanyShift, ShiftBreak
+// Enums: ShiftType, BreakType
+
+// Shifts (Step 11)
+model CompanyShift {
+  id        String @id @default(cuid())
+  companyId String
+
+  // ── Core Timing ──
+  name       String
+  shiftType  ShiftType @default(DAY)
+  startTime  String
+  endTime    String
+  isCrossDay Boolean   @default(false)
+
+  // ── Policy Overrides (null = inherit from Attendance Rules) ──
+  gracePeriodMinutes        Int?
+  earlyExitToleranceMinutes Int?
+  halfDayThresholdHours     Decimal? @db.Decimal(4, 2)
+  fullDayThresholdHours     Decimal? @db.Decimal(4, 2)
+  maxLateCheckInMinutes     Int?
+  minWorkingHoursForOT      Decimal? @db.Decimal(4, 2)
+
+  // ── Capture Overrides (null = inherit) ──
+  requireSelfie  Boolean?
+  requireGPS     Boolean?
+  allowedSources DeviceType[]
+
+  // ── Behavior ──
+  noShuffle           Boolean @default(false)
+  autoClockOutMinutes Int?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // HRMS Relations
+  employees Employee[]
+  breaks    ShiftBreak[]
+
+  // Attendance Relations
+  attendanceRecords AttendanceRecord[] @relation("AttendanceShift")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("company_shifts")
+}
+
+model ShiftBreak {
+  id      String @id @default(cuid())
+  shiftId String
+
+  name      String
+  startTime String?
+  duration  Int
+  type      BreakType
+  isPaid    Boolean @default(false)
+
+  shift CompanyShift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@map("shift_breaks")
+}
+
+enum ShiftType {
+  DAY
+  NIGHT
+  FLEXIBLE
+}
+
+enum BreakType {
+  FIXED
+  FLEXIBLE
+}

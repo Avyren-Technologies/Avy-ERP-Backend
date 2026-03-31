@@ -1,0 +1,74 @@
+// ==========================================
+// HRMS — Asset Management
+// ==========================================
+// Models: AssetCategory, Asset, AssetAssignment
+// Enums: AssetCondition, AssetStatus
+
+model AssetCategory {
+  id               String   @id @default(cuid())
+  name             String
+  depreciationRate Decimal? @db.Decimal(5, 2)
+  returnChecklist  Json? // string[]
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assets           Asset[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@map("asset_categories")
+}
+
+model Asset {
+  id            String            @id @default(cuid())
+  name          String
+  categoryId    String
+  category      AssetCategory     @relation(fields: [categoryId], references: [id])
+  serialNumber  String?
+  purchaseDate  DateTime?         @db.Date
+  purchaseValue Decimal?          @db.Decimal(15, 2)
+  condition     AssetCondition    @default(NEW)
+  status        AssetStatus       @default(IN_STOCK)
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignments   AssetAssignment[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@map("assets")
+}
+
+model AssetAssignment {
+  id              String          @id @default(cuid())
+  assetId         String
+  asset           Asset           @relation(fields: [assetId], references: [id])
+  employeeId      String
+  employee        Employee        @relation(fields: [employeeId], references: [id])
+  issueDate       DateTime        @db.Date
+  returnDate      DateTime?       @db.Date
+  returnCondition AssetCondition?
+  notes           String?
+  companyId       String
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@map("asset_assignments")
+}
+
+enum AssetCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+  DAMAGED
+  LOST
+}
+
+enum AssetStatus {
+  IN_STOCK
+  ASSIGNED
+  UNDER_REPAIR
+  PENDING_RETURN
+  RETIRED
+}

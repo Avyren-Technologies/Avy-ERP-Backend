@@ -70,6 +70,8 @@ router.get('/ess/my-attendance', requireESSFeature('attendanceView'), requirePer
 router.get('/ess/my-declarations', requireESSFeature('itDeclaration'), requirePermissions(['hr:read', 'ess:it-declaration']), controller.getMyDeclarations);
 router.post('/ess/apply-leave', requireESSFeature('leaveApplication'), requirePermissions(['hr:create', 'ess:apply-leave']), controller.applyLeave);
 router.post('/ess/regularize-attendance', requireESSFeature('attendanceRegularization'), requirePermissions(['hr:create', 'ess:regularize-attendance']), controller.regularizeAttendance);
+router.patch('/ess/my-profile', requireESSFeature('profileUpdate'), requirePermissions(['hr:update', 'ess:view-profile']), controller.updateMyProfile);
+router.get('/ess/my-payslips/:id/pdf', requireESSFeature('downloadPayslips'), requirePermissions(['hr:read', 'ess:view-payslips']), controller.downloadPayslipPdf);
 
 // ── ESS: Goals, Grievances, Training, Assets, Form 16 (feature gated) ──
 router.get('/ess/my-goals', requireESSFeature('performanceGoals'), requirePermissions(['hr:read', 'ess:view-goals']), controller.getMyGoals);
@@ -78,6 +80,37 @@ router.post('/ess/file-grievance', requireESSFeature('grievanceSubmission'), req
 router.get('/ess/my-training', requireESSFeature('trainingEnrollment'), requirePermissions(['hr:read', 'ess:enroll-training']), controller.getMyTraining);
 router.get('/ess/my-assets', requireESSFeature('assetView'), requirePermissions(['hr:read', 'ess:view-assets']), controller.getMyAssets);
 router.get('/ess/my-form16', requireESSFeature('downloadForm16'), requirePermissions(['hr:read', 'ess:download-form16']), controller.getMyForm16);
+
+// ── Shift Swap (ESS feature gated) ──────────────────────────────────
+router.get('/ess/my-shift-swaps', requireESSFeature('shiftSwapRequest'), requirePermissions(['hr:read', 'ess:swap-shift']), controller.getMyShiftSwaps);
+router.post('/ess/shift-swap', requireESSFeature('shiftSwapRequest'), requirePermissions(['hr:create', 'ess:swap-shift']), controller.createShiftSwap);
+router.patch('/ess/shift-swap/:id/cancel', requireESSFeature('shiftSwapRequest'), requirePermissions(['hr:update', 'ess:swap-shift']), controller.cancelShiftSwap);
+
+// ── WFH Requests (ESS feature gated) ───────────────────────────────
+router.get('/ess/my-wfh-requests', requireESSFeature('wfhRequest'), requirePermissions(['hr:read', 'ess:request-wfh']), controller.getMyWfhRequests);
+router.post('/ess/wfh-request', requireESSFeature('wfhRequest'), requirePermissions(['hr:create', 'ess:request-wfh']), controller.createWfhRequest);
+router.patch('/ess/wfh-request/:id/cancel', requireESSFeature('wfhRequest'), requirePermissions(['hr:update', 'ess:request-wfh']), controller.cancelWfhRequest);
+
+// ── Employee Documents (ESS feature gated) ──────────────────────────
+router.get('/ess/my-documents', requireESSFeature('documentUpload'), requirePermissions(['hr:read', 'ess:upload-document']), controller.getMyDocuments);
+router.post('/ess/my-documents', requireESSFeature('documentUpload'), requirePermissions(['hr:create', 'ess:upload-document']), controller.uploadMyDocument);
+
+// ── Policy Documents (ESS feature gated + admin create) ─────────────
+router.get('/ess/policy-documents', requireESSFeature('policyDocuments'), requirePermissions(['hr:read', 'ess:view-policies']), controller.getPolicyDocuments);
+router.post('/policy-documents', requirePermissions(['hr:create']), controller.createPolicyDocument);
+
+// ── Holiday Calendar (ESS feature gated) ─────────────────────────────
+router.get('/ess/my-holidays', requireESSFeature('holidayCalendar'), requirePermissions(['hr:read', 'ess:view-holidays']), controller.getMyHolidays);
+
+// ── Expense Claims (ESS feature gated) ──────────────────────────────
+router.get('/ess/my-expense-claims', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:read', 'ess:claim-expense']), controller.getMyExpenseClaims);
+router.post('/ess/my-expense-claims', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:create', 'ess:claim-expense']), controller.createMyExpenseClaim);
+router.patch('/ess/my-expense-claims/:id/submit', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:update', 'ess:claim-expense']), controller.submitMyExpenseClaim);
+
+// ── Loan Application (ESS feature gated) ────────────────────────────
+router.get('/ess/my-loans', requireESSFeature('loanApplication'), requirePermissions(['hr:read', 'ess:apply-loan']), controller.getMyLoans);
+router.get('/ess/loan-policies', requireESSFeature('loanApplication'), requirePermissions(['hr:read', 'ess:apply-loan']), controller.getAvailableLoanPolicies);
+router.post('/ess/apply-loan', requireESSFeature('loanApplication'), requirePermissions(['hr:create', 'ess:apply-loan']), controller.applyForLoan);
 
 // ── MSS Manager Self-Service (feature gated) ────────────────────────
 router.get('/mss/team-members', requireESSFeature('mssViewTeam'), requirePermissions(['hr:read']), controller.getTeamMembers);
