@@ -13,8 +13,12 @@ import { transferRoutes } from './transfer/transfer.routes';
 import { onboardingRoutes } from './onboarding/onboarding.routes';
 import { chatbotRoutes } from './chatbot/chatbot.routes';
 import { retentionRoutes } from './retention/retention.routes';
+import { analyticsRoutes } from './analytics/analytics.routes';
 
 const router = Router();
+
+// HR Analytics (dashboards, drilldowns, exports, alerts)
+router.use('/', analyticsRoutes);
 
 // ESS config, approval workflows, notifications, IT declarations, ESS/MSS self-service
 // MUST be mounted BEFORE attendance/employee routes to prevent /attendance/:id from catching /attendance/my-status

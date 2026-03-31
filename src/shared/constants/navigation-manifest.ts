@@ -70,6 +70,18 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'ca-invoices', label: 'Invoices', icon: 'file-text', requiredPerm: 'company:read', path: '/app/company/billing/invoices', module: null, group: 'Billing', roleScope: 'company', sortOrder: 431 },
   { id: 'ca-payments', label: 'Payments', icon: 'credit-card', requiredPerm: 'company:read', path: '/app/company/billing/payments', module: null, group: 'Billing', roleScope: 'company', sortOrder: 432 },
 
+  // ═══════ HR ANALYTICS ═══════
+  { id: 'hr-analytics', label: 'Analytics Hub', icon: 'bar-chart-2', requiredPerm: 'hr:read', path: '/app/company/hr/analytics', module: 'hr', group: 'HR Analytics', moduleSeparator: 'HR Analytics', roleScope: 'company', sortOrder: 450 },
+  { id: 'hr-analytics-executive', label: 'Executive Overview', icon: 'layout-dashboard', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/executive', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 451 },
+  { id: 'hr-analytics-workforce', label: 'Workforce Analytics', icon: 'users', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/workforce', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 452 },
+  { id: 'hr-analytics-attendance', label: 'Attendance & Productivity', icon: 'clock', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/attendance', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 453 },
+  { id: 'hr-analytics-leave', label: 'Leave & Availability', icon: 'calendar-off', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/leave', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 454 },
+  { id: 'hr-analytics-payroll', label: 'Payroll & Cost Intelligence', icon: 'indian-rupee', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/payroll', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 455 },
+  { id: 'hr-analytics-compliance', label: 'Compliance & Risk', icon: 'shield-check', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/compliance', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 456 },
+  { id: 'hr-analytics-performance', label: 'Performance & Talent', icon: 'target', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/performance', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 457 },
+  { id: 'hr-analytics-recruitment', label: 'Recruitment Intelligence', icon: 'user-plus', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/recruitment', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 458 },
+  { id: 'hr-analytics-attrition', label: 'Attrition & Retention', icon: 'user-minus', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/attrition', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 459 },
+
   // ═══════ HRMS ═══════
   { id: 'hr-departments', label: 'Departments', icon: 'building', requiredPerm: 'hr:read', path: '/app/company/hr/departments', module: 'hr', group: 'Org Structure', moduleSeparator: 'HRMS', roleScope: 'company', sortOrder: 500 },
   { id: 'hr-designations', label: 'Designations', icon: 'briefcase', requiredPerm: 'hr:read', path: '/app/company/hr/designations', module: 'hr', group: 'Org Structure', roleScope: 'company', sortOrder: 501 },
