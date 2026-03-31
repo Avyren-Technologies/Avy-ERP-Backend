@@ -1,4 +1,4 @@
-import type { DashboardName } from '@/modules/hr/analytics/analytics.types';
+import type { DashboardName } from '../analytics.types';
 
 export interface AlertRuleDefinition {
   type: string;

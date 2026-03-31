@@ -209,16 +209,16 @@ export async function generateComplianceSummaryReport(
       { header: 'ESI IP', key: 'esi', width: 12, conditionalFormat: 'status' },
       { header: 'Missing Documents', key: 'missingCount', width: 18, format: 'number' },
     ],
-    rows: docStatusRows.sort((a, b) => b.missingCount - a.missingCount),
+    rows: docStatusRows.sort((a: any, b: any) => b.missingCount - a.missingCount),
     totalsRow: {
       empId: 'Total',
       name: `${docStatusRows.length} employees with gaps`,
       department: '',
-      pan: `${docStatusRows.filter((r) => r.pan === 'Missing').length} missing`,
-      aadhaar: `${docStatusRows.filter((r) => r.aadhaar === 'Missing').length} missing`,
-      uan: `${docStatusRows.filter((r) => r.uan === 'Missing').length} missing`,
-      esi: `${docStatusRows.filter((r) => r.esi === 'Missing').length} missing`,
-      missingCount: docStatusRows.reduce((s, r) => s + r.missingCount, 0),
+      pan: `${docStatusRows.filter((r: any) => r.pan === 'Missing').length} missing`,
+      aadhaar: `${docStatusRows.filter((r: any) => r.aadhaar === 'Missing').length} missing`,
+      uan: `${docStatusRows.filter((r: any) => r.uan === 'Missing').length} missing`,
+      esi: `${docStatusRows.filter((r: any) => r.esi === 'Missing').length} missing`,
+      missingCount: docStatusRows.reduce((s: number, r: any) => s + r.missingCount, 0),
     },
   };
 

@@ -1,4 +1,4 @@
-import { ApiError } from '@/shared/errors';
+import { ApiError } from '../../../../shared/errors';
 import type { DataScope, DashboardName, DashboardResponse } from '../analytics.types';
 
 // ─── Dashboard Access Maps ───

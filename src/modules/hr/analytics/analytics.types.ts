@@ -1,16 +1,16 @@
 // ─── Filter Types ───
 export interface RawDashboardFilters {
-  dateFrom?: string;
-  dateTo?: string;
-  departmentId?: string;
-  locationId?: string;
-  gradeId?: string;
-  employeeTypeId?: string;
-  page?: number;
-  limit?: number;
-  sortBy?: string;
-  sortOrder?: string;
-  search?: string;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
+  departmentId?: string | undefined;
+  locationId?: string | undefined;
+  gradeId?: string | undefined;
+  employeeTypeId?: string | undefined;
+  page?: number | undefined;
+  limit?: number | undefined;
+  sortBy?: string | undefined;
+  sortOrder?: string | undefined;
+  search?: string | undefined;
 }
 
 export interface DashboardFilters {

@@ -1,5 +1,5 @@
-import { platformPrisma, createTenantPrisma } from '@/config/database';
-import { logger } from '@/config/logger';
+import { platformPrisma, createTenantPrisma } from '../../../../config/database';
+import { logger } from '../../../../config/logger';
 import type {
   DashboardFilters,
   DashboardName,
@@ -599,13 +599,13 @@ class DashboardOrchestratorService {
   private extendFiltersForMonths(filters: DashboardFilters, months: number): DashboardFilters {
     const dateFrom = new Date(filters.dateTo);
     dateFrom.setMonth(dateFrom.getMonth() - months);
-    return { ...filters, dateFrom: dateFrom.toISOString().split('T')[0] };
+    return { ...filters, dateFrom: dateFrom.toISOString().split('T')[0] ?? '' };
   }
 
   private extendFiltersForDays(filters: DashboardFilters, days: number): DashboardFilters {
     const dateFrom = new Date(filters.dateTo);
     dateFrom.setDate(dateFrom.getDate() - days);
-    return { ...filters, dateFrom: dateFrom.toISOString().split('T')[0] };
+    return { ...filters, dateFrom: dateFrom.toISOString().split('T')[0] ?? '' };
   }
 }
 

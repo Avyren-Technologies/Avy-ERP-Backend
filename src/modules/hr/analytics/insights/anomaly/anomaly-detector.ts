@@ -1,4 +1,4 @@
-import type { AnomalyResult } from '@/modules/hr/analytics/analytics.types';
+import type { AnomalyResult } from '../../analytics.types';
 import { ANOMALY_THRESHOLDS, MIN_DATA_POINTS } from './thresholds';
 
 /**

@@ -409,9 +409,10 @@ export async function generateTDSSummaryReport(
     else quarter = `Q4 (Jan-Mar ${year})`;
 
     if (!quarterMap[quarter]) quarterMap[quarter] = { count: 0, grossSalary: 0, tds: 0 };
-    quarterMap[quarter].count++;
-    quarterMap[quarter].grossSalary += dec(entry.grossEarnings);
-    quarterMap[quarter].tds += entry.tdsAmount;
+    const qEntry = quarterMap[quarter]!;
+    qEntry.count++;
+    qEntry.grossSalary += dec(entry.grossEarnings);
+    qEntry.tds += entry.tdsAmount;
   }
 
   const quarterlySheet: ReportSheet = {
@@ -526,10 +527,10 @@ export async function generateGratuityLiabilityReport(
     };
   });
 
-  const eligible = empData.filter((e) => e.isEligible);
-  const approaching = empData.filter((e) => e.isApproaching);
-  const totalLiability = eligible.reduce((s, e) => s + e.gratuityAmount, 0);
-  const potentialLiability = approaching.reduce((s, e) => s + e.potentialGratuity, 0);
+  const eligible = empData.filter((e: any) => e.isEligible);
+  const approaching = empData.filter((e: any) => e.isApproaching);
+  const totalLiability = eligible.reduce((s: number, e: any) => s + e.gratuityAmount, 0);
+  const potentialLiability = approaching.reduce((s: number, e: any) => s + e.potentialGratuity, 0);
 
   // ── Summary Sheet ──
   const summarySheet: ReportSheet = {
@@ -564,8 +565,8 @@ export async function generateGratuityLiabilityReport(
       { header: 'Gratuity Amount', key: 'gratuityAmount', width: 16, format: 'currency' },
     ],
     rows: empData
-      .sort((a, b) => b.yearsOfService - a.yearsOfService)
-      .map((e) => ({
+      .sort((a: any, b: any) => b.yearsOfService - a.yearsOfService)
+      .map((e: any) => ({
         empId: e.empId,
         name: e.name,
         department: e.department,

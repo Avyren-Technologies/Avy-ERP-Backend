@@ -1,4 +1,4 @@
-import type { DashboardFilters, RawDashboardFilters } from '@/modules/hr/analytics/analytics.types';
+import type { DashboardFilters, RawDashboardFilters } from './analytics.types';
 
 function startOfMonth(timezone: string): string {
   const formatter = new Intl.DateTimeFormat('en-CA', {

@@ -1,7 +1,12 @@
-import { platformPrisma, createTenantPrisma } from '@/config/database';
-import { logger } from '@/config/logger';
+import { platformPrisma, createTenantPrisma } from '../../../../config/database';
+import { logger } from '../../../../config/logger';
 import cron from 'node-cron';
 import { PrismaClient, Prisma } from '@prisma/client';
+
+/** Cast an array/object to Prisma JSON input. */
+function toJson<T>(value: T): Prisma.InputJsonValue {
+  return value as unknown as Prisma.InputJsonValue;
+}
 
 // ─── Helper Types ───
 
@@ -233,13 +238,13 @@ class AnalyticsCronService {
             leaversCount,
             transfersCount,
             promotionsCount,
-            byDepartment,
-            byLocation,
-            byGrade,
-            byEmployeeType,
-            byGender,
-            byAgeBand,
-            byTenureBand,
+            byDepartment: toJson(byDepartment),
+            byLocation: toJson(byLocation),
+            byGrade: toJson(byGrade),
+            byEmployeeType: toJson(byEmployeeType),
+            byGender: toJson(byGender),
+            byAgeBand: toJson(byAgeBand),
+            byTenureBand: toJson(byTenureBand),
             avgSpanOfControl,
           },
         });
@@ -396,10 +401,10 @@ class AnalyticsCronService {
             lateThresholdBreaches,
             regularizationCount,
             missedPunchCount,
-            byDepartment,
-            byLocation,
-            byShift,
-            bySource,
+            byDepartment: toJson(byDepartment),
+            byLocation: toJson(byLocation),
+            byShift: toJson(byShift),
+            bySource: toJson(bySource),
           },
         });
 
@@ -637,17 +642,17 @@ class AnalyticsCronService {
             avgCTC: Math.round(avgCTC * 100) / 100,
             medianCTC: Math.round(medianCTC * 100) / 100,
             exceptionCount,
-            varianceFromLastMonth: varianceFromLastMonth != null ? Math.round(varianceFromLastMonth * 100) / 100 : undefined,
+            ...(varianceFromLastMonth != null ? { varianceFromLastMonth: Math.round(varianceFromLastMonth * 100) / 100 } : {}),
             totalLoanOutstanding: Math.round(totalLoanOutstanding * 100) / 100,
             activeLoanCount,
             totalSalaryHolds,
             totalBonusDisbursed: Math.round(totalBonusDisbursed * 100) / 100,
             totalIncentivesPaid: Math.round(totalIncentivesPaid * 100) / 100,
-            byDepartment,
-            byLocation,
-            byGrade,
-            byCTCBand,
-            byComponent,
+            byDepartment: toJson(byDepartment),
+            byLocation: toJson(byLocation),
+            byGrade: toJson(byGrade),
+            byCTCBand: toJson(byCTCBand),
+            byComponent: toJson(byComponent),
           },
         });
 
@@ -851,16 +856,16 @@ class AnalyticsCronService {
             retirements,
             earlyExits,
             avgTenureAtExit: Math.round(avgTenureAtExit * 100) / 100,
-            exitReasonBreakdown,
-            wouldRecommendAvg: wouldRecommendAvg != null ? Math.round(wouldRecommendAvg * 100) / 100 : undefined,
-            flightRiskEmployees,
+            exitReasonBreakdown: toJson(exitReasonBreakdown),
+            ...(wouldRecommendAvg != null ? { wouldRecommendAvg: Math.round(wouldRecommendAvg * 100) / 100 } : {}),
+            flightRiskEmployees: toJson(flightRiskEmployees),
             pendingFnFCount,
             totalFnFAmount: Math.round(totalFnFAmount * 100) / 100,
             avgFnFProcessingDays: Math.round(avgFnFProcessingDays * 100) / 100,
-            byDepartment,
-            byGrade,
-            byTenureBand,
-            bySeparationType,
+            byDepartment: toJson(byDepartment),
+            byGrade: toJson(byGrade),
+            byTenureBand: toJson(byTenureBand),
+            bySeparationType: toJson(bySeparationType),
           },
         });
 
@@ -1137,7 +1142,7 @@ class AnalyticsCronService {
     // Take the latest version for each date
     const byDate = new Map<string, number>();
     for (const record of dailyRecords) {
-      const dateKey = record.date.toISOString().split('T')[0];
+      const dateKey = record.date.toISOString().split('T')[0] ?? '';
       if (!byDate.has(dateKey)) {
         byDate.set(dateKey, record.totalHeadcount);
       }

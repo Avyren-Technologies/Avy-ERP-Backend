@@ -1,6 +1,7 @@
-import { platformPrisma } from '@/config/database';
-import { logger } from '@/config/logger';
-import type { DashboardName } from '@/modules/hr/analytics/analytics.types';
+import { platformPrisma } from '../../../../config/database';
+import { logger } from '../../../../config/logger';
+import { Prisma } from '@prisma/client';
+import type { DashboardName } from '../analytics.types';
 import { ALERT_RULES } from './alert-rules';
 
 class AlertService {
@@ -47,7 +48,7 @@ class AlertService {
             status: 'ACTIVE',
             title: rule.title(analyticsData),
             description: rule.description(analyticsData),
-            metadata: analyticsData as Record<string, unknown>,
+            metadata: analyticsData as unknown as Prisma.InputJsonValue,
             expiresAt: new Date(Date.now() + rule.expiresInHours * 60 * 60 * 1000),
           },
         });

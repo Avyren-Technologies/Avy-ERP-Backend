@@ -109,13 +109,21 @@ export async function generateAppraisalSummaryReport(
 
   for (const entry of entries) {
     const rating = dec(entry.finalRating);
-    if (rating === 0) ratingBuckets['Not Rated']++;
-    else if (rating >= 4.5) ratingBuckets['Outstanding (4.5-5.0)']++;
-    else if (rating >= 3.5) ratingBuckets['Exceeds Expectations (3.5-4.4)']++;
-    else if (rating >= 2.5) ratingBuckets['Meets Expectations (2.5-3.4)']++;
-    else if (rating >= 1.5) ratingBuckets['Needs Improvement (1.5-2.4)']++;
-    else ratingBuckets['Unsatisfactory (1.0-1.4)']++;
+    if (rating === 0) ratingBuckets['Not Rated']!++;
+    else if (rating >= 4.5) ratingBuckets['Outstanding (4.5-5.0)']!++;
+    else if (rating >= 3.5) ratingBuckets['Exceeds Expectations (3.5-4.4)']!++;
+    else if (rating >= 2.5) ratingBuckets['Meets Expectations (2.5-3.4)']!++;
+    else if (rating >= 1.5) ratingBuckets['Needs Improvement (1.5-2.4)']!++;
+    else ratingBuckets['Unsatisfactory (1.0-1.4)']!++;
   }
+
+  const outstanding = ratingBuckets['Outstanding (4.5-5.0)'] ?? 0;
+  const exceeds = ratingBuckets['Exceeds Expectations (3.5-4.4)'] ?? 0;
+  const meets = ratingBuckets['Meets Expectations (2.5-3.4)'] ?? 0;
+  const needsImprovement = ratingBuckets['Needs Improvement (1.5-2.4)'] ?? 0;
+  const unsatisfactory = ratingBuckets['Unsatisfactory (1.0-1.4)'] ?? 0;
+  const notRated = ratingBuckets['Not Rated'] ?? 0;
+  const total = entries.length;
 
   const bellCurveSheet: ReportSheet = {
     name: 'Bell Curve',
@@ -126,12 +134,12 @@ export async function generateAppraisalSummaryReport(
       { header: 'Ideal % (Bell Curve)', key: 'idealPct', width: 20, format: 'percentage' },
     ],
     rows: [
-      { band: 'Outstanding (4.5-5.0)', count: ratingBuckets['Outstanding (4.5-5.0)'], percentage: entries.length > 0 ? ratingBuckets['Outstanding (4.5-5.0)'] / entries.length : 0, idealPct: 0.1 },
-      { band: 'Exceeds Expectations (3.5-4.4)', count: ratingBuckets['Exceeds Expectations (3.5-4.4)'], percentage: entries.length > 0 ? ratingBuckets['Exceeds Expectations (3.5-4.4)'] / entries.length : 0, idealPct: 0.2 },
-      { band: 'Meets Expectations (2.5-3.4)', count: ratingBuckets['Meets Expectations (2.5-3.4)'], percentage: entries.length > 0 ? ratingBuckets['Meets Expectations (2.5-3.4)'] / entries.length : 0, idealPct: 0.4 },
-      { band: 'Needs Improvement (1.5-2.4)', count: ratingBuckets['Needs Improvement (1.5-2.4)'], percentage: entries.length > 0 ? ratingBuckets['Needs Improvement (1.5-2.4)'] / entries.length : 0, idealPct: 0.2 },
-      { band: 'Unsatisfactory (1.0-1.4)', count: ratingBuckets['Unsatisfactory (1.0-1.4)'], percentage: entries.length > 0 ? ratingBuckets['Unsatisfactory (1.0-1.4)'] / entries.length : 0, idealPct: 0.1 },
-      { band: 'Not Rated', count: ratingBuckets['Not Rated'], percentage: entries.length > 0 ? ratingBuckets['Not Rated'] / entries.length : 0, idealPct: 0 },
+      { band: 'Outstanding (4.5-5.0)', count: outstanding, percentage: total > 0 ? outstanding / total : 0, idealPct: 0.1 },
+      { band: 'Exceeds Expectations (3.5-4.4)', count: exceeds, percentage: total > 0 ? exceeds / total : 0, idealPct: 0.2 },
+      { band: 'Meets Expectations (2.5-3.4)', count: meets, percentage: total > 0 ? meets / total : 0, idealPct: 0.4 },
+      { band: 'Needs Improvement (1.5-2.4)', count: needsImprovement, percentage: total > 0 ? needsImprovement / total : 0, idealPct: 0.2 },
+      { band: 'Unsatisfactory (1.0-1.4)', count: unsatisfactory, percentage: total > 0 ? unsatisfactory / total : 0, idealPct: 0.1 },
+      { band: 'Not Rated', count: notRated, percentage: total > 0 ? notRated / total : 0, idealPct: 0 },
     ],
     totalsRow: {
       band: 'Total',

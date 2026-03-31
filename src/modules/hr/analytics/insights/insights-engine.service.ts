@@ -1,5 +1,5 @@
-import { logger } from '@/config/logger';
-import type { DashboardName, Insight, InsightCategory, InsightRule } from '@/modules/hr/analytics/analytics.types';
+import { logger } from '../../../../config/logger';
+import type { DashboardName, Insight, InsightCategory, InsightRule } from '../analytics.types';
 import { detectAnomaly } from './anomaly/anomaly-detector';
 import { attritionRules } from './rules/attrition.rules';
 import { attendanceRules } from './rules/attendance.rules';

@@ -1,5 +1,5 @@
-import { platformPrisma, createTenantPrisma } from '@/config/database';
-import { logger } from '@/config/logger';
+import { platformPrisma, createTenantPrisma } from '../../../../config/database';
+import { logger } from '../../../../config/logger';
 import type { DashboardFilters, DataScope, PaginatedReport } from '../analytics.types';
 import { analyticsService } from './analytics.service';
 

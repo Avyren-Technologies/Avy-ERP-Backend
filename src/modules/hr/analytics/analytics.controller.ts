@@ -1,10 +1,10 @@
 import { Request, Response } from 'express';
-import { asyncHandler } from '@/middleware/error.middleware';
-import { createSuccessResponse } from '@/shared/utils';
-import { ApiError } from '@/shared/errors';
-import { cacheRedis } from '@/config/redis';
-import { logger } from '@/config/logger';
-import { platformPrisma, createTenantPrisma } from '@/config/database';
+import { asyncHandler } from '../../../middleware/error.middleware';
+import { createSuccessResponse } from '../../../shared/utils';
+import { ApiError } from '../../../shared/errors';
+import { cacheRedis } from '../../../config/redis';
+import { logger } from '../../../config/logger';
+import { platformPrisma, createTenantPrisma } from '../../../config/database';
 import { dashboardOrchestratorService } from './services/dashboard-orchestrator.service';
 import { drilldownService } from './services/drilldown.service';
 import { alertService } from './alerts/alert.service';
@@ -110,7 +110,7 @@ class AnalyticsController {
     const userId = req.user?.id;
     if (!userId) throw ApiError.badRequest('User ID is required');
 
-    const dashboard = req.params.dashboard;
+    const dashboard = req.params.dashboard as string;
     const parsed = drilldownFiltersSchema.safeParse(req.query);
     if (!parsed.success) {
       throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
@@ -130,7 +130,7 @@ class AnalyticsController {
     // Fire-and-forget audit log
     analyticsAuditService.logDrilldown(userId, companyId, dashboard, parsed.data.type).catch(() => {});
 
-    res.json(createSuccessResponse(result.data, 'Drilldown loaded', result.meta));
+    res.json(createSuccessResponse(result.data, 'Drilldown loaded'));
   });
 
   // ── GET /analytics/export/:reportType ─────────────────────────────────
@@ -152,7 +152,7 @@ class AnalyticsController {
       throw ApiError.badRequest('Export rate limit exceeded. Maximum 20 exports per hour.');
     }
 
-    const reportType = req.params.reportType;
+    const reportType = req.params.reportType as string;
     if (!VALID_REPORT_TYPES.includes(reportType)) {
       throw ApiError.badRequest(`Invalid report type: ${reportType}. Valid: ${VALID_REPORT_TYPES.join(', ')}`);
     }
@@ -162,7 +162,8 @@ class AnalyticsController {
       throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
     }
 
-    const filters = normalizeFilters(parsed.data);
+    const { format: exportFormat, ...rawFilters } = parsed.data;
+    const filters = normalizeFilters(rawFilters);
     const role = req.user?.roleId ?? 'COMPANY_ADMIN';
     const scope = await reportAccessService.resolveScope(userId, companyId, role as any, 'executive' as DashboardName);
 
@@ -195,7 +196,7 @@ class AnalyticsController {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     // Fire-and-forget audit log
-    analyticsAuditService.logExport(userId, companyId, reportType, parsed.data.format).catch(() => {});
+    analyticsAuditService.logExport(userId, companyId, reportType, exportFormat).catch(() => {});
 
     res.send(buffer);
   });

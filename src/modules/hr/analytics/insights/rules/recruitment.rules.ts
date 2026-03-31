@@ -1,4 +1,4 @@
-import type { InsightRule } from '@/modules/hr/analytics/analytics.types';
+import type { InsightRule } from '../../analytics.types';
 
 export const recruitmentRules: InsightRule[] = [
   {

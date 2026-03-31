@@ -1,5 +1,5 @@
-import { platformPrisma } from '@/config/database';
-import { logger } from '@/config/logger';
+import { platformPrisma } from '../../../../config/database';
+import { logger } from '../../../../config/logger';
 import type { DashboardFilters, DataScope, TrendSeries, Distribution } from '../analytics.types';
 
 // ─── Helper Types ───

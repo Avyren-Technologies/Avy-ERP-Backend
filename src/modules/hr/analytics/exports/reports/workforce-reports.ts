@@ -413,15 +413,15 @@ export async function generateDemographicsReport(
   for (const emp of employees) {
     if (!emp.dateOfBirth) continue;
     const age = Math.floor((now.getTime() - new Date(emp.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
-    if (age <= 25) ageBuckets['18-25']++;
-    else if (age <= 30) ageBuckets['26-30']++;
-    else if (age <= 35) ageBuckets['31-35']++;
-    else if (age <= 40) ageBuckets['36-40']++;
-    else if (age <= 45) ageBuckets['41-45']++;
-    else if (age <= 50) ageBuckets['46-50']++;
-    else if (age <= 55) ageBuckets['51-55']++;
-    else if (age <= 60) ageBuckets['56-60']++;
-    else ageBuckets['60+']++;
+    if (age <= 25) ageBuckets['18-25']!++;
+    else if (age <= 30) ageBuckets['26-30']!++;
+    else if (age <= 35) ageBuckets['31-35']!++;
+    else if (age <= 40) ageBuckets['36-40']!++;
+    else if (age <= 45) ageBuckets['41-45']!++;
+    else if (age <= 50) ageBuckets['46-50']!++;
+    else if (age <= 55) ageBuckets['51-55']!++;
+    else if (age <= 60) ageBuckets['56-60']!++;
+    else ageBuckets['60+']!++;
   }
 
   const ageSheet: ReportSheet = {
@@ -454,14 +454,14 @@ export async function generateDemographicsReport(
   for (const emp of employees) {
     if (!emp.joiningDate) continue;
     const years = (now.getTime() - new Date(emp.joiningDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000);
-    if (years < 1) tenureBuckets['< 1 year']++;
-    else if (years < 2) tenureBuckets['1-2 years']++;
-    else if (years < 3) tenureBuckets['2-3 years']++;
-    else if (years < 5) tenureBuckets['3-5 years']++;
-    else if (years < 10) tenureBuckets['5-10 years']++;
-    else if (years < 15) tenureBuckets['10-15 years']++;
-    else if (years < 20) tenureBuckets['15-20 years']++;
-    else tenureBuckets['20+ years']++;
+    if (years < 1) tenureBuckets['< 1 year']!++;
+    else if (years < 2) tenureBuckets['1-2 years']!++;
+    else if (years < 3) tenureBuckets['2-3 years']!++;
+    else if (years < 5) tenureBuckets['3-5 years']!++;
+    else if (years < 10) tenureBuckets['5-10 years']!++;
+    else if (years < 15) tenureBuckets['10-15 years']!++;
+    else if (years < 20) tenureBuckets['15-20 years']!++;
+    else tenureBuckets['20+ years']!++;
   }
 
   const tenureSheet: ReportSheet = {

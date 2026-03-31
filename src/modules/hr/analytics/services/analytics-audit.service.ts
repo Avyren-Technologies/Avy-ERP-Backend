@@ -1,5 +1,5 @@
-import { platformPrisma } from '@/config/database';
-import { logger } from '@/config/logger';
+import { platformPrisma } from '../../../../config/database';
+import { logger } from '../../../../config/logger';
 
 // ─── Audit Action Constants ───
 
@@ -106,12 +106,12 @@ class AnalyticsAuditService {
     userId: string;
     companyId: string;
     action: string;
-    dashboard?: string;
-    reportType?: string;
-    filters?: Record<string, unknown>;
-    exportFormat?: string;
-    ipAddress?: string;
-    userAgent?: string;
+    dashboard?: string | undefined;
+    reportType?: string | undefined;
+    filters?: Record<string, unknown> | undefined;
+    exportFormat?: string | undefined;
+    ipAddress?: string | undefined;
+    userAgent?: string | undefined;
   }): Promise<void> {
     try {
       await platformPrisma.analyticsAuditLog.create({
@@ -121,7 +121,7 @@ class AnalyticsAuditService {
           action: data.action,
           dashboard: data.dashboard ?? null,
           reportType: data.reportType ?? null,
-          filters: data.filters ?? null,
+          filters: (data.filters ?? null) as any,
           exportFormat: data.exportFormat ?? null,
           ipAddress: data.ipAddress ?? null,
           userAgent: data.userAgent ?? null,
