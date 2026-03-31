@@ -9,6 +9,7 @@ import { buildOpenApiSpec } from './openapi';
 import { authRoutes } from '../core/auth/auth.routes';
 import { tenantRoutes } from '../core/tenant/tenant.routes';
 import { rbacRoutes } from '../core/rbac/rbac.routes';
+import { rbacController } from '../core/rbac/rbac.controller';
 import { companyRoutes } from '../core/company/company.routes';
 import { billingRoutes } from '../core/billing/billing.routes';
 import { dashboardPlatformRoutes, dashboardTenantRoutes } from '../core/dashboard/dashboard.routes';
@@ -106,6 +107,13 @@ router.get('/modules/catalogue', authMiddleware({ requireTenant: false }), async
   }));
   return res.json({ success: true, data: { catalogue }, message: 'Module catalogue retrieved' });
 });
+
+// Navigation manifest (accessible by BOTH super-admin and company users, no tenant required)
+router.get(
+  '/rbac/navigation-manifest',
+  authMiddleware({ requireTenant: false }),
+  rbacController.getNavigationManifest
+);
 
 // Apply authentication and tenant validation to business routes
 router.use(

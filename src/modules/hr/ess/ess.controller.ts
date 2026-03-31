@@ -773,6 +773,55 @@ export class ESSController {
     }
 
     const now = new Date();
+
+    // Shift time validation (if employee has a shift assigned)
+    const employeeForShift = await platformPrisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { shiftId: true },
+    });
+
+    if (employeeForShift?.shiftId || shiftId) {
+      const targetShiftId = shiftId || employeeForShift?.shiftId;
+      const shift = await platformPrisma.companyShift.findUnique({
+        where: { id: targetShiftId! },
+        select: { startTime: true, endTime: true, name: true },
+      });
+
+      if (shift) {
+        // Get attendance rules for grace period
+        const rules = await platformPrisma.attendanceRule.findUnique({
+          where: { companyId },
+          select: { gracePeriodMinutes: true },
+        });
+        const gracePeriod = rules?.gracePeriodMinutes ? Number(rules.gracePeriodMinutes) : 15;
+
+        // Parse shift start time
+        const [shiftHour, shiftMin] = (shift.startTime || '00:00').split(':').map(Number);
+        const shiftStart = new Date(now);
+        shiftStart.setHours(shiftHour ?? 0, shiftMin ?? 0, 0, 0);
+
+        // Allow check-in only within: (shiftStart - 60 minutes) to (shiftStart + gracePeriod + 120 minutes)
+        // This gives a 1-hour early window and 2-hour late window (after grace period)
+        const earliestCheckIn = new Date(shiftStart.getTime() - 60 * 60 * 1000);
+        const latestCheckIn = new Date(shiftStart.getTime() + (gracePeriod + 120) * 60 * 1000);
+
+        // Handle overnight shifts (endTime < startTime means shift crosses midnight)
+        const [toHour, toMin] = (shift.endTime || '23:59').split(':').map(Number);
+        const isOvernightShift = (toHour ?? 0) < (shiftHour ?? 0);
+
+        if (!isOvernightShift) {
+          // Normal shift: validate check-in time
+          if (now < earliestCheckIn || now > latestCheckIn) {
+            throw ApiError.badRequest(
+              `Check-in not allowed at this time. Your shift "${shift.name}" starts at ${shift.startTime}. ` +
+              `You can check in between ${shift.startTime} (minus 1 hour) and up to 2 hours after shift start.`
+            );
+          }
+        }
+        // For overnight shifts, allow broader window (more complex to validate)
+      }
+    }
+
     const record = await platformPrisma.attendanceRecord.upsert({
       where: { employeeId_date: { employeeId, date: today } },
       create: {

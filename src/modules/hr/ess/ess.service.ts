@@ -494,6 +494,28 @@ export class ESSService {
           }
           break;
 
+        case 'AttendanceOverride': {
+          // Check if the override is still PENDING before processing
+          // (processOverride also checks this, avoiding double-update)
+          const overrideCheck = await platformPrisma.attendanceOverride.findUnique({
+            where: { id: entityId },
+            select: { companyId: true, status: true },
+          });
+          if (overrideCheck && overrideCheck.status === 'PENDING') {
+            // Use dynamic import to avoid circular dependencies
+            const { attendanceService } = await import('../attendance/attendance.service');
+            // processOverride handles everything:
+            // - Applying corrected punch times
+            // - Recalculating worked hours
+            // - Re-evaluating status (PRESENT/HALF_DAY)
+            // - Handling ABSENT_OVERRIDE and LATE_OVERRIDE
+            // - Setting isRegularized flag
+            // - Updating override status to APPROVED/REJECTED
+            await attendanceService.processOverride(overrideCheck.companyId, entityId, 'system', decision);
+          }
+          break;
+        }
+
         default:
           // Unknown entity type — log but don't fail
           break;
@@ -501,7 +523,7 @@ export class ESSService {
     } catch (error) {
       // Log the callback error but don't fail the approval
       // The approval itself succeeded; entity update failure should be retryable
-      console.error(`Approval callback failed for ${entityType}/${entityId}:`, error);
+      logger.error(`Approval callback failed for ${entityType}/${entityId}:`, error);
     }
   }
 
