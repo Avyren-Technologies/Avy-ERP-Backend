@@ -1837,6 +1837,343 @@ export class ESSService {
 
     return { payslips };
   }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Dashboard (unified payload)
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Extract the value from a Promise.allSettled result.
+   * Returns null (and logs a warning) if the promise rejected.
+   */
+  private settledValue<T>(result: PromiseSettledResult<T>, label: string): T | null {
+    if (result.status === 'fulfilled') return result.value;
+    logger.warn(`Dashboard widget "${label}" failed: ${(result.reason as Error)?.message ?? result.reason}`);
+    return null;
+  }
+
+  /**
+   * Unified dashboard endpoint — returns all widget data in a single API call.
+   * Uses Promise.allSettled so one failing query never breaks the entire dashboard.
+   */
+  async getDashboard(
+    companyId: string,
+    employeeId: string | null,
+    _userId: string,
+    permissions: string[],
+  ) {
+    const hasPerm = (p: string) => permissions.includes(p) || permissions.includes('*') || permissions.includes('hr:*');
+
+    // If no employee linked, return a minimal shell so the frontend still renders
+    if (!employeeId) {
+      return {
+        attendanceStatus: { status: 'NOT_LINKED' as const, record: null, elapsedSeconds: 0 },
+        leaveBalance: [],
+        upcomingHolidays: [],
+        announcements: [], // TODO: populate once Announcement model exists
+        recentAttendance: [],
+        currentShift: null,
+        myGoals: null,
+        pendingApprovals: null,
+        teamSummary: null,
+      };
+    }
+
+    const isManager = hasPerm('hr:approve');
+
+    const [
+      attendanceStatus,
+      leaveBalance,
+      upcomingHolidays,
+      recentAttendance,
+      currentShift,
+      myGoals,
+      pendingApprovals,
+      teamSummary,
+    ] = await Promise.allSettled([
+      this.getDashboardAttendanceStatus(companyId, employeeId),
+      this.getDashboardLeaveBalance(companyId, employeeId),
+      this.getDashboardUpcomingHolidays(companyId, 5),
+      this.getDashboardRecentAttendance(companyId, employeeId, 7),
+      this.getDashboardCurrentShift(companyId, employeeId),
+      this.getDashboardGoalsSummary(companyId, employeeId),
+      isManager ? this.getDashboardPendingApprovals(companyId, employeeId) : Promise.resolve(null),
+      isManager ? this.getDashboardTeamSummary(companyId, employeeId) : Promise.resolve(null),
+    ]);
+
+    return {
+      attendanceStatus: this.settledValue(attendanceStatus, 'attendanceStatus'),
+      leaveBalance: this.settledValue(leaveBalance, 'leaveBalance'),
+      upcomingHolidays: this.settledValue(upcomingHolidays, 'upcomingHolidays'),
+      announcements: [] as any[], // TODO: populate once Announcement model exists
+      recentAttendance: this.settledValue(recentAttendance, 'recentAttendance'),
+      currentShift: this.settledValue(currentShift, 'currentShift'),
+      myGoals: this.settledValue(myGoals, 'myGoals'),
+      pendingApprovals: this.settledValue(pendingApprovals, 'pendingApprovals'),
+      teamSummary: this.settledValue(teamSummary, 'teamSummary'),
+    };
+  }
+
+  // ── Dashboard helper: Attendance Status ──
+
+  private async getDashboardAttendanceStatus(_companyId: string, employeeId: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const record = await platformPrisma.attendanceRecord.findUnique({
+      where: { employeeId_date: { employeeId, date: today } },
+      include: {
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
+        location: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!record) {
+      return { status: 'NOT_CHECKED_IN' as const, record: null, elapsedSeconds: 0 };
+    }
+
+    let elapsedSeconds = 0;
+    if (record.punchIn && !record.punchOut) {
+      elapsedSeconds = Math.floor((Date.now() - new Date(record.punchIn).getTime()) / 1000);
+    }
+
+    const status = record.punchOut ? ('CHECKED_OUT' as const) : ('CHECKED_IN' as const);
+    return { status, record, elapsedSeconds };
+  }
+
+  // ── Dashboard helper: Leave Balance Summary ──
+
+  private async getDashboardLeaveBalance(companyId: string, employeeId: string) {
+    const currentYear = new Date().getFullYear();
+
+    const balances = await platformPrisma.leaveBalance.findMany({
+      where: { companyId, employeeId, year: currentYear },
+      include: {
+        leaveType: { select: { id: true, name: true, code: true, category: true } },
+      },
+      orderBy: { leaveType: { name: 'asc' } },
+      take: 4, // Top 4 leave types (Casual, Earned, Sick, etc.)
+    });
+
+    return balances.map((b) => ({
+      id: b.id,
+      leaveTypeId: b.leaveTypeId,
+      leaveTypeName: b.leaveType.name,
+      leaveTypeCode: b.leaveType.code,
+      category: b.leaveType.category,
+      openingBalance: Number(b.openingBalance),
+      accrued: Number(b.accrued),
+      taken: Number(b.taken),
+      adjusted: Number(b.adjusted),
+      balance: Number(b.balance),
+    }));
+  }
+
+  // ── Dashboard helper: Upcoming Holidays ──
+
+  private async getDashboardUpcomingHolidays(companyId: string, count: number) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const holidays = await platformPrisma.holidayCalendar.findMany({
+      where: {
+        companyId,
+        date: { gte: today },
+      },
+      select: {
+        id: true,
+        name: true,
+        date: true,
+        type: true,
+        isOptional: true,
+      },
+      orderBy: { date: 'asc' },
+      take: count,
+    });
+
+    return holidays;
+  }
+
+  // ── Dashboard helper: Recent Attendance (last N days) ──
+
+  private async getDashboardRecentAttendance(companyId: string, employeeId: string, days: number) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - days);
+
+    const records = await platformPrisma.attendanceRecord.findMany({
+      where: {
+        companyId,
+        employeeId,
+        date: { gte: startDate, lte: today },
+      },
+      select: {
+        id: true,
+        date: true,
+        status: true,
+        punchIn: true,
+        punchOut: true,
+        workedHours: true,
+        isLate: true,
+        isEarlyExit: true,
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    return records.map((r) => ({
+      id: r.id,
+      date: r.date,
+      status: r.status,
+      punchIn: r.punchIn,
+      punchOut: r.punchOut,
+      workedHours: r.workedHours ? Number(r.workedHours) : null,
+      isLate: r.isLate,
+      isEarlyExit: r.isEarlyExit,
+    }));
+  }
+
+  // ── Dashboard helper: Current Shift ──
+
+  private async getDashboardCurrentShift(_companyId: string, employeeId: string) {
+    const employee = await platformPrisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { shiftId: true },
+    });
+
+    if (!employee?.shiftId) return null;
+
+    const shift = await platformPrisma.companyShift.findUnique({
+      where: { id: employee.shiftId },
+      select: {
+        id: true,
+        name: true,
+        shiftType: true,
+        startTime: true,
+        endTime: true,
+        isCrossDay: true,
+        breaks: {
+          select: { id: true, name: true, startTime: true, duration: true, type: true, isPaid: true },
+          orderBy: { startTime: 'asc' },
+        },
+      },
+    });
+
+    return shift;
+  }
+
+  // ── Dashboard helper: Goals Summary ──
+
+  private async getDashboardGoalsSummary(companyId: string, employeeId: string) {
+    const goals = await platformPrisma.goal.findMany({
+      where: { companyId, employeeId, status: { in: ['ACTIVE', 'DRAFT'] } },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        weightage: true,
+        targetValue: true,
+        achievedValue: true,
+        cycle: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const activeGoals = goals.filter((g) => g.status === 'ACTIVE');
+    const averageCompletion =
+      activeGoals.length > 0
+        ? activeGoals.reduce((sum, g) => {
+            const target = Number(g.targetValue ?? 0);
+            const achieved = Number(g.achievedValue ?? 0);
+            return sum + (target > 0 ? (achieved / target) * 100 : 0);
+          }, 0) / activeGoals.length
+        : 0;
+
+    return {
+      totalActive: activeGoals.length,
+      totalDraft: goals.length - activeGoals.length,
+      averageCompletion: Math.round(averageCompletion * 100) / 100,
+      topGoals: goals.slice(0, 3).map((g) => ({
+        id: g.id,
+        title: g.title,
+        status: g.status,
+        targetValue: g.targetValue ? Number(g.targetValue) : null,
+        achievedValue: g.achievedValue ? Number(g.achievedValue) : null,
+        progress:
+          g.targetValue && Number(g.targetValue) > 0
+            ? Math.round((Number(g.achievedValue ?? 0) / Number(g.targetValue)) * 10000) / 100
+            : 0,
+        cycleName: g.cycle.name,
+      })),
+    };
+  }
+
+  // ── Dashboard helper: Pending Approvals (manager) ──
+
+  private async getDashboardPendingApprovals(companyId: string, managerId: string) {
+    // Reuse existing method — returns { leaveRequests, overrides }
+    const approvals = await this.getPendingApprovals(companyId, managerId);
+    return {
+      leaveRequestCount: approvals.leaveRequests.length,
+      attendanceOverrideCount: approvals.overrides.length,
+      totalCount: approvals.leaveRequests.length + approvals.overrides.length,
+      recentLeaveRequests: approvals.leaveRequests.slice(0, 3),
+      recentOverrides: approvals.overrides.slice(0, 3),
+    };
+  }
+
+  // ── Dashboard helper: Team Summary (manager) ──
+
+  private async getDashboardTeamSummary(companyId: string, managerId: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Get all reportees
+    const reportees = await platformPrisma.employee.findMany({
+      where: {
+        companyId,
+        reportingManagerId: managerId,
+        status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED'] },
+      },
+      select: { id: true },
+    });
+
+    const totalMembers = reportees.length;
+    if (totalMembers === 0) {
+      return { totalMembers: 0, presentToday: 0, absentToday: 0, onLeaveToday: 0, notCheckedIn: 0 };
+    }
+
+    const ids = reportees.map((r) => r.id);
+
+    // Count attendance statuses for today
+    const [attendanceRecords, leaveRequests] = await Promise.all([
+      platformPrisma.attendanceRecord.findMany({
+        where: { companyId, employeeId: { in: ids }, date: today },
+        select: { employeeId: true, status: true, punchIn: true },
+      }),
+      platformPrisma.leaveRequest.count({
+        where: {
+          companyId,
+          employeeId: { in: ids },
+          status: 'APPROVED',
+          fromDate: { lte: today },
+          toDate: { gte: today },
+        },
+      }),
+    ]);
+
+    const presentToday = attendanceRecords.filter((r) => r.punchIn != null).length;
+    const checkedInIds = new Set(attendanceRecords.filter((r) => r.punchIn != null).map((r) => r.employeeId));
+    const notCheckedIn = totalMembers - checkedInIds.size;
+
+    return {
+      totalMembers,
+      presentToday,
+      onLeaveToday: leaveRequests,
+      absentToday: Math.max(0, totalMembers - presentToday - leaveRequests),
+      notCheckedIn,
+    };
+  }
 }
 
 export const essService = new ESSService();

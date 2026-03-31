@@ -923,6 +923,22 @@ export class ESSController {
 
     res.json(createSuccessResponse(record, 'Checked out successfully'));
   });
+
+  // ── Dashboard ─────────────────────────────────────────────────────
+
+  getDashboard = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    const permissions = req.user?.permissions ?? [];
+
+    const data = await essService.getDashboard(companyId, employeeId, userId, permissions);
+    res.json(createSuccessResponse(data, 'Dashboard data retrieved'));
+  });
 }
 
 export const essController = new ESSController();

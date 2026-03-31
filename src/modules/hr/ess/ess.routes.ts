@@ -59,6 +59,9 @@ router.patch('/it-declarations/:id/submit', requireESSFeature('itDeclaration'), 
 router.patch('/it-declarations/:id/verify', requirePermissions(['hr:update']), controller.verifyDeclaration);
 router.patch('/it-declarations/:id/lock', requirePermissions(['hr:update']), controller.lockDeclaration);
 
+// ── ESS Dashboard (unified payload) ─────────────────────────────────
+router.get('/ess/dashboard', requirePermissions(['hr:read']), controller.getDashboard);
+
 // ── ESS Self-Service (Employee-facing, feature gated) ───────────────
 router.get('/ess/my-profile', requireESSFeature('profileUpdate'), requirePermissions(['hr:read', 'ess:view-profile']), controller.getMyProfile);
 router.get('/ess/my-payslips', requireESSFeature('viewPayslips'), requirePermissions(['hr:read', 'ess:view-payslips']), controller.getMyPayslips);
