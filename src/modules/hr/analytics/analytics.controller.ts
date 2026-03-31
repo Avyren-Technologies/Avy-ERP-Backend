@@ -143,13 +143,18 @@ class AnalyticsController {
     if (!userId) throw ApiError.badRequest('User ID is required');
 
     // Rate limiting: max 20 exports per hour per user
-    const rateLimitKey = `export_rate:${userId}`;
-    const currentCount = await cacheRedis.incr(rateLimitKey);
-    if (currentCount === 1) {
-      await cacheRedis.expire(rateLimitKey, 3600);
-    }
-    if (currentCount > 20) {
-      throw ApiError.badRequest('Export rate limit exceeded. Maximum 20 exports per hour.');
+    try {
+      const rateLimitKey = `export_rate:${userId}`;
+      const currentCount = await cacheRedis.incr(rateLimitKey);
+      if (currentCount === 1) {
+        await cacheRedis.expire(rateLimitKey, 3600);
+      }
+      if (currentCount > 20) {
+        throw ApiError.badRequest('Export rate limit exceeded. Max 20 per hour.');
+      }
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      logger.warn('Rate limit check failed, allowing request', { error: (err as Error).message });
     }
 
     const reportType = req.params.reportType as string;
@@ -173,7 +178,6 @@ class AnalyticsController {
       select: { schemaName: true },
     });
     if (!tenant) throw ApiError.notFound('Tenant not found');
-    const tenantDb = createTenantPrisma(tenant.schemaName);
 
     // Get company name for report header
     const company = await platformPrisma.company.findUnique({
@@ -188,33 +192,39 @@ class AnalyticsController {
       throw ApiError.badRequest(`No generator found for report type: ${reportType}`);
     }
 
-    const buffer = await generator(tenantDb, companyName, filters, scope);
+    let tenantDb;
+    try {
+      tenantDb = createTenantPrisma(tenant.schemaName);
+      const buffer = await generator(tenantDb, companyName, filters, scope);
 
-    // Set response headers for xlsx download
-    const filename = `${reportType}-${filters.dateFrom}-to-${filters.dateTo}.xlsx`;
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      // Set response headers for xlsx download
+      const filename = `${reportType}-${filters.dateFrom}-to-${filters.dateTo}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-    // Fire-and-forget audit log
-    analyticsAuditService.logExport(userId, companyId, reportType, exportFormat).catch(() => {});
+      // Fire-and-forget audit log
+      analyticsAuditService.logExport(userId, companyId, reportType, exportFormat).catch(() => {});
 
-    // Fire-and-forget report history record
-    platformPrisma.reportHistory.create({
-      data: {
-        companyId,
-        userId,
-        userName: req.user?.firstName ? `${req.user.firstName}${req.user.lastName ? ` ${req.user.lastName}` : ''}` : 'Unknown',
-        reportType,
-        reportTitle: REPORT_DEFINITIONS[reportType]?.title || reportType,
-        category: REPORT_DEFINITIONS[reportType]?.category || 'unknown',
-        filters: parsed.data as any,
-        format: exportFormat,
-        status: 'COMPLETED',
-        fileSize: buffer.length,
-      },
-    }).catch(() => {});
+      // Fire-and-forget report history record
+      platformPrisma.reportHistory.create({
+        data: {
+          companyId,
+          userId,
+          userName: req.user?.firstName ? `${req.user.firstName}${req.user.lastName ? ` ${req.user.lastName}` : ''}` : 'Unknown',
+          reportType,
+          reportTitle: REPORT_DEFINITIONS[reportType]?.title || reportType,
+          category: REPORT_DEFINITIONS[reportType]?.category || 'unknown',
+          filters: parsed.data as any,
+          format: exportFormat,
+          status: 'COMPLETED',
+          fileSize: buffer.length,
+        },
+      }).catch((err) => logger.error('report_history_save_failed', { error: (err as Error).message, reportType }));
 
-    res.send(buffer);
+      res.send(buffer);
+    } finally {
+      if (tenantDb) tenantDb.$disconnect().catch(() => {});
+    }
   });
 
   // ── GET /analytics/alerts ─────────────────────────────────────────────
@@ -234,11 +244,14 @@ class AnalyticsController {
     const userId = req.user?.id;
     if (!userId) throw ApiError.badRequest('User ID is required');
 
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
     const alertId = req.params.id;
     if (!alertId) throw ApiError.badRequest('Alert ID is required');
 
-    const result = await alertService.acknowledgeAlert(alertId, userId);
-    res.json(createSuccessResponse(result, 'Alert acknowledged'));
+    await alertService.acknowledgeAlert(alertId, userId, companyId);
+    res.json(createSuccessResponse({ acknowledged: true }, 'Alert acknowledged'));
   });
 
   // ── POST /analytics/alerts/:id/resolve ────────────────────────────────
@@ -247,11 +260,14 @@ class AnalyticsController {
     const userId = req.user?.id;
     if (!userId) throw ApiError.badRequest('User ID is required');
 
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
     const alertId = req.params.id;
     if (!alertId) throw ApiError.badRequest('Alert ID is required');
 
-    const result = await alertService.resolveAlert(alertId, userId);
-    res.json(createSuccessResponse(result, 'Alert resolved'));
+    await alertService.resolveAlert(alertId, userId, companyId);
+    res.json(createSuccessResponse({ resolved: true }, 'Alert resolved'));
   });
 
   // ── POST /analytics/recompute ─────────────────────────────────────────
@@ -324,16 +340,26 @@ class AnalyticsController {
     const userId = req.user?.id;
     if (!userId) throw ApiError.unauthorized('Authentication required');
 
-    const rateLimitKey = `export_rate:${userId}`;
-    const used = parseInt(await cacheRedis.get(rateLimitKey) || '0');
-    const ttl = await cacheRedis.ttl(rateLimitKey);
+    try {
+      const rateLimitKey = `export_rate:${userId}`;
+      const used = parseInt(await cacheRedis.get(rateLimitKey) || '0');
+      const ttl = await cacheRedis.ttl(rateLimitKey);
 
-    res.json(createSuccessResponse({
-      used,
-      limit: 20,
-      remaining: Math.max(0, 20 - used),
-      resetsInSeconds: ttl > 0 ? ttl : 0,
-    }, 'Rate limit status'));
+      res.json(createSuccessResponse({
+        used,
+        limit: 20,
+        remaining: Math.max(0, 20 - used),
+        resetsInSeconds: ttl > 0 ? ttl : 0,
+      }, 'Rate limit status'));
+    } catch (err) {
+      logger.warn('Rate limit status check failed, returning defaults', { error: (err as Error).message });
+      res.json(createSuccessResponse({
+        used: 0,
+        limit: 20,
+        remaining: 20,
+        resetsInSeconds: 0,
+      }, 'Rate limit status'));
+    }
   });
 }
 

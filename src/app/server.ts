@@ -6,6 +6,7 @@ import { checkDatabaseConnection, disconnectDatabase } from '../config/database'
 import { checkAllRedisConnections, disconnectRedis } from '../config/redis';
 import { startSLACron } from '../workers/sla-cron';
 import { initSocket } from '../lib/socket';
+import { analyticsCronService } from '../modules/hr/analytics/services/analytics-cron.service';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -39,6 +40,9 @@ async function startServer(): Promise<void> {
 
       // Start SLA enforcement cron job
       startSLACron();
+
+      // Start analytics cron jobs
+      analyticsCronService.startAll();
     });
 
     // Handle server errors

@@ -184,12 +184,11 @@ class DashboardOrchestratorService {
     const deptStrength = this.unwrapSettled(deptStrengthResult, 'departmentStrength', partialFailures);
 
     const totalHeadcount = headcount?.totalHeadcount ?? 0;
-    const avgTenure = 0; // Would require additional computation
 
     const kpis: KPICard[] = [
       this.buildKPI('total_employees', 'Total Employees', totalHeadcount, 'number', 'workforce:employeeDirectory'),
       this.buildKPI('joiners', 'Joiners (This Period)', headcount?.joinersCount ?? 0, 'number', 'workforce:employeeDirectory'),
-      this.buildKPI('avg_tenure', 'Avg Tenure (Months)', avgTenure, 'number', 'workforce:employeeDirectory'),
+      this.buildKPI('avg_tenure', 'Avg Tenure (Months)', 'N/A', 'text', 'workforce:employeeDirectory'),
       this.buildKPI('vacancy_rate', 'On Notice', headcount?.noticeCount ?? 0, 'number', 'attrition:exitDetail'),
     ];
 
@@ -247,6 +246,21 @@ class DashboardOrchestratorService {
       : null;
 
     const alerts = await this.getAlertsSafe(scope.companyId, 'attendance', partialFailures);
+
+    // TODO: Fetch last 6 months of attendance data from AttendanceAnalyticsDaily for anomaly detection.
+    // Pass historicalData (keyed arrays of attendance_rate, productivity_index) as the third argument
+    // to generateInsights() so the anomaly detector can flag statistical outliers.
+    // Example:
+    //   const historicalRecords = await platformPrisma.attendanceAnalyticsDaily.findMany({
+    //     where: { companyId: scope.companyId }, orderBy: { date: 'desc' }, take: 180,
+    //     select: { presentCount: true, totalEmployees: true, productivityIndex: true },
+    //   });
+    //   const historicalData = {
+    //     attendance_rate: historicalRecords.map(r => r.totalEmployees > 0 ? r.presentCount / r.totalEmployees : 0),
+    //     productivity_index: historicalRecords.map(r => r.productivityIndex),
+    //   };
+    //   insightsEngineService.generateInsights('attendance', currentData, historicalData);
+
     const insights = insightsEngineService.generateInsights('attendance', {
       attendancePercent: summary?.attendancePercent ?? 0,
       lateCount: summary?.lateCount ?? 0,
@@ -341,9 +355,9 @@ class DashboardOrchestratorService {
 
     const kpis: KPICard[] = [
       this.buildKPI('compliance_score', 'Compliance Score', statutory?.complianceScore ?? 0, 'percentage', 'compliance:filingTracker'),
-      this.buildKPI('overdue_filings', 'Overdue Filings', 0, 'number', 'compliance:filingTracker'),
-      this.buildKPI('pending_grievances', 'Pending Grievances', 0, 'number', 'compliance:grievanceCases'),
-      this.buildKPI('active_disciplinary', 'Active Disciplinary', 0, 'number', 'compliance:grievanceCases'),
+      this.buildKPI('overdue_filings', 'Overdue Filings', 'N/A', 'text', 'compliance:filingTracker'),
+      this.buildKPI('pending_grievances', 'Pending Grievances', 'N/A', 'text', 'compliance:grievanceCases'),
+      this.buildKPI('active_disciplinary', 'Active Disciplinary', 'N/A', 'text', 'compliance:grievanceCases'),
     ];
 
     const alerts = await this.getAlertsSafe(scope.companyId, 'compliance', partialFailures);
@@ -371,8 +385,8 @@ class DashboardOrchestratorService {
     const kpis: KPICard[] = [
       this.buildKPI('completion_percent', 'Appraisal Completion', appraisal?.completionPercent ?? 0, 'percentage', 'performance:appraisalDetail'),
       this.buildKPI('avg_rating', 'Avg Rating', appraisal?.avgRating ?? 0, 'number', 'performance:appraisalDetail'),
-      this.buildKPI('skill_coverage', 'Skill Coverage', 0, 'percentage', 'performance:skillGap'),
-      this.buildKPI('succession_coverage', 'Succession Coverage', 0, 'percentage', 'performance:appraisalDetail'),
+      this.buildKPI('skill_coverage', 'Skill Coverage', 'N/A', 'text', 'performance:skillGap'),
+      this.buildKPI('succession_coverage', 'Succession Coverage', 'N/A', 'text', 'performance:appraisalDetail'),
     ];
 
     const alerts = await this.getAlertsSafe(scope.companyId, 'performance', partialFailures);

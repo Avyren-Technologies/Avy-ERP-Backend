@@ -2,6 +2,7 @@ import { platformPrisma, createTenantPrisma } from '../../../../config/database'
 import { logger } from '../../../../config/logger';
 import cron from 'node-cron';
 import { PrismaClient, Prisma } from '@prisma/client';
+import { alertService } from '../alerts/alert.service';
 
 /** Cast an array/object to Prisma JSON input. */
 function toJson<T>(value: T): Prisma.InputJsonValue {
@@ -407,6 +408,12 @@ class AnalyticsCronService {
             bySource: toJson(bySource),
           },
         });
+
+        // Evaluate alert rules for attendance data
+        await alertService.evaluateAndCreate(company.id, 'attendance', {
+          presentCount, absentCount, lateCount, totalEmployees,
+          totalOvertimeHours, productivityIndex, avgLateMinutes,
+        }).catch(err => logger.error('Alert evaluation failed', { companyId: company.id, err: (err as Error).message }));
 
         companiesProcessed++;
       } catch (error) {
@@ -868,6 +875,12 @@ class AnalyticsCronService {
             bySeparationType: toJson(bySeparationType),
           },
         });
+
+        // Evaluate alert rules for attrition data
+        await alertService.evaluateAndCreate(company.id, 'attrition', {
+          attritionRate, totalExits, earlyAttritionRate,
+          flightRiskEmployees, avgFnFProcessingDays, pendingFnFCount,
+        }).catch(err => logger.error('Alert evaluation failed', { companyId: company.id, err: (err as Error).message }));
 
         companiesProcessed++;
       } catch (error) {

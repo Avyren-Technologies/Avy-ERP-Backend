@@ -80,8 +80,12 @@ class AlertService {
   /**
    * Acknowledge an alert (user has seen it).
    */
-  async acknowledgeAlert(alertId: string, userId: string) {
-    return platformPrisma.analyticsAlert.update({
+  async acknowledgeAlert(alertId: string, userId: string, companyId: string): Promise<void> {
+    const alert = await platformPrisma.analyticsAlert.findFirst({
+      where: { id: alertId, companyId },
+    });
+    if (!alert) throw new Error('Alert not found');
+    await platformPrisma.analyticsAlert.update({
       where: { id: alertId },
       data: {
         status: 'ACKNOWLEDGED',
@@ -94,8 +98,12 @@ class AlertService {
   /**
    * Resolve an alert manually.
    */
-  async resolveAlert(alertId: string, userId: string) {
-    return platformPrisma.analyticsAlert.update({
+  async resolveAlert(alertId: string, userId: string, companyId: string): Promise<void> {
+    const alert = await platformPrisma.analyticsAlert.findFirst({
+      where: { id: alertId, companyId },
+    });
+    if (!alert) throw new Error('Alert not found');
+    await platformPrisma.analyticsAlert.update({
       where: { id: alertId },
       data: {
         status: 'RESOLVED',
