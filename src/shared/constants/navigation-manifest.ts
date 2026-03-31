@@ -190,8 +190,9 @@ export function getGroupedNavigation(items: NavigationItem[]): Array<{
 }> {
   const groups = new Map<string, { moduleSeparator: string | undefined; items: NavigationItem[] }>();
   const sorted = [...items].sort((a, b) => a.sortOrder - b.sortOrder);
+  const collapsed = collapseChildPaths(sorted);
 
-  for (const item of sorted) {
+  for (const item of collapsed) {
     if (!groups.has(item.group)) {
       groups.set(item.group, { moduleSeparator: item.moduleSeparator, items: [] });
     }
@@ -203,4 +204,41 @@ export function getGroupedNavigation(items: NavigationItem[]): Array<{
     if (data.moduleSeparator) result.moduleSeparator = data.moduleSeparator;
     return result;
   });
+}
+
+function collapseChildPaths(items: NavigationItem[]): NavigationItem[] {
+  const consumed = new Set<string>();
+  const result: NavigationItem[] = [];
+
+  for (const item of items) {
+    if (consumed.has(item.id)) continue;
+
+    // Keep explicitly configured children as-is.
+    if (item.children && item.children.length > 0) {
+      result.push(item);
+      continue;
+    }
+
+    const childCandidates = items.filter((candidate) => {
+      if (candidate.id === item.id) return false;
+      if (consumed.has(candidate.id)) return false;
+      if (candidate.group !== item.group) return false;
+      if (!candidate.path.startsWith(`${item.path}/`)) return false;
+      return true;
+    });
+
+    if (childCandidates.length === 0) {
+      result.push(item);
+      continue;
+    }
+
+    const children = childCandidates
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((candidate) => ({ label: candidate.label, path: candidate.path }));
+
+    childCandidates.forEach((candidate) => consumed.add(candidate.id));
+    result.push({ ...item, children });
+  }
+
+  return result;
 }
