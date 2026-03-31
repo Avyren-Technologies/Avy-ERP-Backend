@@ -8,6 +8,11 @@ const router = Router();
 router.get('/analytics/dashboard/:dashboard', requirePermissions(['hr:read']), controller.getDashboard);
 router.get('/analytics/drilldown/:dashboard', requirePermissions(['hr:read']), controller.getDrilldown);
 
+// ── Reports Hub ───────────────────────────────────────────────────────
+router.get('/analytics/reports/catalog', requirePermissions(['hr:read']), controller.getReportCatalog);
+router.get('/analytics/reports/history', requirePermissions(['hr:read']), controller.getReportHistory);
+router.get('/analytics/reports/rate-limit', requirePermissions(['hr:read']), controller.getRateLimit);
+
 // ── Export ────────────────────────────────────────────────────────────
 router.get('/analytics/export/:reportType', requirePermissions(['hr:export']), controller.exportReport);
 

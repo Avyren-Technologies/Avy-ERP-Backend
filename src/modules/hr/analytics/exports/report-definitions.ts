@@ -202,3 +202,31 @@ export const REPORT_DEFINITIONS: Record<string, ReportDefinition> = {
 };
 
 export const VALID_REPORT_TYPES = Object.keys(REPORT_DEFINITIONS);
+
+export const REPORT_DESCRIPTIONS: Record<string, string> = {
+  'employee-master': 'Complete employee directory with personal, professional, and compensation details',
+  'headcount-movement': 'Monthly joiners, leavers, transfers, and promotions with net headcount change',
+  demographics: 'Workforce distribution by gender, age band, and tenure',
+  'attendance-register': 'Day-wise attendance grid for all employees with status codes',
+  'late-coming': 'Late arrival analysis with frequency tracking and department breakdown',
+  overtime: 'Overtime hours and cost analysis by employee, department, and shift',
+  absenteeism: 'Absence patterns, frequent absentees, and trend analysis',
+  'leave-balance': 'Current leave balances by type and employee with carry-forward details',
+  'leave-utilization': 'Leave consumption patterns by type, department, and month',
+  'leave-encashment': 'Leave encashment liability calculation per eligible employee',
+  'salary-register': 'Complete payroll breakup — earnings, deductions, net pay, and employer cost',
+  'bank-transfer': 'Bank-ready NEFT/RTGS file with account details and net pay amounts',
+  'ctc-distribution': 'CTC analysis by grade, department, and salary bands',
+  'salary-revision': 'Salary revision history with old/new CTC and increment percentages',
+  'loan-outstanding': 'Active employee loans with EMI schedule and outstanding amounts',
+  'pf-ecr': 'EPFO Electronic Challan cum Return with UAN-wise contributions',
+  'esi-challan': 'ESI contribution challan with IP number and wage details',
+  'professional-tax': 'State-wise professional tax deductions and slab compliance',
+  'tds-summary': 'Quarterly TDS summary with regime-wise breakdown and declarations',
+  'gratuity-liability': 'Projected gratuity liability for eligible employees (4+ years)',
+  'appraisal-summary': 'Appraisal cycle results — ratings, bell curve, and department averages',
+  'skill-gap': 'Required vs actual skill levels with gap analysis by department',
+  attrition: 'Attrition analysis — rates, reasons, department trends, and early exits',
+  'fnf-settlement': 'Full & final settlement status — pending and completed with breakdowns',
+  'compliance-summary': 'Overall compliance health — filing status, grievances, and document gaps',
+};

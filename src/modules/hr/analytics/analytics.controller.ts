@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../../middleware/error.middleware';
-import { createSuccessResponse } from '../../../shared/utils';
+import { createSuccessResponse, createPaginatedResponse } from '../../../shared/utils';
 import { ApiError } from '../../../shared/errors';
 import { cacheRedis } from '../../../config/redis';
 import { logger } from '../../../config/logger';
@@ -17,7 +17,7 @@ import {
   exportFiltersSchema,
   recomputeSchema,
 } from './analytics.validators';
-import { VALID_REPORT_TYPES } from './exports/report-definitions';
+import { VALID_REPORT_TYPES, REPORT_DEFINITIONS, REPORT_DESCRIPTIONS } from './exports/report-definitions';
 import type { DashboardName, DataScope, DashboardFilters } from './analytics.types';
 import { reportAccessService } from './services/report-access.service';
 
@@ -198,6 +198,22 @@ class AnalyticsController {
     // Fire-and-forget audit log
     analyticsAuditService.logExport(userId, companyId, reportType, exportFormat).catch(() => {});
 
+    // Fire-and-forget report history record
+    platformPrisma.reportHistory.create({
+      data: {
+        companyId,
+        userId,
+        userName: req.user?.firstName ? `${req.user.firstName}${req.user.lastName ? ` ${req.user.lastName}` : ''}` : 'Unknown',
+        reportType,
+        reportTitle: REPORT_DEFINITIONS[reportType]?.title || reportType,
+        category: REPORT_DEFINITIONS[reportType]?.category || 'unknown',
+        filters: parsed.data as any,
+        format: exportFormat,
+        status: 'COMPLETED',
+        fileSize: buffer.length,
+      },
+    }).catch(() => {});
+
     res.send(buffer);
   });
 
@@ -255,6 +271,69 @@ class AnalyticsController {
     await analyticsCronService.recomputeForCompany(companyId, date);
 
     res.json(createSuccessResponse({ recomputed: true }, 'Analytics recomputation complete'));
+  });
+  // ── GET /analytics/reports/catalog ──────────────────────────────────
+
+  getReportCatalog = asyncHandler(async (req: Request, res: Response) => {
+    const catalog: Record<string, Array<{ key: string; title: string; sheetNames: string[]; description: string }>> = {};
+
+    for (const [_key, def] of Object.entries(REPORT_DEFINITIONS)) {
+      if (!catalog[def.category]) catalog[def.category] = [];
+      catalog[def.category]!.push({
+        key: def.key,
+        title: def.title,
+        sheetNames: def.sheetNames,
+        description: REPORT_DESCRIPTIONS[def.key] ?? '',
+      });
+    }
+
+    res.json(createSuccessResponse(catalog, 'Report catalog'));
+  });
+
+  // ── GET /analytics/reports/history ────────────────────────────────────
+
+  getReportHistory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.unauthorized('Authentication required');
+
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const reportType = req.query.reportType as string | undefined;
+    const category = req.query.category as string | undefined;
+
+    const where: any = { companyId };
+    if (reportType) where.reportType = reportType;
+    if (category) where.category = category;
+
+    const [records, total] = await Promise.all([
+      platformPrisma.reportHistory.findMany({
+        where,
+        orderBy: { generatedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      platformPrisma.reportHistory.count({ where }),
+    ]);
+
+    res.json(createPaginatedResponse(records, page, limit, total, 'Report history'));
+  });
+
+  // ── GET /analytics/reports/rate-limit ─────────────────────────────────
+
+  getRateLimit = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.unauthorized('Authentication required');
+
+    const rateLimitKey = `export_rate:${userId}`;
+    const used = parseInt(await cacheRedis.get(rateLimitKey) || '0');
+    const ttl = await cacheRedis.ttl(rateLimitKey);
+
+    res.json(createSuccessResponse({
+      used,
+      limit: 20,
+      remaining: Math.max(0, 20 - used),
+      resetsInSeconds: ttl > 0 ? ttl : 0,
+    }, 'Rate limit status'));
   });
 }
 

@@ -215,6 +215,11 @@ model Company {
   employeeTransfers  EmployeeTransfer[]
   employeePromotions EmployeePromotion[]
 
+  // Shift Swap, WFH & Policy Documents Relations
+  shiftSwapRequests ShiftSwapRequest[]
+  wfhRequests       WfhRequest[]
+  policyDocuments   PolicyDocument[]
+
   // Support Ticket Relations
   supportTickets SupportTicket[]
 
@@ -224,6 +229,7 @@ model Company {
   payrollAnalytics      PayrollAnalyticsMonthly[]
   attritionMetrics      AttritionMetricsMonthly[]
   analyticsAlerts       AnalyticsAlert[]
+  reportHistory         ReportHistory[]
 
   @@map("companies")
 }

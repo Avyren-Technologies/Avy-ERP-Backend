@@ -232,3 +232,25 @@ model AnalyticsAuditLog {
   @@index([companyId, action, createdAt])
   @@map("analytics_audit_logs")
 }
+
+model ReportHistory {
+  id            String   @id @default(cuid())
+  companyId     String
+  userId        String
+  userName      String
+  reportType    String
+  reportTitle   String
+  category      String
+  filters       Json
+  format        String   @default("excel")
+  status        String   @default("COMPLETED")
+  fileSize      Int?
+  generatedAt   DateTime @default(now())
+
+  company       Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, generatedAt])
+  @@index([companyId, reportType])
+  @@index([companyId, userId])
+  @@map("report_history")
+}
