@@ -8,6 +8,7 @@ import {
   getCachedAttendanceRules,
   getCachedCompanySettings,
 } from '../../../shared/utils/config-cache';
+import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
 import { resolvePolicy, type EvaluationContext } from '../../../shared/services/policy-resolver.service';
 import {
   resolveAttendanceStatus,
@@ -929,15 +930,32 @@ export class ESSController {
       return;
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Use company timezone for correct attendance date
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const nowCT = nowInCompanyTimezone(companyTimezone);
+    const today = new Date(nowCT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
 
-    const record = await platformPrisma.attendanceRecord.findUnique({
+    let record = await platformPrisma.attendanceRecord.findUnique({
       where: { employeeId_date: { employeeId, date: today } },
       include: { shift: true, location: true },
     });
 
-    if (!record) {
+    // For cross-day (night) shifts: if no record today, check yesterday's record
+    // (employee may have checked in yesterday and not yet checked out)
+    if (!record || (!record.punchIn)) {
+      const yesterdayDT = nowCT.minus({ days: 1 });
+      const yesterday = new Date(yesterdayDT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
+      const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
+        where: { employeeId_date: { employeeId, date: yesterday } },
+        include: { shift: true, location: true },
+      });
+      if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
+        record = yesterdayRecord;
+      }
+    }
+
+    if (!record || !record.punchIn) {
       res.json(createSuccessResponse({ status: 'NOT_CHECKED_IN', record: null }, 'Not checked in today'));
       return;
     }
@@ -965,8 +983,15 @@ export class ESSController {
 
     const { shiftId, locationId, latitude, longitude, photoUrl } = parsed.data;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Use company timezone for all time operations
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const nowCT = nowInCompanyTimezone(companyTimezone);
+    // Attendance date in company timezone (stored as UTC midnight of that date)
+    const todayStr = nowCT.toFormat('yyyy-MM-dd');
+    const today = new Date(todayStr + 'T00:00:00.000Z');
+
+    const now = new Date();
 
     // Prevent double check-in
     const existing = await platformPrisma.attendanceRecord.findUnique({
@@ -991,53 +1016,78 @@ export class ESSController {
       geoStatus = 'NO_LOCATION';
     }
 
-    const now = new Date();
-
     // Shift time validation (if employee has a shift assigned)
     const employeeForShift = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
-      select: { shiftId: true },
+      select: { shiftId: true, locationId: true },
     });
 
-    if (employeeForShift?.shiftId || shiftId) {
-      const targetShiftId = shiftId || employeeForShift?.shiftId;
+    const effectiveShiftId = shiftId || employeeForShift?.shiftId;
+
+    if (effectiveShiftId) {
       const shift = await platformPrisma.companyShift.findUnique({
-        where: { id: targetShiftId! },
-        select: { startTime: true, endTime: true, name: true },
+        where: { id: effectiveShiftId },
+        select: {
+          startTime: true,
+          endTime: true,
+          name: true,
+          isCrossDay: true,
+          gracePeriodMinutes: true,
+          maxLateCheckInMinutes: true,
+        },
       });
 
       if (shift) {
-        // Get attendance rules for grace period
-        const rules = await platformPrisma.attendanceRule.findUnique({
-          where: { companyId },
-          select: { gracePeriodMinutes: true },
-        });
-        const gracePeriod = rules?.gracePeriodMinutes ? Number(rules.gracePeriodMinutes) : 15;
+        // Resolve max late check-in using policy hierarchy:
+        // shift override -> attendance rules -> system defaults
+        const rules = await getCachedAttendanceRules(companyId);
+        const maxLateCheckIn = shift.maxLateCheckInMinutes
+          ?? rules.maxLateCheckInMinutes
+          ?? 240;
 
-        // Parse shift start time
-        const [shiftHour, shiftMin] = (shift.startTime || '00:00').split(':').map(Number);
-        const shiftStart = new Date(now);
-        shiftStart.setHours(shiftHour ?? 0, shiftMin ?? 0, 0, 0);
+        // Parse shift start/end in company timezone
+        const [shiftHour = 0, shiftMin = 0] = (shift.startTime || '00:00').split(':').map(Number);
+        // Current time in company timezone (minutes since midnight)
+        const nowMinutes = nowCT.hour * 60 + nowCT.minute;
+        const shiftStartMinutes = (shiftHour ?? 0) * 60 + (shiftMin ?? 0);
 
-        // Allow check-in only within: (shiftStart - 60 minutes) to (shiftStart + gracePeriod + 120 minutes)
-        // This gives a 1-hour early window and 2-hour late window (after grace period)
-        const earliestCheckIn = new Date(shiftStart.getTime() - 60 * 60 * 1000);
-        const latestCheckIn = new Date(shiftStart.getTime() + (gracePeriod + 120) * 60 * 1000);
+        // Early window: 60 minutes before shift start
+        const earlyWindowMinutes = 60;
+        // Late window: maxLateCheckIn minutes after shift start
+        const lateWindowMinutes = maxLateCheckIn;
 
-        // Handle overnight shifts (endTime < startTime means shift crosses midnight)
-        const [toHour, toMin] = (shift.endTime || '23:59').split(':').map(Number);
-        const isOvernightShift = (toHour ?? 0) < (shiftHour ?? 0);
+        const earliestMinutes = shiftStartMinutes - earlyWindowMinutes;
+        const latestMinutes = shiftStartMinutes + lateWindowMinutes;
 
-        if (!isOvernightShift) {
-          // Normal shift: validate check-in time
-          if (now < earliestCheckIn || now > latestCheckIn) {
-            throw ApiError.badRequest(
-              `Check-in not allowed at this time. Your shift "${shift.name}" starts at ${shift.startTime}. ` +
-              `You can check in between ${shift.startTime} (minus 1 hour) and up to 2 hours after shift start.`
-            );
+        let isWithinWindow: boolean;
+
+        if (shift.isCrossDay) {
+          // Cross-day (night) shift: e.g., 19:00 - 07:00
+          // The check-in window wraps around midnight.
+          // Earliest: shiftStart - earlyWindow (e.g., 18:00)
+          // Latest: shiftStart + maxLateCheckIn (e.g., 19:00 + 240 = 23:00, or past midnight)
+
+          if (latestMinutes >= 1440) {
+            // Late window extends past midnight
+            // Valid if: nowMinutes >= earliestMinutes OR nowMinutes <= (latestMinutes - 1440)
+            isWithinWindow = nowMinutes >= earliestMinutes || nowMinutes <= (latestMinutes - 1440);
+          } else {
+            // Late window doesn't cross midnight (e.g., 18:00 - 23:00)
+            isWithinWindow = nowMinutes >= earliestMinutes && nowMinutes <= latestMinutes;
           }
+        } else {
+          // Day shift: simple range check
+          isWithinWindow = nowMinutes >= earliestMinutes && nowMinutes <= latestMinutes;
         }
-        // For overnight shifts, allow broader window (more complex to validate)
+
+        if (!isWithinWindow) {
+          const earlyTime = `${String(Math.floor(Math.max(0, earliestMinutes) / 60)).padStart(2, '0')}:${String(Math.max(0, earliestMinutes) % 60).padStart(2, '0')}`;
+          const lateHours = Math.floor(lateWindowMinutes / 60);
+          throw ApiError.badRequest(
+            `Check-in not allowed at this time. Your shift "${shift.name}" starts at ${shift.startTime}. ` +
+            `You can check in from ${earlyTime} (1 hour before shift) up to ${lateHours} hours after shift start.`
+          );
+        }
       }
     }
 
@@ -1050,7 +1100,7 @@ export class ESSController {
         status: 'PRESENT',
         source: 'MOBILE_GPS',
         companyId,
-        shiftId: shiftId || null,
+        shiftId: effectiveShiftId || null,
         locationId: locationId || null,
         checkInLatitude: latitude ?? null,
         checkInLongitude: longitude ?? null,
@@ -1061,8 +1111,8 @@ export class ESSController {
         punchIn: now,
         status: 'PRESENT',
         source: 'MOBILE_GPS',
-        ...(shiftId
-          ? { shift: { connect: { id: shiftId } } }
+        ...(effectiveShiftId
+          ? { shift: { connect: { id: effectiveShiftId } } }
           : { shift: { disconnect: true } }),
         ...(locationId
           ? { location: { connect: { id: locationId } } }
@@ -1092,12 +1142,32 @@ export class ESSController {
 
     const { latitude, longitude, photoUrl } = parsed.data;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Use company timezone for correct attendance date
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const nowCT = nowInCompanyTimezone(companyTimezone);
+    const todayStr = nowCT.toFormat('yyyy-MM-dd');
+    const today = new Date(todayStr + 'T00:00:00.000Z');
 
-    const existing = await platformPrisma.attendanceRecord.findUnique({
+    // Look for today's record first; for cross-day (night) shifts, also check
+    // yesterday's record (employee checked in on day 1, checking out on day 2)
+    let existing = await platformPrisma.attendanceRecord.findUnique({
       where: { employeeId_date: { employeeId, date: today } },
     });
+    let attendanceDate = today;
+
+    if ((!existing || !existing.punchIn || existing.punchOut) && todayStr) {
+      const yesterdayDT = nowCT.minus({ days: 1 });
+      const yesterdayStr = yesterdayDT.toFormat('yyyy-MM-dd');
+      const yesterday = new Date(yesterdayStr + 'T00:00:00.000Z');
+      const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
+        where: { employeeId_date: { employeeId, date: yesterday } },
+      });
+      if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
+        existing = yesterdayRecord;
+        attendanceDate = yesterday;
+      }
+    }
 
     if (!existing || !existing.punchIn) {
       throw ApiError.badRequest('You must check in before checking out.');
@@ -1107,8 +1177,6 @@ export class ESSController {
     }
 
     const now = new Date();
-    const companySettings = await getCachedCompanySettings(companyId);
-    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
 
     const employee = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
@@ -1117,10 +1185,11 @@ export class ESSController {
     const effectiveShiftId = existing.shiftId ?? employee?.shiftId ?? null;
     const effectiveLocationId = existing.locationId ?? employee?.locationId ?? null;
 
+    // Use the attendance date (may be yesterday for cross-day shifts) for context
     const holiday = await platformPrisma.holidayCalendar.findFirst({
       where: {
         companyId,
-        date: today,
+        date: attendanceDate,
       },
       select: { name: true },
     });
@@ -1129,14 +1198,14 @@ export class ESSController {
       select: { weekOff1: true, weekOff2: true },
     });
     const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dow = dayOfWeek[today.getDay()];
+    const dow = dayOfWeek[attendanceDate.getDay()];
     const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
 
     const evaluationContext: EvaluationContext = {
       employeeId,
       shiftId: effectiveShiftId,
       locationId: effectiveLocationId,
-      date: today,
+      date: attendanceDate,
       isHoliday: !!holiday,
       isWeekOff,
       ...(holiday?.name && { holidayName: holiday.name }),
