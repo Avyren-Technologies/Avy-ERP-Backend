@@ -12,53 +12,53 @@ model ESSConfig {
   viewPayslips        Boolean @default(true)
   downloadPayslips    Boolean @default(true)
   downloadForm16      Boolean @default(true)
-  viewSalaryStructure Boolean @default(false)
+  viewSalaryStructure Boolean @default(true)
   itDeclaration       Boolean @default(true)
 
   // ── Leave ──
   leaveApplication  Boolean @default(true)
   leaveBalanceView  Boolean @default(true)
-  leaveCancellation Boolean @default(false)
+  leaveCancellation Boolean @default(true)
 
   // ── Attendance ──
   attendanceView           Boolean @default(true)
-  attendanceRegularization Boolean @default(false)
-  viewShiftSchedule        Boolean @default(false)
-  shiftSwapRequest         Boolean @default(false)
-  wfhRequest               Boolean @default(false)
+  attendanceRegularization Boolean @default(true)
+  viewShiftSchedule        Boolean @default(true)
+  shiftSwapRequest         Boolean @default(true)
+  wfhRequest               Boolean @default(true)
 
   // ── Profile & Documents ──
-  profileUpdate     Boolean @default(false)
-  documentUpload    Boolean @default(false)
-  employeeDirectory Boolean @default(false)
-  viewOrgChart      Boolean @default(false)
+  profileUpdate     Boolean @default(true)
+  documentUpload    Boolean @default(true)
+  employeeDirectory Boolean @default(true)
+  viewOrgChart      Boolean @default(true)
 
   // ── Financial ──
-  reimbursementClaims Boolean @default(false)
-  loanApplication    Boolean @default(false)
-  assetView          Boolean @default(false)
+  reimbursementClaims Boolean @default(true)
+  loanApplication    Boolean @default(true)
+  assetView          Boolean @default(true)
 
   // ── Performance & Development ──
-  performanceGoals   Boolean @default(false)
-  appraisalAccess    Boolean @default(false)
-  feedback360        Boolean @default(false)
-  trainingEnrollment Boolean @default(false)
+  performanceGoals   Boolean @default(true)
+  appraisalAccess    Boolean @default(true)
+  feedback360        Boolean @default(true)
+  trainingEnrollment Boolean @default(true)
 
   // ── Support & Communication ──
-  helpDesk            Boolean @default(false)
-  grievanceSubmission Boolean @default(false)
+  helpDesk            Boolean @default(true)
+  grievanceSubmission Boolean @default(true)
   holidayCalendar     Boolean @default(true)
-  policyDocuments     Boolean @default(false)
-  announcementBoard   Boolean @default(false)
+  policyDocuments     Boolean @default(true)
+  announcementBoard   Boolean @default(true)
 
   // ── Manager Self-Service (MSS) ──
-  mssViewTeam           Boolean @default(false)
-  mssApproveLeave       Boolean @default(false)
-  mssApproveAttendance  Boolean @default(false)
-  mssViewTeamAttendance Boolean @default(false)
+  mssViewTeam           Boolean @default(true)
+  mssApproveLeave       Boolean @default(true)
+  mssApproveAttendance  Boolean @default(true)
+  mssViewTeamAttendance Boolean @default(true)
 
   // ── Mobile Behavior ──
-  mobileOfflinePunch     Boolean          @default(false)
+  mobileOfflinePunch     Boolean          @default(true)
   mobileSyncRetryMinutes Int              @default(5)
   mobileLocationAccuracy LocationAccuracy @default(HIGH)
 

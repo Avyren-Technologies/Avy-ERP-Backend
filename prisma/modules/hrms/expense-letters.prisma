@@ -1,29 +1,127 @@
 // ==========================================
 // HRMS — Expense, Letters, Grievance & Discipline
 // ==========================================
-// Models: ExpenseClaim, HRLetterTemplate, HRLetter, GrievanceCategory, GrievanceCase, DisciplinaryAction
-// Enums: ClaimStatus, GrievanceStatus, DisciplineActionType
+// Models: ExpenseCategory, ExpenseCategoryLimit, ExpenseClaim, ExpenseClaimItem,
+//         HRLetterTemplate, HRLetter, GrievanceCategory, GrievanceCase, DisciplinaryAction
+// Enums: ClaimStatus, ExpensePaymentMethod, GrievanceStatus, DisciplineActionType
+
+model ExpenseCategory {
+  id               String  @id @default(cuid())
+  name             String // Display name: "Travel", "Food & Beverages", etc.
+  code             String // Short code: TRAVEL, FOOD, ACCOMMODATION, FUEL, PHONE, INTERNET, OFFICE_SUPPLIES, MEDICAL, UNIFORM, BUSINESS, OTHER
+  description      String?
+  isActive         Boolean @default(true)
+  requiresReceipt  Boolean @default(true) // Whether receipt is mandatory for all claims
+  receiptThreshold Decimal? @db.Decimal(15, 2) // Receipt required above this amount (if requiresReceipt is false)
+  maxAmountPerClaim Decimal? @db.Decimal(15, 2) // Max amount per single claim in this category
+  maxAmountPerMonth Decimal? @db.Decimal(15, 2) // Monthly spending cap
+  maxAmountPerYear  Decimal? @db.Decimal(15, 2) // Annual spending cap
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  limits ExpenseCategoryLimit[]
+  items  ExpenseClaimItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@map("expense_categories")
+}
+
+model ExpenseCategoryLimit {
+  id         String @id @default(cuid())
+  categoryId String
+  category   ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  // Limits can be tied to grade or designation (one or both)
+  gradeId       String?
+  grade         Grade? @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+  designationId String?
+  designation   Designation? @relation(fields: [designationId], references: [id], onDelete: Cascade)
+
+  maxAmountPerClaim Decimal? @db.Decimal(15, 2) // Overrides category-level limit
+  maxAmountPerMonth Decimal? @db.Decimal(15, 2)
+  maxAmountPerYear  Decimal? @db.Decimal(15, 2)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([categoryId, gradeId, designationId])
+  @@map("expense_category_limits")
+}
 
 model ExpenseClaim {
   id          String      @id @default(cuid())
+  claimNumber String? // Auto-generated: EXP-2026-0001
   employeeId  String
   employee    Employee    @relation(fields: [employeeId], references: [id])
   title       String
-  amount      Decimal     @db.Decimal(15, 2)
-  category    String // TRAVEL, MEDICAL, INTERNET, FUEL, UNIFORM, BUSINESS, OTHER
-  receipts    Json? // Array of { fileName, fileUrl }
+  amount      Decimal     @db.Decimal(15, 2) // Total claim amount (sum of line items or direct)
+  category    String // Legacy: kept for backward compatibility (primary category)
+  receipts    Json? // Legacy: kept for backward compatibility (claim-level receipts)
   description String?
-  tripDate    DateTime?   @db.Date
-  status      ClaimStatus @default(DRAFT)
-  approvedBy  String?
-  approvedAt  DateTime?
-  paidAt      DateTime?
-  companyId   String
-  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  tripDate    DateTime?   @db.Date // Legacy: kept for single-date claims
+  fromDate    DateTime?   @db.Date // For date-range claims (e.g., multi-day travel)
+  toDate      DateTime?   @db.Date
 
+  // Payment & merchant info
+  paymentMethod ExpensePaymentMethod @default(CASH)
+  merchantName  String? // Vendor/merchant name
+  projectCode   String? // Project/cost center for allocation
+  costCentreId  String? // FK to CostCentre if applicable
+  currency      String  @default("INR")
+
+  // Approval
+  status          ClaimStatus @default(DRAFT)
+  approvedAmount  Decimal?    @db.Decimal(15, 2) // For partial approvals
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String? // Reason when rejected
+  paidAt          DateTime?
+  paidInPayrollId String? // FK to PayrollRun when paid through payroll
+
+  // Line items
+  items ExpenseClaimItem[]
+
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([companyId, status])
+  @@index([employeeId, status])
+  @@index([companyId, employeeId])
   @@map("expense_claims")
+}
+
+model ExpenseClaimItem {
+  id          String @id @default(cuid())
+  claimId     String
+  claim       ExpenseClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  categoryId  String?
+  category    ExpenseCategory? @relation(fields: [categoryId], references: [id])
+  categoryCode String // Denormalized for quick access: TRAVEL, FOOD, etc.
+  description String
+  amount      Decimal @db.Decimal(15, 2)
+  expenseDate DateTime @db.Date
+  merchantName String?
+  receipts     Json? // Array of { fileName, fileUrl } per line item
+  isApproved   Boolean? // null = pending, true = approved, false = rejected (for partial approvals)
+  approvedAmount Decimal? @db.Decimal(15, 2) // Amount approved for this item (may differ from claimed)
+  rejectionReason String? // Per-item rejection reason
+
+  // Mileage/distance tracking (for travel claims)
+  distanceKm   Decimal? @db.Decimal(10, 2)
+  ratePerKm    Decimal? @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("expense_claim_items")
 }
 
 model HRLetterTemplate {
@@ -119,9 +217,21 @@ model DisciplinaryAction {
 enum ClaimStatus {
   DRAFT
   SUBMITTED
+  PENDING_APPROVAL
   APPROVED
+  PARTIALLY_APPROVED
   REJECTED
   PAID
+  CANCELLED
+}
+
+enum ExpensePaymentMethod {
+  CASH
+  PERSONAL_CARD
+  COMPANY_CARD
+  BANK_TRANSFER
+  UPI
+  OTHER
 }
 
 enum GrievanceStatus {

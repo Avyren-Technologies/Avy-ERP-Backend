@@ -14,8 +14,11 @@ export const DEFAULT_ROLES = [
       'ess:view-attendance', 'ess:regularize-attendance', 'ess:view-holidays',
       'ess:it-declaration', 'ess:view-directory', 'ess:view-profile',
       'ess:download-form16', 'ess:view-goals', 'ess:submit-appraisal',
-      'ess:submit-feedback', 'ess:view-assets', 'ess:enroll-training',
+      'ess:submit-feedback', 'ess:swap-shift', 'ess:request-wfh',
+      'ess:upload-document', 'ess:view-policies', 'ess:claim-expense',
+      'ess:view-org-chart', 'ess:view-assets', 'ess:enroll-training',
       'ess:raise-grievance', 'ess:raise-helpdesk', 'ess:apply-loan',
+      'ess:use-chatbot', 'ess:view-esign', 'ess:view-disciplinary',
     ],
     isSystem: false,
   },
@@ -162,6 +165,21 @@ export const DEFAULT_GRIEVANCE_CATEGORIES = [
   { name: 'Workplace Safety', slaHours: 24 },
   { name: 'Manager Conduct', slaHours: 72 },
   { name: 'Policy & Process', slaHours: 96 },
+];
+
+// ── Default Expense Categories ──
+export const DEFAULT_EXPENSE_CATEGORIES = [
+  { name: 'Travel', code: 'TRAVEL', description: 'Air/train/bus fare, taxi, cab charges', requiresReceipt: true },
+  { name: 'Food & Beverages', code: 'FOOD', description: 'Meals, refreshments during official work', requiresReceipt: false, receiptThreshold: 500 },
+  { name: 'Accommodation', code: 'ACCOMMODATION', description: 'Hotel/lodge stays for official travel', requiresReceipt: true },
+  { name: 'Fuel', code: 'FUEL', description: 'Petrol/diesel for official travel using own vehicle', requiresReceipt: true },
+  { name: 'Phone & Internet', code: 'PHONE_INTERNET', description: 'Mobile bills, internet charges for work', requiresReceipt: true },
+  { name: 'Office Supplies', code: 'OFFICE_SUPPLIES', description: 'Stationery, printing, courier charges', requiresReceipt: true },
+  { name: 'Medical', code: 'MEDICAL', description: 'Medical expenses eligible for reimbursement', requiresReceipt: true },
+  { name: 'Uniform & Dress', code: 'UNIFORM', description: 'Uniform and dress allowance claims', requiresReceipt: true },
+  { name: 'Business Entertainment', code: 'BUSINESS', description: 'Client entertainment, gifts, hospitality', requiresReceipt: true },
+  { name: 'Mileage', code: 'MILEAGE', description: 'Per-km reimbursement for own vehicle usage', requiresReceipt: false },
+  { name: 'Other', code: 'OTHER', description: 'Miscellaneous expenses not covered above', requiresReceipt: true },
 ];
 
 // ── Approval Workflows ──

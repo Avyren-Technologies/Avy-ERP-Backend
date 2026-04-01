@@ -1,6 +1,7 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, OvertimeRequestStatus } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { generateNextNumber } from '../../../shared/utils/number-series';
 import { essService } from '../ess/ess.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
@@ -174,12 +175,18 @@ export class PayrollRunService {
       throw ApiError.conflict(`Payroll run for ${month}/${year} already exists (status: ${existing.status})`);
     }
 
+    // Generate payroll reference number (graceful: if no series configured, proceed without)
+    const referenceNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Payroll', 'Payroll Run'], 'Payroll Run',
+    ).catch(() => undefined);
+
     return platformPrisma.payrollRun.create({
       data: {
         companyId,
         month,
         year,
         status: 'DRAFT',
+        ...(referenceNumber ? { referenceNumber } : {}),
       },
     });
   }
@@ -463,11 +470,15 @@ export class PayrollRunService {
       attendanceByEmployee.get(rec.employeeId)!.push(rec);
     }
 
-    // Batch-fetch ALL approved OT requests for the company/month
+    // Batch-fetch OT requests for the company/month
+    // If autoIncludePayroll is enabled, include PENDING requests (treated as auto-approved for payroll)
+    const otStatusFilter: OvertimeRequestStatus[] = otRule?.autoIncludePayroll
+      ? ['APPROVED', 'PENDING']
+      : ['APPROVED'];
     const allOtRequests = await platformPrisma.overtimeRequest.findMany({
       where: {
         companyId,
-        status: 'APPROVED',
+        status: { in: otStatusFilter },
         date: { gte: monthStart, lt: monthEnd },
       },
       select: {
@@ -510,8 +521,9 @@ export class PayrollRunService {
     const salaryRoundingRule = fiscalConfig?.salaryRoundingRule ?? 'NEAREST_RUPEE';
 
     // YEL-8: Fetch approved unpaid expense claims for reimbursement merge
+    // Include both fully and partially approved claims
     const approvedClaims = await platformPrisma.expenseClaim.findMany({
-      where: { companyId, status: 'APPROVED', paidAt: null },
+      where: { companyId, status: { in: ['APPROVED', 'PARTIALLY_APPROVED'] }, paidAt: null },
     });
     const claimsByEmployee = new Map<string, typeof approvedClaims>();
     for (const claim of approvedClaims) {
@@ -735,10 +747,11 @@ export class PayrollRunService {
       }
 
       // YEL-8: Add reimbursement from approved expense claims
+      // Use approvedAmount (for partial approvals) or fallback to full amount
       let reimbursementTotal = 0;
       const empClaims = claimsByEmployee.get(emp.id) ?? [];
       for (const claim of empClaims) {
-        reimbursementTotal += Number(claim.amount);
+        reimbursementTotal += Number(claim.approvedAmount ?? claim.amount);
       }
       if (reimbursementTotal > 0) {
         earnings['REIMBURSEMENT'] = round(reimbursementTotal);
@@ -922,7 +935,7 @@ export class PayrollRunService {
     if (paidClaimIds.length > 0) {
       await platformPrisma.expenseClaim.updateMany({
         where: { id: { in: paidClaimIds } },
-        data: { paidAt: new Date() },
+        data: { status: 'PAID', paidAt: new Date(), paidInPayrollId: runId },
       });
     }
 
@@ -975,18 +988,23 @@ export class PayrollRunService {
     });
     const pfInclusionCodes = new Set(pfInclusionComponents.map((c) => c.code));
 
-    // Build PT slab lookup by state
+    // Build PT slab lookup by state (with monthly overrides)
     const ptSlabsByState = new Map<string, any[]>();
+    const ptMonthlyOverridesByState = new Map<string, Record<string, number>>();
     for (const ptc of ptConfigs) {
       ptSlabsByState.set(ptc.state, ptc.slabs as any[]);
+      if (ptc.monthlyOverrides) {
+        ptMonthlyOverridesByState.set(ptc.state, ptc.monthlyOverrides as Record<string, number>);
+      }
     }
 
-    // Build LWF lookup by state
-    const lwfByState = new Map<string, { employeeAmount: number; employerAmount: number }>();
+    // Build LWF lookup by state (with frequency for applicable-month checks)
+    const lwfByState = new Map<string, { employeeAmount: number; employerAmount: number; frequency: string }>();
     for (const lwf of lwfConfigs) {
       lwfByState.set(lwf.state, {
         employeeAmount: Number(lwf.employeeAmount),
         employerAmount: Number(lwf.employerAmount),
+        frequency: lwf.frequency,
       });
     }
 
@@ -1038,7 +1056,7 @@ export class PayrollRunService {
       where: {
         companyId,
         financialYear: fiscalYearLabel,
-        status: { in: ['SUBMITTED', 'VERIFIED'] },
+        status: { in: ['SUBMITTED', 'VERIFIED', 'LOCKED'] },
       },
       select: {
         employeeId: true,
@@ -1048,9 +1066,12 @@ export class PayrollRunService {
         section80D: true,
         section80E: true,
         section80G: true,
+        section80GG: true,
         section80TTA: true,
         homeLoanInterest: true,
         hraExemption: true,
+        ltaExemption: true,
+        otherIncome: true,
       },
     });
     const employeeRegimeMap = new Map<string, string>();
@@ -1058,6 +1079,10 @@ export class PayrollRunService {
     const deductionsByEmployee = new Map<string, number>();
     // ORA-1: Build HRA exemption data per employee
     const hraDataByEmployee = new Map<string, { rentPaid: number; cityType: string }>();
+    // LTA exemption per employee (old regime only — exempt from taxable income)
+    const ltaByEmployee = new Map<string, number>();
+    // Other income per employee (added to taxable income)
+    const otherIncomeByEmployee = new Map<string, number>();
     for (const itd of itDeclarations) {
       employeeRegimeMap.set(itd.employeeId, itd.regime);
 
@@ -1091,11 +1116,30 @@ export class PayrollRunService {
       const s80tta = itd.section80TTA as any;
       if (s80tta?.savingsInterest) totalDeductions += Math.min(Number(s80tta.savingsInterest), 10000);
 
+      // Section 80GG rent paid for non-HRA employees (cap ₹60,000/year i.e. ₹5,000/month)
+      const s80gg = itd.section80GG as any;
+      if (s80gg?.rentPaid) totalDeductions += Math.min(Number(s80gg.rentPaid), 60000);
+
       // Home loan interest (cap ₹2,00,000)
       const hli = itd.homeLoanInterest as any;
       if (hli?.interestAmount) totalDeductions += Math.min(Number(hli.interestAmount), 200000);
 
       deductionsByEmployee.set(itd.employeeId, totalDeductions);
+
+      // LTA exemption (store for old regime employees — exempted from taxable income)
+      const lta = itd.ltaExemption as any;
+      if (lta?.travelCost) {
+        ltaByEmployee.set(itd.employeeId, Number(lta.travelCost));
+      }
+
+      // Other income (add to taxable income — interest, rental, etc.)
+      const oi = itd.otherIncome as any;
+      if (oi) {
+        const otherIncomeTotal = Number(oi.interestIncome ?? 0) + Number(oi.rentalIncome ?? 0) + Number(oi.otherSources ?? 0);
+        if (otherIncomeTotal > 0) {
+          otherIncomeByEmployee.set(itd.employeeId, otherIncomeTotal);
+        }
+      }
 
       // ORA-1: Store HRA exemption data for old regime employees
       const hra = itd.hraExemption as any;
@@ -1228,13 +1272,23 @@ export class PayrollRunService {
         }
       }
 
-      // 3. PT Calculation
+      // 3. PT Calculation (with monthly override support)
+      // In India, PT varies by month in some states (e.g., Karnataka: Feb = ₹300, rest = ₹200)
       if (empType.ptApplicable && state && ptSlabsByState.has(state)) {
         const slabs = ptSlabsByState.get(state)!;
+        // First, find the slab-based amount
         for (const slab of slabs) {
           if (grossEarnings >= slab.fromAmount && grossEarnings <= slab.toAmount) {
             ptAmount = slab.taxAmount;
             break;
+          }
+        }
+        // Then check for a monthly override (e.g., { "2": 300 } means February = ₹300)
+        const overrides = ptMonthlyOverridesByState.get(state);
+        if (overrides) {
+          const monthKey = String(run.month);
+          if (overrides[monthKey] !== undefined) {
+            ptAmount = overrides[monthKey];
           }
         }
       }
@@ -1287,13 +1341,20 @@ export class PayrollRunService {
           );
           totalITDeductions += hraExemption;
         }
+
+        // LTA exemption (old regime only — exempt from taxable income)
+        const ltaAmount = ltaByEmployee.get(entry.employeeId) ?? 0;
+        if (ltaAmount > 0) totalITDeductions += ltaAmount;
       } else {
         // New regime: only standard deduction ₹75,000
         totalITDeductions = 75000;
       }
 
-      // Taxable income after deductions
-      const taxableIncome = Math.max(projectedAnnualIncome - totalITDeductions, 0);
+      // Add other income (interest, rental, etc.) to projected income before computing taxable income
+      const otherIncome = otherIncomeByEmployee.get(entry.employeeId) ?? 0;
+
+      // Taxable income after deductions + other income
+      const taxableIncome = Math.max(projectedAnnualIncome + otherIncome - totalITDeductions, 0);
 
       // Apply slabs to taxable income (after deductions)
       let annualTax = 0;
@@ -1301,11 +1362,24 @@ export class PayrollRunService {
         const upper = slab.toAmount === null || slab.toAmount === undefined ? Infinity : slab.toAmount;
         if (taxableIncome > slab.fromAmount) {
           const taxableInSlab = Math.min(taxableIncome, upper) - slab.fromAmount;
-          annualTax += taxableInSlab * slab.rate;
+          annualTax += taxableInSlab * (slab.rate / 100);
         }
       }
 
-      // Add cess
+      // Apply surcharge for high earners (before cess)
+      const surchargeRates = taxConfig.surchargeRates as Array<{ threshold: number; rate: number }> | null;
+      if (surchargeRates && Array.isArray(surchargeRates) && surchargeRates.length > 0) {
+        // Sort descending by threshold to find the highest applicable slab
+        const sortedSurcharge = [...surchargeRates].sort((a, b) => b.threshold - a.threshold);
+        for (const sc of sortedSurcharge) {
+          if (taxableIncome > sc.threshold) {
+            annualTax += annualTax * (sc.rate / 100);
+            break;
+          }
+        }
+      }
+
+      // Add cess (4% health & education cess on tax + surcharge)
       annualTax = annualTax * (1 + cessRate);
 
       // Subtract YTD TDS to get this month's TDS
@@ -1314,11 +1388,23 @@ export class PayrollRunService {
       const proportionalTds = round(totalTdsForYear * monthsElapsed / 12);
       tdsAmount = Math.max(round(proportionalTds - ytdTds), 0);
 
-      // 5. LWF
+      // 5. LWF (respects frequency — only deduct in applicable months)
       if (state && lwfByState.has(state)) {
         const lwf = lwfByState.get(state)!;
-        lwfEmployee = lwf.employeeAmount;
-        lwfEmployer = lwf.employerAmount;
+        let lwfApplicable = false;
+        if (lwf.frequency === 'MONTHLY') {
+          lwfApplicable = true;
+        } else if (lwf.frequency === 'SEMI_ANNUAL') {
+          // Deduct in June (6) and December (12) — end of each half-year
+          lwfApplicable = run.month === 6 || run.month === 12;
+        } else if (lwf.frequency === 'ANNUAL') {
+          // Deduct in February (2) — typically the last payroll before FY close
+          lwfApplicable = run.month === 2;
+        }
+        if (lwfApplicable) {
+          lwfEmployee = lwf.employeeAmount;
+          lwfEmployer = lwf.employerAmount;
+        }
       }
 
       // Update entry with statutory amounts (H20: include VPF in employee deductions)
@@ -2715,12 +2801,12 @@ export class PayrollRunService {
       },
     });
 
-    // Fetch IT declarations for the FY (submitted or verified)
+    // Fetch IT declarations for the FY (submitted, verified, or locked)
     const itDeclarations = await platformPrisma.iTDeclaration.findMany({
       where: {
         companyId,
         financialYear,
-        status: { in: ['SUBMITTED', 'VERIFIED'] },
+        status: { in: ['SUBMITTED', 'VERIFIED', 'LOCKED'] },
       },
     });
     const itDeclByEmployee = new Map(itDeclarations.map((d) => [d.employeeId, d]));
@@ -2795,8 +2881,9 @@ export class PayrollRunService {
     const form16Records = Array.from(employeeMap.entries()).map(([empId, agg]) => {
       const decl = itDeclByEmployee.get(empId);
 
-      // Standard deduction (Section 16): ₹50,000 under new regime, ₹50,000 under old
-      const standardDeduction = 50000;
+      // Standard deduction (Section 16): ₹75,000 under new regime, ₹50,000 under old
+      const empRegime = decl?.regime ?? 'NEW';
+      const standardDeduction = empRegime === 'OLD' ? 50000 : 75000;
 
       // Chapter VI-A deductions from IT declarations
       let chapterVIA = 0;

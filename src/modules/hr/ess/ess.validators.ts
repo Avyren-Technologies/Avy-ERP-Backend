@@ -147,14 +147,43 @@ export const createDelegateSchema = z.object({
 
 // ── Expense Claims (ESS) ───────────────────────────────────────────
 
+const expenseClaimItemSchema = z.object({
+  id: z.string().optional(),
+  categoryCode: z.string().min(1, 'Category code is required'),
+  categoryId: z.string().optional(),
+  description: z.string().min(1, 'Item description is required'),
+  amount: z.number().positive('Amount must be positive'),
+  expenseDate: z.string().min(1, 'Expense date is required'),
+  merchantName: z.string().optional(),
+  receipts: z.array(z.object({ fileName: z.string(), fileUrl: z.string() })).optional(),
+  distanceKm: z.number().positive().optional(),
+  ratePerKm: z.number().positive().optional(),
+});
+
 export const essExpenseClaimSchema = z.object({
-  title: z.string().min(1),
-  amount: z.number().positive(),
-  category: z.enum(['TRAVEL', 'MEDICAL', 'INTERNET', 'FUEL', 'UNIFORM', 'BUSINESS', 'OTHER']),
+  title: z.string().min(1, 'Title is required'),
+  amount: z.number().positive('Amount must be positive'),
+  category: z.string().min(1, 'Category is required'),
   description: z.string().optional(),
   tripDate: z.string().optional(),
+  fromDate: z.string().optional(),
+  toDate: z.string().optional(),
+  paymentMethod: z.enum(['CASH', 'PERSONAL_CARD', 'COMPANY_CARD', 'BANK_TRANSFER', 'UPI', 'OTHER']).optional(),
+  merchantName: z.string().optional(),
+  projectCode: z.string().optional(),
+  currency: z.string().optional(),
   receipts: z.array(z.object({ fileName: z.string(), fileUrl: z.string() })).optional(),
-});
+  items: z.array(expenseClaimItemSchema).optional(),
+}).refine(
+  (data) => {
+    // If fromDate and toDate are both provided, fromDate must be <= toDate
+    if (data.fromDate && data.toDate) {
+      return new Date(data.fromDate) <= new Date(data.toDate);
+    }
+    return true;
+  },
+  { message: 'From date must be before or equal to to date', path: ['toDate'] }
+);
 
 // ── Loan Application (ESS) ────────────────────────────────────────
 

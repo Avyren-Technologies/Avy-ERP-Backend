@@ -52,6 +52,10 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'ess-expense-claims', label: 'My Expenses', icon: 'receipt', requiredPerm: 'ess:claim-expense', path: '/app/company/hr/my-expense-claims', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 317 },
   { id: 'ess-loans', label: 'My Loans', icon: 'banknote', requiredPerm: 'ess:apply-loan', path: '/app/company/hr/my-loans', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 318 },
   { id: 'ess-org-chart', label: 'Org Chart', icon: 'network', requiredPerm: 'ess:view-org-chart', path: '/app/company/hr/org-chart', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 319 },
+  { id: 'ess-esign', label: 'E-Sign Requests', icon: 'pen-tool', requiredPerm: 'ess:view-esign', path: '/app/company/hr/esign', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 320 },
+  { id: 'ess-appraisal', label: 'My Appraisal', icon: 'target', requiredPerm: 'ess:submit-appraisal', path: '/app/company/hr/my-appraisal', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 321 },
+  { id: 'ess-disciplinary', label: 'Disciplinary Actions', icon: 'gavel', requiredPerm: 'ess:view-disciplinary', path: '/app/company/hr/disciplinary', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 322 },
+  { id: 'ess-chatbot', label: 'AI Assistant', icon: 'message-circle', requiredPerm: 'ess:use-chatbot', path: '/app/company/hr/chatbot', module: 'hr', group: 'My Workspace', roleScope: 'company', sortOrder: 323 },
   { id: 'ess-helpdesk', label: 'Help & Support', icon: 'support', requiredPerm: null, path: '/app/help', module: null, group: 'My Workspace', roleScope: 'company', sortOrder: 399 },
 
   // ═══════ MANAGER SELF-SERVICE ═══════
@@ -121,6 +125,8 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-bank', label: 'Bank Config', icon: 'landmark', requiredPerm: 'hr:configure', path: '/app/company/hr/bank-config', module: 'hr', group: 'Payroll & Compliance', roleScope: 'company', sortOrder: 535 },
   { id: 'hr-loan-pol', label: 'Loan Policies', icon: 'hand-coins', requiredPerm: 'hr:read', path: '/app/company/hr/loan-policies', module: 'hr', group: 'Payroll & Compliance', roleScope: 'company', sortOrder: 536 },
   { id: 'hr-loans', label: 'Loans', icon: 'receipt', requiredPerm: 'hr:read', path: '/app/company/hr/loans', module: 'hr', group: 'Payroll & Compliance', roleScope: 'company', sortOrder: 537 },
+
+  { id: 'hr-it-declarations', label: 'IT Declarations', icon: 'file-check', requiredPerm: 'hr:read', path: '/app/company/hr/it-declarations', module: 'hr', group: 'Payroll & Compliance', roleScope: 'company', sortOrder: 538 },
 
   { id: 'hr-payroll-runs', label: 'Payroll Runs', icon: 'play', requiredPerm: 'hr:read', path: '/app/company/hr/payroll-runs', module: 'hr', group: 'Payroll Operations', roleScope: 'company', sortOrder: 540 },
   { id: 'hr-payslips', label: 'Payslips', icon: 'file-text', requiredPerm: 'hr:read', path: '/app/company/hr/payslips', module: 'hr', group: 'Payroll Operations', roleScope: 'company', sortOrder: 541 },

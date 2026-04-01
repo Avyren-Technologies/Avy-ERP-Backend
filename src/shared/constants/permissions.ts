@@ -154,7 +154,7 @@ export const PERMISSION_MODULES = {
   },
   ess: {
     label: 'Employee Self-Service',
-    actions: ['view-dashboard', 'view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart'],
+    actions: ['view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart', 'use-chatbot', 'view-esign', 'view-disciplinary'],
   },
   platform: {
     label: 'Platform Administration',
@@ -271,7 +271,6 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   'Employee': {
     description: 'Standard employee with ESS access — self-service for leave, attendance, payslips, and profile',
     permissions: [
-      'ess:view-dashboard',
       'ess:view-payslips', 'ess:view-leave', 'ess:apply-leave',
       'ess:view-attendance', 'ess:regularize-attendance', 'ess:view-holidays',
       'ess:it-declaration', 'ess:view-directory', 'ess:view-profile',
@@ -280,7 +279,8 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
       'ess:upload-document', 'ess:view-policies', 'ess:claim-expense',
       'ess:apply-loan', 'ess:view-org-chart',
       'ess:raise-grievance', 'ess:enroll-training', 'ess:view-assets',
-      'ess:raise-helpdesk',
+      'ess:raise-helpdesk', 'ess:use-chatbot',
+      'ess:view-esign', 'ess:view-disciplinary',
     ],
   },
   'Manager': {

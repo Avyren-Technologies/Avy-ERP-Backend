@@ -680,6 +680,44 @@ export class ESSService {
           break;
         }
 
+        case 'ExpenseClaim': {
+          const expenseClaim = await platformPrisma.expenseClaim.findUnique({
+            where: { id: entityId },
+          });
+          if (expenseClaim) {
+            if (decision === 'APPROVED') {
+              await platformPrisma.expenseClaim.update({
+                where: { id: entityId },
+                data: {
+                  status: 'APPROVED',
+                  approvedBy: 'system',
+                  approvedAt: new Date(),
+                  approvedAmount: expenseClaim.amount, // Full approval by default via workflow
+                },
+              });
+              // Also approve all line items if they exist
+              await platformPrisma.expenseClaimItem.updateMany({
+                where: { claimId: entityId },
+                data: { isApproved: true },
+              });
+            } else {
+              await platformPrisma.expenseClaim.update({
+                where: { id: entityId },
+                data: {
+                  status: 'REJECTED',
+                  rejectionReason: 'Rejected via approval workflow',
+                },
+              });
+              // Mark all line items as rejected
+              await platformPrisma.expenseClaimItem.updateMany({
+                where: { claimId: entityId },
+                data: { isApproved: false, rejectionReason: 'Claim rejected via approval workflow' },
+              });
+            }
+          }
+          break;
+        }
+
         default:
           // Unknown entity type — log but don't fail
           break;
@@ -1908,7 +1946,42 @@ export class ESSService {
   async getMyForm16(employeeId: string, companyId: string) {
     if (!employeeId) throw ApiError.badRequest('Employee ID required');
 
-    // Form 16 is generated from statutory filings. Return the employee's payslips and TDS records.
+    // Fetch generated Form 16 statutory filings for this company
+    const filings = await platformPrisma.statutoryFiling.findMany({
+      where: { companyId, type: 'FORM_16' },
+      orderBy: { year: 'desc' },
+      select: {
+        id: true,
+        year: true,
+        status: true,
+        details: true,
+        createdAt: true,
+      },
+    });
+
+    // Extract this employee's Form 16 record from each filing's details
+    // The employee's data is embedded in the filing details during generation
+    const form16Records = filings
+      .map((filing) => {
+        const details = filing.details as any;
+        const records = details?.records ?? details?.employees ?? [];
+        // Match by employee internal ID (records store employeeId as the display ID)
+        const empRecord = Array.isArray(records)
+          ? records.find((r: any) => r.employeeId === employeeId || r.internalId === employeeId)
+          : null;
+        if (!empRecord) return null;
+        return {
+          filingId: filing.id,
+          financialYear: details?.financialYear ?? `${filing.year}-${String(filing.year + 1).slice(2)}`,
+          assessmentYear: details?.assessmentYear ?? `${filing.year + 1}-${String(filing.year + 2).slice(2)}`,
+          status: filing.status,
+          generatedAt: filing.createdAt,
+          ...empRecord,
+        };
+      })
+      .filter(Boolean);
+
+    // Also return payslip TDS summary grouped by financial year for reference
     const payslips = await platformPrisma.payslip.findMany({
       where: { employeeId, companyId },
       select: {
@@ -1924,7 +1997,7 @@ export class ESSService {
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
     });
 
-    return { payslips };
+    return { form16Records, payslips };
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -3385,14 +3458,126 @@ export class ESSService {
   // Expense Claims (ESS)
   // ────────────────────────────────────────────────────────────────────
 
-  async getMyExpenseClaims(companyId: string, userId: string) {
+  async getMyExpenseClaims(companyId: string, userId: string, options?: { status?: string; page?: number; limit?: number }) {
     const employeeId = await this.resolveEmployeeIdFromUser(userId);
-    if (!employeeId) return [];
+    if (!employeeId) return { claims: [], total: 0, page: 1, limit: 25 };
 
-    return platformPrisma.expenseClaim.findMany({
-      where: { employeeId, companyId },
-      orderBy: { createdAt: 'desc' },
+    const page = options?.page ?? 1;
+    const limit = options?.limit ?? 25;
+    const where: any = { employeeId, companyId };
+    if (options?.status) where.status = options.status.toUpperCase();
+
+    const [claims, total] = await Promise.all([
+      platformPrisma.expenseClaim.findMany({
+        where,
+        include: {
+          items: {
+            include: { category: { select: { id: true, name: true, code: true } } },
+            orderBy: { expenseDate: 'asc' },
+          },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      platformPrisma.expenseClaim.count({ where }),
+    ]);
+
+    return { claims, total, page, limit };
+  }
+
+  async getMyExpenseClaim(companyId: string, userId: string, claimId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    const claim = await platformPrisma.expenseClaim.findUnique({
+      where: { id: claimId },
+      include: {
+        items: {
+          include: { category: { select: { id: true, name: true, code: true } } },
+          orderBy: { expenseDate: 'asc' },
+        },
+      },
     });
+    if (!claim || claim.employeeId !== employeeId || claim.companyId !== companyId) {
+      throw ApiError.notFound('Expense claim not found');
+    }
+    return claim;
+  }
+
+  async getExpenseCategories(companyId: string) {
+    return platformPrisma.expenseCategory.findMany({
+      where: { companyId, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getMyExpenseSummary(companyId: string, userId: string, financialYear?: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) return null;
+
+    // Determine date range for financial year (April to March)
+    const now = new Date();
+    let startDate: Date;
+    let endDate: Date;
+    if (financialYear) {
+      const [startYear] = financialYear.split('-').map(Number);
+      startDate = new Date(startYear!, 3, 1); // April 1
+      endDate = new Date(startYear! + 1, 2, 31); // March 31
+    } else {
+      const currentMonth = now.getMonth(); // 0-indexed
+      const startYear = currentMonth >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+      startDate = new Date(startYear, 3, 1);
+      endDate = new Date(startYear + 1, 2, 31);
+    }
+
+    // Get all non-cancelled claims for this period
+    const claims = await platformPrisma.expenseClaim.findMany({
+      where: {
+        employeeId,
+        companyId,
+        status: { notIn: ['CANCELLED', 'DRAFT'] },
+        createdAt: { gte: startDate, lte: endDate },
+      },
+      select: { status: true, amount: true, approvedAmount: true, category: true },
+    });
+
+    const summary = {
+      totalClaimed: 0,
+      totalApproved: 0,
+      totalPaid: 0,
+      totalPending: 0,
+      totalRejected: 0,
+      claimCount: claims.length,
+      byCategory: {} as Record<string, { claimed: number; approved: number }>,
+    };
+
+    for (const claim of claims) {
+      const amt = Number(claim.amount);
+      summary.totalClaimed += amt;
+      if (claim.status === 'APPROVED' || claim.status === 'PARTIALLY_APPROVED') {
+        summary.totalApproved += Number(claim.approvedAmount ?? claim.amount);
+      }
+      if (claim.status === 'PAID') {
+        summary.totalPaid += Number(claim.approvedAmount ?? claim.amount);
+        summary.totalApproved += Number(claim.approvedAmount ?? claim.amount);
+      }
+      if (claim.status === 'SUBMITTED' || claim.status === 'PENDING_APPROVAL') {
+        summary.totalPending += amt;
+      }
+      if (claim.status === 'REJECTED') {
+        summary.totalRejected += amt;
+      }
+      if (!summary.byCategory[claim.category]) {
+        summary.byCategory[claim.category] = { claimed: 0, approved: 0 };
+      }
+      summary.byCategory[claim.category]!.claimed += amt;
+      if (['APPROVED', 'PARTIALLY_APPROVED', 'PAID'].includes(claim.status)) {
+        summary.byCategory[claim.category]!.approved += Number(claim.approvedAmount ?? claim.amount);
+      }
+    }
+
+    return summary;
   }
 
   async createMyExpenseClaim(companyId: string, userId: string, data: {
@@ -3401,27 +3586,118 @@ export class ESSService {
     category: string;
     description?: string | undefined;
     tripDate?: string | undefined;
+    fromDate?: string | undefined;
+    toDate?: string | undefined;
+    paymentMethod?: string | undefined;
+    merchantName?: string | undefined;
+    projectCode?: string | undefined;
+    currency?: string | undefined;
     receipts?: Array<{ fileName: string; fileUrl: string }> | undefined;
+    items?: Array<{
+      categoryCode: string;
+      categoryId?: string | undefined;
+      description: string;
+      amount: number;
+      expenseDate: string;
+      merchantName?: string | undefined;
+      receipts?: Array<{ fileName: string; fileUrl: string }> | undefined;
+      distanceKm?: number | undefined;
+      ratePerKm?: number | undefined;
+    }> | undefined;
   }) {
     const employeeId = await this.resolveEmployeeIdFromUser(userId);
     if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
 
-    return platformPrisma.expenseClaim.create({
-      data: {
-        employeeId,
-        title: data.title,
-        amount: data.amount,
-        category: data.category,
-        description: data.description ?? null,
-        tripDate: data.tripDate ? new Date(data.tripDate) : null,
-        receipts: data.receipts ?? Prisma.JsonNull,
-        status: 'DRAFT',
-        companyId,
+    // Get employee info for limit checks
+    const employee = await platformPrisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { gradeId: true, designationId: true },
+    });
+
+    // Calculate total from line items if provided, otherwise use direct amount
+    let totalAmount = data.amount;
+    if (data.items && data.items.length > 0) {
+      totalAmount = data.items.reduce((sum, item) => sum + item.amount, 0);
+    }
+
+    // Validate spending limits if line items are provided
+    if (data.items && data.items.length > 0) {
+      await this.validateExpenseLimits(companyId, employeeId, employee?.gradeId ?? null, employee?.designationId ?? null, data.items);
+    }
+
+    // Generate claim number
+    const claimNumber = await this.generateExpenseClaimNumber(companyId);
+
+    const createData: any = {
+      employeeId,
+      claimNumber,
+      title: data.title,
+      amount: totalAmount,
+      category: data.category,
+      description: data.description ?? null,
+      tripDate: data.tripDate ? new Date(data.tripDate) : null,
+      fromDate: data.fromDate ? new Date(data.fromDate) : null,
+      toDate: data.toDate ? new Date(data.toDate) : null,
+      paymentMethod: (data.paymentMethod as any) ?? 'CASH',
+      merchantName: data.merchantName ?? null,
+      projectCode: data.projectCode ?? null,
+      currency: data.currency ?? 'INR',
+      receipts: data.receipts ?? Prisma.JsonNull,
+      status: 'DRAFT',
+      companyId,
+    };
+
+    if (data.items && data.items.length > 0) {
+      createData.items = {
+        create: data.items.map((item) => ({
+          categoryCode: item.categoryCode,
+          categoryId: item.categoryId ?? null,
+          description: item.description,
+          amount: item.amount,
+          expenseDate: new Date(item.expenseDate),
+          merchantName: item.merchantName ?? null,
+          receipts: item.receipts ?? Prisma.JsonNull,
+          distanceKm: item.distanceKm ?? null,
+          ratePerKm: item.ratePerKm ?? null,
+        })),
+      };
+    }
+
+    const claim = await platformPrisma.expenseClaim.create({
+      data: createData,
+      include: {
+        items: { orderBy: { expenseDate: 'asc' } },
       },
     });
+
+    return claim;
   }
 
-  async submitMyExpenseClaim(companyId: string, userId: string, claimId: string) {
+  async updateMyExpenseClaim(companyId: string, userId: string, claimId: string, data: {
+    title?: string | undefined;
+    amount?: number | undefined;
+    category?: string | undefined;
+    description?: string | undefined;
+    tripDate?: string | undefined;
+    fromDate?: string | undefined;
+    toDate?: string | undefined;
+    paymentMethod?: string | undefined;
+    merchantName?: string | undefined;
+    projectCode?: string | undefined;
+    receipts?: Array<{ fileName: string; fileUrl: string }> | undefined;
+    items?: Array<{
+      id?: string | undefined;
+      categoryCode: string;
+      categoryId?: string | undefined;
+      description: string;
+      amount: number;
+      expenseDate: string;
+      merchantName?: string | undefined;
+      receipts?: Array<{ fileName: string; fileUrl: string }> | undefined;
+      distanceKm?: number | undefined;
+      ratePerKm?: number | undefined;
+    }> | undefined;
+  }) {
     const employeeId = await this.resolveEmployeeIdFromUser(userId);
     if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
 
@@ -3430,13 +3706,280 @@ export class ESSService {
       throw ApiError.notFound('Expense claim not found');
     }
     if (claim.status !== 'DRAFT') {
-      throw ApiError.badRequest('Only DRAFT claims can be submitted');
+      throw ApiError.badRequest('Only DRAFT claims can be updated');
+    }
+
+    // If items are being replaced, recalculate total
+    let newAmount = data.amount;
+    if (data.items && data.items.length > 0) {
+      newAmount = data.items.reduce((sum, item) => sum + item.amount, 0);
+    }
+
+    // Delete existing line items and recreate if items are provided
+    if (data.items !== undefined) {
+      await platformPrisma.expenseClaimItem.deleteMany({ where: { claimId } });
+    }
+
+    const updateData: any = {
+      ...(data.title !== undefined && { title: data.title }),
+      ...(newAmount !== undefined && { amount: newAmount }),
+      ...(data.category !== undefined && { category: data.category }),
+      ...(data.description !== undefined && { description: data.description ?? null }),
+      ...(data.tripDate !== undefined && { tripDate: data.tripDate ? new Date(data.tripDate) : null }),
+      ...(data.fromDate !== undefined && { fromDate: data.fromDate ? new Date(data.fromDate) : null }),
+      ...(data.toDate !== undefined && { toDate: data.toDate ? new Date(data.toDate) : null }),
+      ...(data.paymentMethod !== undefined && { paymentMethod: data.paymentMethod as any }),
+      ...(data.merchantName !== undefined && { merchantName: data.merchantName ?? null }),
+      ...(data.projectCode !== undefined && { projectCode: data.projectCode ?? null }),
+      ...(data.receipts !== undefined && { receipts: data.receipts ?? Prisma.JsonNull }),
+    };
+
+    if (data.items && data.items.length > 0) {
+      updateData.items = {
+        create: data.items.map((item) => ({
+          categoryCode: item.categoryCode,
+          categoryId: item.categoryId ?? null,
+          description: item.description,
+          amount: item.amount,
+          expenseDate: new Date(item.expenseDate),
+          merchantName: item.merchantName ?? null,
+          receipts: item.receipts ?? Prisma.JsonNull,
+          distanceKm: item.distanceKm ?? null,
+          ratePerKm: item.ratePerKm ?? null,
+        })),
+      };
     }
 
     return platformPrisma.expenseClaim.update({
       where: { id: claimId },
-      data: { status: 'SUBMITTED' },
+      data: updateData,
+      include: {
+        items: { orderBy: { expenseDate: 'asc' } },
+      },
     });
+  }
+
+  async submitMyExpenseClaim(companyId: string, userId: string, claimId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    const claim = await platformPrisma.expenseClaim.findUnique({
+      where: { id: claimId },
+      include: { items: true },
+    });
+    if (!claim || claim.employeeId !== employeeId || claim.companyId !== companyId) {
+      throw ApiError.notFound('Expense claim not found');
+    }
+    if (claim.status !== 'DRAFT') {
+      throw ApiError.badRequest('Only DRAFT claims can be submitted');
+    }
+
+    // Validate receipt requirements
+    await this.validateExpenseReceipts(companyId, claim);
+
+    // Submit and wire to approval workflow
+    const updatedClaim = await platformPrisma.expenseClaim.update({
+      where: { id: claimId },
+      data: { status: 'SUBMITTED' },
+      include: { items: true },
+    });
+
+    // Create approval request via workflow
+    const approvalRequest = await this.createRequest(companyId, {
+      requesterId: employeeId,
+      entityType: 'ExpenseClaim',
+      entityId: claim.id,
+      triggerEvent: 'REIMBURSEMENT',
+      data: {
+        amount: Number(claim.amount),
+        category: claim.category,
+        title: claim.title,
+        itemCount: claim.items.length,
+        claimNumber: claim.claimNumber,
+      },
+    });
+
+    // If no workflow is configured, auto-approve
+    if (!approvalRequest) {
+      await platformPrisma.expenseClaim.update({
+        where: { id: claimId },
+        data: {
+          status: 'APPROVED',
+          approvedBy: 'auto',
+          approvedAt: new Date(),
+          approvedAmount: claim.amount,
+        },
+      });
+      if (claim.items.length > 0) {
+        await platformPrisma.expenseClaimItem.updateMany({
+          where: { claimId },
+          data: { isApproved: true },
+        });
+      }
+      return platformPrisma.expenseClaim.findUnique({
+        where: { id: claimId },
+        include: { items: true },
+      });
+    } else {
+      // Update status to PENDING_APPROVAL since there is a workflow
+      return platformPrisma.expenseClaim.update({
+        where: { id: claimId },
+        data: { status: 'PENDING_APPROVAL' },
+        include: { items: true },
+      });
+    }
+  }
+
+  async cancelMyExpenseClaim(companyId: string, userId: string, claimId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
+
+    const claim = await platformPrisma.expenseClaim.findUnique({ where: { id: claimId } });
+    if (!claim || claim.employeeId !== employeeId || claim.companyId !== companyId) {
+      throw ApiError.notFound('Expense claim not found');
+    }
+    if (!['DRAFT', 'SUBMITTED', 'PENDING_APPROVAL'].includes(claim.status)) {
+      throw ApiError.badRequest('Only DRAFT, SUBMITTED, or PENDING_APPROVAL claims can be cancelled');
+    }
+
+    return platformPrisma.expenseClaim.update({
+      where: { id: claimId },
+      data: { status: 'CANCELLED' },
+    });
+  }
+
+  // ── Expense Claim Helper Methods ──────────────────────────────────
+
+  private async generateExpenseClaimNumber(companyId: string): Promise<string> {
+    const year = new Date().getFullYear();
+    const count = await platformPrisma.expenseClaim.count({
+      where: {
+        companyId,
+        createdAt: {
+          gte: new Date(`${year}-01-01`),
+          lt: new Date(`${year + 1}-01-01`),
+        },
+      },
+    });
+    return `EXP-${year}-${String(count + 1).padStart(4, '0')}`;
+  }
+
+  private async validateExpenseLimits(
+    companyId: string,
+    employeeId: string,
+    gradeId: string | null,
+    designationId: string | null,
+    items: Array<{ categoryCode: string; amount: number; expenseDate: string }>,
+  ) {
+    // Get categories with limits
+    const categoryCodes = [...new Set(items.map((i) => i.categoryCode))];
+    const categories = await platformPrisma.expenseCategory.findMany({
+      where: { companyId, code: { in: categoryCodes }, isActive: true },
+      include: {
+        limits: {
+          where: {
+            OR: [
+              { gradeId, designationId },
+              { gradeId, designationId: null },
+              { gradeId: null, designationId },
+              { gradeId: null, designationId: null },
+            ],
+          },
+        },
+      },
+    });
+
+    const categoryMap = new Map(categories.map((c) => [c.code, c]));
+
+    for (const code of categoryCodes) {
+      const cat = categoryMap.get(code);
+      if (!cat) continue; // No category config — skip limit check
+
+      // Determine applicable limits (grade+designation > grade > designation > category default)
+      const limit = cat.limits.find((l) => l.gradeId === gradeId && l.designationId === designationId)
+        ?? cat.limits.find((l) => l.gradeId === gradeId && l.designationId === null)
+        ?? cat.limits.find((l) => l.gradeId === null && l.designationId === designationId)
+        ?? null;
+
+      const maxPerClaim = limit?.maxAmountPerClaim ? Number(limit.maxAmountPerClaim) : (cat.maxAmountPerClaim ? Number(cat.maxAmountPerClaim) : null);
+      const maxPerMonth = limit?.maxAmountPerMonth ? Number(limit.maxAmountPerMonth) : (cat.maxAmountPerMonth ? Number(cat.maxAmountPerMonth) : null);
+
+      // Sum amounts for this category in this claim
+      const categoryTotal = items
+        .filter((i) => i.categoryCode === code)
+        .reduce((sum, i) => sum + i.amount, 0);
+
+      // Per-claim limit
+      if (maxPerClaim !== null && categoryTotal > maxPerClaim) {
+        throw ApiError.badRequest(
+          `${cat.name}: total amount ${categoryTotal} exceeds per-claim limit of ${maxPerClaim}`
+        );
+      }
+
+      // Monthly limit check
+      if (maxPerMonth !== null) {
+        // Get current month's approved/pending claims for this category
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+        const existingItems = await platformPrisma.expenseClaimItem.findMany({
+          where: {
+            categoryCode: code,
+            expenseDate: { gte: monthStart, lte: monthEnd },
+            claim: {
+              employeeId,
+              companyId,
+              status: { in: ['SUBMITTED', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_APPROVED', 'PAID'] },
+            },
+          },
+          select: { amount: true },
+        });
+
+        const existingTotal = existingItems.reduce((sum, i) => sum + Number(i.amount), 0);
+        if (existingTotal + categoryTotal > maxPerMonth) {
+          throw ApiError.badRequest(
+            `${cat.name}: monthly limit of ${maxPerMonth} would be exceeded (already ${existingTotal} this month, claiming ${categoryTotal})`
+          );
+        }
+      }
+    }
+  }
+
+  private async validateExpenseReceipts(
+    companyId: string,
+    claim: any,
+  ) {
+    // If claim has line items, validate per-item receipts
+    if (claim.items && claim.items.length > 0) {
+      const categoryCodes = [...new Set(claim.items.map((i: any) => i.categoryCode))] as string[];
+      const categories = await platformPrisma.expenseCategory.findMany({
+        where: { companyId, code: { in: categoryCodes } },
+      });
+      const categoryMap = new Map(categories.map((c) => [c.code, c]));
+
+      for (const item of claim.items) {
+        const cat = categoryMap.get(item.categoryCode);
+        if (!cat) continue;
+
+        const receipts = item.receipts as any[] | null;
+        const hasReceipts = receipts && receipts.length > 0;
+
+        if (cat.requiresReceipt && !hasReceipts) {
+          throw ApiError.badRequest(
+            `Receipt is required for "${cat.name}" expenses (item: ${item.description})`
+          );
+        }
+
+        if (!cat.requiresReceipt && cat.receiptThreshold !== null) {
+          if (Number(item.amount) >= Number(cat.receiptThreshold) && !hasReceipts) {
+            throw ApiError.badRequest(
+              `Receipt is required for "${cat.name}" expenses above ${cat.receiptThreshold} (item: ${item.description})`
+            );
+          }
+        }
+      }
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────

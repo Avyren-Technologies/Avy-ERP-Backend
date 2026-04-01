@@ -3,6 +3,7 @@ import { companyAdminService } from './company-admin.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { ApiError } from '../../shared/errors';
+import { LINKED_SCREENS } from '../../shared/constants/linked-screens';
 import {
   updateLocationSchema,
   createShiftSchema,
@@ -205,6 +206,11 @@ export class CompanyAdminController {
   });
 
   // ── No. Series ──────────────────────────────────────────────────────
+
+  /** Returns all valid linked screen options for the number series dropdown */
+  getLinkedScreens = asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createSuccessResponse(LINKED_SCREENS, 'Linked screens retrieved'));
+  });
 
   listNoSeries = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;

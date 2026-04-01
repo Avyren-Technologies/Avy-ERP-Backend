@@ -24,6 +24,10 @@ import {
   updateAssetSchema,
   createAssetAssignmentSchema,
   returnAssetSchema,
+  createExpenseCategorySchema,
+  updateExpenseCategorySchema,
+  createExpenseCategoryLimitSchema,
+  updateExpenseCategoryLimitSchema,
   createExpenseClaimSchema,
   updateExpenseClaimSchema,
   approveRejectClaimSchema,
@@ -578,7 +582,98 @@ export class AdvancedHRController {
   });
 
   // ════════════════════════════════════════════════════════════════
-  // EXPENSE CLAIMS
+  // EXPENSE CATEGORIES (Admin Configuration)
+  // ════════════════════════════════════════════════════════════════
+
+  listExpenseCategories = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const includeInactive = req.query.includeInactive === 'true';
+    const categories = await advancedHRService.listExpenseCategories(companyId, { includeInactive });
+    res.json(createSuccessResponse(categories, 'Expense categories retrieved'));
+  });
+
+  getExpenseCategory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const category = await advancedHRService.getExpenseCategory(companyId, req.params.id!);
+    res.json(createSuccessResponse(category, 'Expense category retrieved'));
+  });
+
+  createExpenseCategory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createExpenseCategorySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const category = await advancedHRService.createExpenseCategory(companyId, parsed.data);
+    res.status(201).json(createSuccessResponse(category, 'Expense category created'));
+  });
+
+  updateExpenseCategory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateExpenseCategorySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const category = await advancedHRService.updateExpenseCategory(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(category, 'Expense category updated'));
+  });
+
+  deleteExpenseCategory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await advancedHRService.deleteExpenseCategory(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Expense category deleted'));
+  });
+
+  // ── Expense Category Limits ─────────────────────────────────────
+
+  createExpenseCategoryLimit = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createExpenseCategoryLimitSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const limit = await advancedHRService.createExpenseCategoryLimit(companyId, parsed.data);
+    res.status(201).json(createSuccessResponse(limit, 'Expense category limit created'));
+  });
+
+  updateExpenseCategoryLimit = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateExpenseCategoryLimitSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const limit = await advancedHRService.updateExpenseCategoryLimit(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(limit, 'Expense category limit updated'));
+  });
+
+  deleteExpenseCategoryLimit = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await advancedHRService.deleteExpenseCategoryLimit(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Expense category limit deleted'));
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // EXPENSE CLAIMS (Admin)
   // ════════════════════════════════════════════════════════════════
 
   listExpenseClaims = asyncHandler(async (req: Request, res: Response) => {
@@ -646,10 +741,29 @@ export class AdvancedHRController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
+    const approvalData: any = { action: parsed.data.action };
+    if (parsed.data.approvedBy) approvalData.approvedBy = parsed.data.approvedBy;
+    if (parsed.data.rejectionReason) approvalData.rejectionReason = parsed.data.rejectionReason;
+    if (parsed.data.approvedAmount !== undefined) approvalData.approvedAmount = parsed.data.approvedAmount;
+    if (parsed.data.itemApprovals) approvalData.itemApprovals = parsed.data.itemApprovals;
     const claim = await advancedHRService.approveRejectExpenseClaim(
-      companyId, req.params.id!, parsed.data.action, parsed.data.approvedBy,
+      companyId, req.params.id!, approvalData,
     );
     res.json(createSuccessResponse(claim, `Expense claim ${parsed.data.action}d`));
+  });
+
+  getExpenseClaimReport = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const reportOpts: { fromDate?: string; toDate?: string; employeeId?: string; departmentId?: string; status?: string } = {};
+    if (req.query.fromDate) reportOpts.fromDate = req.query.fromDate as string;
+    if (req.query.toDate) reportOpts.toDate = req.query.toDate as string;
+    if (req.query.employeeId) reportOpts.employeeId = req.query.employeeId as string;
+    if (req.query.departmentId) reportOpts.departmentId = req.query.departmentId as string;
+    if (req.query.status) reportOpts.status = req.query.status as string;
+    const result = await advancedHRService.getExpenseClaimReport(companyId, reportOpts);
+    res.json(createSuccessResponse(result, 'Expense claim report generated'));
   });
 
   deleteExpenseClaim = asyncHandler(async (req: Request, res: Response) => {

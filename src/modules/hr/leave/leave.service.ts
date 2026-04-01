@@ -1,6 +1,7 @@
 import { Prisma, AttendanceStatus } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { generateNextNumber } from '../../../shared/utils/number-series';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -693,6 +694,18 @@ export class LeaveService {
         throw ApiError.badRequest(`No leave balance found for year ${toYear}. Please initialize balances first`);
       }
 
+      // Enforce comp-off expiry on cross-year balances
+      // TODO: A future cron job should clean up expired comp-off balances periodically
+      if (leaveType.category === 'COMPENSATORY') {
+        const now = new Date();
+        if (balanceFrom.expiresAt && new Date(balanceFrom.expiresAt) < now) {
+          throw ApiError.badRequest(`Compensatory leave balance for year ${fromYear} has expired`);
+        }
+        if (balanceTo.expiresAt && new Date(balanceTo.expiresAt) < now) {
+          throw ApiError.badRequest(`Compensatory leave balance for year ${toYear} has expired`);
+        }
+      }
+
       if (leaveType.category !== 'UNPAID') {
         const availableFrom = Number(balanceFrom.balance);
         const availableTo = Number(balanceTo.balance);
@@ -714,6 +727,11 @@ export class LeaveService {
       const deductFrom = leaveType.category === 'UNPAID' ? 0 : Math.min(daysInFromYear, Number(balanceFrom.balance));
       const deductTo = leaveType.category === 'UNPAID' ? 0 : Math.min(daysInToYear, Number(balanceTo.balance));
 
+      // Generate leave reference number (safe to do before batch — atomic per-row)
+      const referenceNumber = await generateNextNumber(
+        platformPrisma, companyId, ['Leave Management', 'Leave'], 'Leave Request',
+      ).catch(() => undefined); // Graceful: if no series configured, proceed without
+
       // Create request and deduct from both years
       const [request] = await platformPrisma.$transaction([
         platformPrisma.leaveRequest.create({
@@ -728,6 +746,7 @@ export class LeaveService {
             halfDayType: n(halfDayType),
             reason,
             status: 'PENDING',
+            ...(referenceNumber ? { referenceNumber } : {}),
           },
           include: {
             employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
@@ -772,6 +791,12 @@ export class LeaveService {
       throw ApiError.badRequest('No leave balance found. Please initialize balances first');
     }
 
+    // Enforce comp-off expiry: if the balance has expired, treat it as 0
+    // TODO: A future cron job should clean up expired comp-off balances periodically
+    if (leaveType.category === 'COMPENSATORY' && balance.expiresAt && new Date(balance.expiresAt) < new Date()) {
+      throw ApiError.badRequest('Compensatory leave balance has expired and can no longer be used');
+    }
+
     if (leaveType.category !== 'UNPAID') {
       const available = Number(balance.balance);
       if (available < actualDays) {
@@ -787,6 +812,11 @@ export class LeaveService {
     // Deduct only up to available balance (excess becomes LOP)
     const deductDays = leaveType.category === 'UNPAID' ? 0 : Math.min(actualDays, Number(balance.balance));
 
+    // Generate leave reference number (safe to do before batch — atomic per-row)
+    const refNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Leave Management', 'Leave'], 'Leave Request',
+    ).catch(() => undefined); // Graceful: if no series configured, proceed without
+
     // Create request and deduct balance (optimistic)
     const [request] = await platformPrisma.$transaction([
       platformPrisma.leaveRequest.create({
@@ -801,6 +831,7 @@ export class LeaveService {
           halfDayType: n(halfDayType),
           reason,
           status: 'PENDING',
+          ...(refNumber ? { referenceNumber: refNumber } : {}),
         },
         include: {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },

@@ -1257,8 +1257,42 @@ export class ESSController {
     const userId = req.user?.id;
     if (!userId) throw ApiError.badRequest('User ID is required');
 
-    const claims = await essService.getMyExpenseClaims(companyId, userId);
-    res.json(createSuccessResponse(claims, 'Expense claims retrieved'));
+    const options: { status?: string; page?: number; limit?: number } = {};
+    if (req.query.status) options.status = req.query.status as string;
+    if (req.query.page) options.page = Number(req.query.page);
+    if (req.query.limit) options.limit = Number(req.query.limit);
+    const result = await essService.getMyExpenseClaims(companyId, userId, options);
+    res.json(createPaginatedResponse(result.claims, result.page, result.limit, result.total, 'Expense claims retrieved'));
+  });
+
+  getMyExpenseClaim = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const claim = await essService.getMyExpenseClaim(companyId, userId, req.params.id!);
+    res.json(createSuccessResponse(claim, 'Expense claim retrieved'));
+  });
+
+  getExpenseCategories = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const categories = await essService.getExpenseCategories(companyId);
+    res.json(createSuccessResponse(categories, 'Expense categories retrieved'));
+  });
+
+  getMyExpenseSummary = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const summary = await essService.getMyExpenseSummary(companyId, userId, req.query.financialYear as string | undefined);
+    res.json(createSuccessResponse(summary, 'Expense summary retrieved'));
   });
 
   createMyExpenseClaim = asyncHandler(async (req: Request, res: Response) => {
@@ -1277,6 +1311,22 @@ export class ESSController {
     res.status(201).json(createSuccessResponse(claim, 'Expense claim created'));
   });
 
+  updateMyExpenseClaim = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = essExpenseClaimSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const claim = await essService.updateMyExpenseClaim(companyId, userId, req.params.id!, parsed.data as any);
+    res.json(createSuccessResponse(claim, 'Expense claim updated'));
+  });
+
   submitMyExpenseClaim = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
@@ -1286,6 +1336,17 @@ export class ESSController {
 
     const claim = await essService.submitMyExpenseClaim(companyId, userId, req.params.id!);
     res.json(createSuccessResponse(claim, 'Expense claim submitted'));
+  });
+
+  cancelMyExpenseClaim = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const claim = await essService.cancelMyExpenseClaim(companyId, userId, req.params.id!);
+    res.json(createSuccessResponse(claim, 'Expense claim cancelled'));
   });
 
   // ── Loan Application (ESS) ────────────────────────────────────────

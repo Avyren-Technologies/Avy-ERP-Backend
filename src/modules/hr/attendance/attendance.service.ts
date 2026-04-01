@@ -209,6 +209,16 @@ export class AttendanceService {
     // ── Step 3: Resolve Policy ──
     const { policy, trace } = await resolvePolicy(companyId, evaluationContext);
 
+    // ── Step 3b: Enforce resolved selfie/GPS requirements ──
+    // The policy resolver merges location, shift, and attendance rule settings.
+    // This check ensures selfie/GPS is enforced even when no location is assigned.
+    if (policy.selfieRequired && !data.checkInPhotoUrl) {
+      throw ApiError.badRequest('Selfie photo is required for check-in (per resolved attendance policy)');
+    }
+    if (policy.gpsRequired && (data.checkInLatitude == null || data.checkInLongitude == null)) {
+      throw ApiError.badRequest('GPS coordinates are required for check-in (per resolved attendance policy)');
+    }
+
     // ── Step 4: Get company timezone ──
     const companySettings = await getCachedCompanySettings(companyId);
     const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
@@ -245,8 +255,30 @@ export class AttendanceService {
     };
 
     // ── Step 7: Resolve Attendance Status ──
-    const punchIn = data.punchIn ? new Date(data.punchIn) : null;
-    const punchOut = data.punchOut ? new Date(data.punchOut) : null;
+    let punchIn = data.punchIn ? new Date(data.punchIn) : null;
+    let punchOut = data.punchOut ? new Date(data.punchOut) : null;
+
+    // ── Apply punchTimeRounding to round raw punch times before status resolution ──
+    if (rules.punchTimeRounding !== 'NONE' && (punchIn || punchOut)) {
+      const roundPunch = (d: Date, direction: string): Date => {
+        const roundingMinutes = rules.punchTimeRounding === 'NEAREST_5' ? 5 : 15;
+        const ms = d.getTime();
+        const roundingMs = roundingMinutes * 60 * 1000;
+        let rounded: number;
+        if (direction === 'UP') {
+          rounded = Math.ceil(ms / roundingMs) * roundingMs;
+        } else if (direction === 'DOWN') {
+          rounded = Math.floor(ms / roundingMs) * roundingMs;
+        } else {
+          // NEAREST
+          rounded = Math.round(ms / roundingMs) * roundingMs;
+        }
+        return new Date(rounded);
+      };
+      const dir = rules.punchTimeRoundingDirection ?? 'NEAREST';
+      if (punchIn) punchIn = roundPunch(punchIn, dir);
+      if (punchOut) punchOut = roundPunch(punchOut, dir);
+    }
 
     const statusResult = resolveAttendanceStatus(
       punchIn,
@@ -257,6 +289,30 @@ export class AttendanceService {
       rulesInput,
       companyTimezone,
     );
+
+    // ── Step 7b: ignoreLateOnLeaveDay — suppress late if employee has approved leave on this date ──
+    if (statusResult.isLate && rules.ignoreLateOnLeaveDay) {
+      const approvedLeave = await platformPrisma.leaveRequest.findFirst({
+        where: {
+          employeeId: data.employeeId,
+          status: 'APPROVED',
+          fromDate: { lte: attendanceDate },
+          toDate: { gte: attendanceDate },
+        },
+        select: { id: true },
+      });
+      if (approvedLeave) {
+        statusResult.isLate = false;
+        statusResult.appliedLateDeduction = null;
+        statusResult.finalStatusReason += ' (late suppressed — leave day exception)';
+        if (statusResult.status === 'LATE') {
+          statusResult.status = 'PRESENT';
+        }
+        logger.info(
+          `Late suppressed for employee ${data.employeeId} on ${dateStr} — approved leave found (ignoreLateOnLeaveDay=true)`,
+        );
+      }
+    }
 
     // ── Step 8: Create attendance record with resolved values ──
     const record = await platformPrisma.attendanceRecord.create({
@@ -420,6 +476,21 @@ export class AttendanceService {
     if (otRule.calculationBasis === 'TOTAL_HOURS') {
       const workedHours = record.workedHours ? Number(record.workedHours) : 0;
       effectiveOtHours = workedHours;
+    }
+
+    // ── thresholdMinutes: dead-zone before OT starts counting ──
+    // Employee must work at least thresholdMinutes beyond their shift before any OT is counted.
+    // The threshold is subtracted from raw OT — e.g. if thresholdMinutes=30 and employee worked
+    // 45 min past shift, only 15 min counts as OT.
+    if (otRule.thresholdMinutes > 0 && otRule.calculationBasis === 'AFTER_SHIFT') {
+      const thresholdHours = otRule.thresholdMinutes / 60;
+      if (effectiveOtHours <= thresholdHours) {
+        logger.info(
+          `OT below threshold: ${(effectiveOtHours * 60).toFixed(1)}min <= ${otRule.thresholdMinutes}min threshold for employee ${record.employeeId}`,
+        );
+        return;
+      }
+      effectiveOtHours -= thresholdHours;
     }
 
     // ── includeBreaksInOT ──
@@ -1736,6 +1807,13 @@ export class AttendanceService {
             : 8;
           const credit = Number(request.requestedHours) >= fullDayHours ? 1 : 0.5;
 
+          // Calculate comp-off expiry date if compOffExpiryDays is configured
+          let expiresAt: Date | undefined;
+          if (otRules.compOffExpiryDays) {
+            expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + Number(otRules.compOffExpiryDays));
+          }
+
           const existingBalance = await platformPrisma.leaveBalance.findUnique({
             where: {
               employeeId_leaveTypeId_year: {
@@ -1752,6 +1830,8 @@ export class AttendanceService {
               data: {
                 accrued: { increment: credit },
                 balance: { increment: credit },
+                // Extend expiry to the latest comp-off grant's expiry window
+                ...(expiresAt ? { expiresAt } : {}),
               },
             });
           } else {
@@ -1764,6 +1844,7 @@ export class AttendanceService {
                 accrued: credit,
                 taken: 0,
                 balance: credit,
+                ...(expiresAt ? { expiresAt } : {}),
               },
             });
           }

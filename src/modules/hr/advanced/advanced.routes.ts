@@ -86,14 +86,29 @@ router.post('/asset-assignments', requirePermissions(['hr:create']), controller.
 router.patch('/asset-assignments/:id/return', requirePermissions(['hr:update']), controller.returnAssetAssignment);
 
 // ═══════════════════════════════════════════════════════════════════
-// EXPENSE CLAIMS
+// EXPENSE CATEGORIES (Admin Configuration)
+// ═══════════════════════════════════════════════════════════════════
+router.get('/expense-categories', requirePermissions(['hr:read']), controller.listExpenseCategories);
+router.post('/expense-categories', requirePermissions(['hr:configure']), controller.createExpenseCategory);
+router.get('/expense-categories/:id', requirePermissions(['hr:read']), controller.getExpenseCategory);
+router.patch('/expense-categories/:id', requirePermissions(['hr:configure']), controller.updateExpenseCategory);
+router.delete('/expense-categories/:id', requirePermissions(['hr:configure']), controller.deleteExpenseCategory);
+
+// ── Expense Category Limits (per grade/designation) ──────────────
+router.post('/expense-category-limits', requirePermissions(['hr:configure']), controller.createExpenseCategoryLimit);
+router.patch('/expense-category-limits/:id', requirePermissions(['hr:configure']), controller.updateExpenseCategoryLimit);
+router.delete('/expense-category-limits/:id', requirePermissions(['hr:configure']), controller.deleteExpenseCategoryLimit);
+
+// ═══════════════════════════════════════════════════════════════════
+// EXPENSE CLAIMS (Admin)
 // ═══════════════════════════════════════════════════════════════════
 router.get('/expense-claims', requirePermissions(['hr:read']), controller.listExpenseClaims);
+router.get('/expense-claims/report', requirePermissions(['hr:export']), controller.getExpenseClaimReport);
 router.post('/expense-claims', requirePermissions(['hr:create']), controller.createExpenseClaim);
 router.get('/expense-claims/:id', requirePermissions(['hr:read']), controller.getExpenseClaim);
 router.patch('/expense-claims/:id', requirePermissions(['hr:update']), controller.updateExpenseClaim);
 router.patch('/expense-claims/:id/submit', requirePermissions(['hr:update']), controller.submitExpenseClaim);
-router.patch('/expense-claims/:id/approve-reject', requirePermissions(['hr:update']), controller.approveRejectExpenseClaim);
+router.patch('/expense-claims/:id/approve-reject', requirePermissions(['hr:approve']), controller.approveRejectExpenseClaim);
 router.delete('/expense-claims/:id', requirePermissions(['hr:delete']), controller.deleteExpenseClaim);
 
 // ═══════════════════════════════════════════════════════════════════

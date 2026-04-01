@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
-import { hashPassword } from '../../../shared/utils';
+import { hashPassword, generateNextNumber } from '../../../shared/utils';
+import { LeaveService } from '../leave/leave.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -10,48 +11,6 @@ function n<T>(value: T | undefined): T | null {
 }
 
 export class EmployeeService {
-  // ────────────────────────────────────────────────────────────────────
-  // Employee ID Generation (from NoSeries)
-  // ────────────────────────────────────────────────────────────────────
-
-  private async generateEmployeeId(companyId: string, tx: typeof platformPrisma = platformPrisma): Promise<string> {
-    const noSeries = await tx.noSeriesConfig.findFirst({
-      where: { companyId, linkedScreen: { in: ['Employee', 'Employee Onboarding'] } },
-    });
-
-    if (!noSeries) {
-      throw ApiError.badRequest(
-        'Employee Number Series is not configured. Please create a Number Series for "Employee Onboarding" first.'
-      );
-    }
-
-    // Atomically reserve the next number using raw SQL to prevent race conditions.
-    // We use the startNumber field as a mutable counter: each call increments it,
-    // effectively treating startNumber as "next number to assign".
-    await tx.$executeRaw`
-      UPDATE no_series_configs
-      SET "startNumber" = "startNumber" + 1,
-          "updatedAt" = NOW()
-      WHERE id = ${noSeries.id}
-    `;
-
-    // Read back the updated value (the incremented startNumber is the assigned number)
-    const updated = await tx.noSeriesConfig.findUnique({
-      where: { id: noSeries.id },
-      select: { startNumber: true, prefix: true, suffix: true, numberCount: true },
-    });
-
-    if (!updated) {
-      throw ApiError.internal('Failed to generate employee ID: NoSeries update failed');
-    }
-
-    // The number we just reserved is (startNumber - 1) since we incremented first,
-    // but to keep it simple: the original startNumber was the next to use, and we
-    // incremented it for the next caller. So the assigned number is updated.startNumber - 1.
-    const assignedNumber = updated.startNumber - 1;
-    const padded = String(assignedNumber).padStart(updated.numberCount || 5, '0');
-    return `${updated.prefix || ''}${padded}${updated.suffix || ''}`;
-  }
 
   // ────────────────────────────────────────────────────────────────────
   // Employee CRUD
@@ -175,9 +134,26 @@ export class EmployeeService {
       }
     }
 
+    // Auto-assign default shift if none provided
+    if (!data.shiftId) {
+      try {
+        const defaultShift = await platformPrisma.companyShift.findFirst({
+          where: { companyId },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, name: true },
+        });
+        if (defaultShift) {
+          data.shiftId = defaultShift.id;
+          logger.info(`Auto-assigned default shift "${defaultShift.name}" (${defaultShift.id}) for new employee`);
+        }
+      } catch (err) {
+        logger.warn('Failed to auto-assign default shift for new employee', err);
+      }
+    }
+
     // Atomic ID generation eliminates collisions — no retry loop needed
-    return await platformPrisma.$transaction(async (tx) => {
-          const employeeId = await this.generateEmployeeId(companyId, tx as any);
+    const employee = await platformPrisma.$transaction(async (tx) => {
+          const employeeId = await generateNextNumber(tx as any, companyId, ['Employee', 'Employee Onboarding'], 'Employee');
 
           // Calculate probation end date if grade has probationMonths
           let probationEndDate: Date | null = null;
@@ -401,6 +377,66 @@ export class EmployeeService {
           logger.info(`Employee created: ${employee.id} (${employee.employeeId}) for company ${companyId}`);
           return employee;
         });
+
+    // ── Post-creation seeding (non-blocking — failures are logged, not thrown) ──
+
+    // 1. Initialize leave balances for the current year
+    try {
+      const leaveService = new LeaveService();
+      const currentYear = new Date().getFullYear();
+      await leaveService.initializeBalances(companyId, {
+        employeeId: employee.id,
+        year: currentYear,
+      });
+      logger.info(`Auto-initialized leave balances for employee ${employee.id}, year ${currentYear}`);
+    } catch (err) {
+      logger.warn(`Failed to auto-initialize leave balances for employee ${employee.id}`, err);
+    }
+
+    // 2. Schedule probation review if employee has a probation end date
+    try {
+      const createdEmployee = await platformPrisma.employee.findUnique({
+        where: { id: employee.id },
+        select: { probationEndDate: true, joiningDate: true },
+      });
+      if (createdEmployee?.probationEndDate) {
+        await platformPrisma.probationReview.create({
+          data: {
+            employeeId: employee.id,
+            reviewDate: createdEmployee.probationEndDate,
+            probationEndDate: createdEmployee.probationEndDate,
+            decision: 'PENDING',
+            companyId,
+          },
+        });
+        logger.info(`Auto-created probation review for employee ${employee.id}, due ${createdEmployee.probationEndDate.toISOString()}`);
+      }
+    } catch (err) {
+      logger.warn(`Failed to auto-create probation review for employee ${employee.id}`, err);
+    }
+
+    // 3. Create IT declaration placeholder for the current financial year
+    try {
+      const now = new Date();
+      // Indian financial year: April to March. If month < April (0-indexed: 3), FY started previous year.
+      const fyStartYear = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+      const financialYear = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
+
+      await platformPrisma.iTDeclaration.create({
+        data: {
+          employeeId: employee.id,
+          financialYear,
+          regime: 'NEW',
+          status: 'DRAFT',
+          companyId,
+        },
+      });
+      logger.info(`Auto-created IT declaration (${financialYear}) for employee ${employee.id}`);
+    } catch (err) {
+      logger.warn(`Failed to auto-create IT declaration for employee ${employee.id}`, err);
+    }
+
+    return employee;
   }
 
   async updateEmployee(companyId: string, id: string, data: any, performedBy?: string) {

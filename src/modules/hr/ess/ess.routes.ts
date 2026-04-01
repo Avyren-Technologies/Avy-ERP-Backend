@@ -63,7 +63,7 @@ router.patch('/it-declarations/:id/verify', requirePermissions(['hr:update']), c
 router.patch('/it-declarations/:id/lock', requirePermissions(['hr:update']), controller.lockDeclaration);
 
 // ── ESS Dashboard (unified payload) ─────────────────────────────────
-router.get('/ess/dashboard', requirePermissions(['hr:read', 'ess:view-dashboard', 'ess:view-profile']), controller.getDashboard);
+router.get('/ess/dashboard', requirePermissions(['hr:read', 'ess:view-profile']), controller.getDashboard);
 
 // ── ESS Self-Service (Employee-facing, feature gated) ───────────────
 router.get('/ess/my-profile', requireESSFeature('profileUpdate'), requirePermissions(['hr:read', 'ess:view-profile']), controller.getMyProfile);
@@ -111,9 +111,14 @@ router.post('/policy-documents', requirePermissions(['hr:create']), controller.c
 router.get('/ess/my-holidays', requireESSFeature('holidayCalendar'), requirePermissions(['hr:read', 'ess:view-holidays']), controller.getMyHolidays);
 
 // ── Expense Claims (ESS feature gated) ──────────────────────────────
+router.get('/ess/expense-categories', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:read', 'ess:claim-expense']), controller.getExpenseCategories);
 router.get('/ess/my-expense-claims', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:read', 'ess:claim-expense']), controller.getMyExpenseClaims);
+router.get('/ess/my-expense-claims/summary', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:read', 'ess:claim-expense']), controller.getMyExpenseSummary);
+router.get('/ess/my-expense-claims/:id', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:read', 'ess:claim-expense']), controller.getMyExpenseClaim);
 router.post('/ess/my-expense-claims', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:create', 'ess:claim-expense']), controller.createMyExpenseClaim);
+router.patch('/ess/my-expense-claims/:id', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:update', 'ess:claim-expense']), controller.updateMyExpenseClaim);
 router.patch('/ess/my-expense-claims/:id/submit', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:update', 'ess:claim-expense']), controller.submitMyExpenseClaim);
+router.patch('/ess/my-expense-claims/:id/cancel', requireESSFeature('reimbursementClaims'), requirePermissions(['hr:update', 'ess:claim-expense']), controller.cancelMyExpenseClaim);
 
 // ── Loan Application (ESS feature gated) ────────────────────────────
 router.get('/ess/my-loans', requireESSFeature('loanApplication'), requirePermissions(['hr:read', 'ess:apply-loan']), controller.getMyLoans);

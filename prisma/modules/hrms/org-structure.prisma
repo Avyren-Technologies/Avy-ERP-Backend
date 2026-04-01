@@ -50,13 +50,14 @@ model Designation {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  employees       Employee[]
-  successionPlans SuccessionPlan[]
-  requisitions    JobRequisition[]    @relation("RequisitionDesignation")
-  transfersFrom   EmployeeTransfer[]  @relation("TransferFromDesig")
-  transfersTo     EmployeeTransfer[]  @relation("TransferToDesig")
-  promotionsFrom  EmployeePromotion[] @relation("PromotionFromDesig")
-  promotionsTo    EmployeePromotion[] @relation("PromotionToDesig")
+  employees             Employee[]
+  successionPlans       SuccessionPlan[]
+  requisitions          JobRequisition[]        @relation("RequisitionDesignation")
+  transfersFrom         EmployeeTransfer[]      @relation("TransferFromDesig")
+  transfersTo           EmployeeTransfer[]      @relation("TransferToDesig")
+  promotionsFrom        EmployeePromotion[]     @relation("PromotionFromDesig")
+  promotionsTo          EmployeePromotion[]     @relation("PromotionToDesig")
+  expenseCategoryLimits ExpenseCategoryLimit[]
 
   @@unique([companyId, code])
   @@map("designations")
@@ -79,10 +80,11 @@ model Grade {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  designations   Designation[]
-  employees      Employee[]
-  promotionsFrom EmployeePromotion[] @relation("PromotionFromGrade")
-  promotionsTo   EmployeePromotion[] @relation("PromotionToGrade")
+  designations          Designation[]
+  employees             Employee[]
+  promotionsFrom        EmployeePromotion[] @relation("PromotionFromGrade")
+  promotionsTo          EmployeePromotion[] @relation("PromotionToGrade")
+  expenseCategoryLimits ExpenseCategoryLimit[]
 
   @@unique([companyId, code])
   @@map("grades")

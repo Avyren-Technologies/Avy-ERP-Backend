@@ -418,3 +418,6 @@ export function createStoredReportCacheKey(reportId: string): string {
 export function createRootRedisPattern(): string {
   return `${env.REDIS_KEY_PREFIX}:*`;
 }
+
+// Number series
+export { generateNextNumber } from './number-series';

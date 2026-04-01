@@ -1217,6 +1217,171 @@ export class AdvancedHRService {
   // EXPENSE CLAIMS
   // ════════════════════════════════════════════════════════════════
 
+  // ════════════════════════════════════════════════════════════════
+  // EXPENSE CATEGORIES (Admin Configuration)
+  // ════════════════════════════════════════════════════════════════
+
+  async listExpenseCategories(companyId: string, options: { includeInactive?: boolean } = {}) {
+    const where: any = { companyId };
+    if (!options.includeInactive) where.isActive = true;
+
+    return platformPrisma.expenseCategory.findMany({
+      where,
+      include: {
+        limits: {
+          include: {
+            grade: { select: { id: true, name: true, code: true } },
+            designation: { select: { id: true, name: true, code: true } },
+          },
+        },
+        _count: { select: { items: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getExpenseCategory(companyId: string, id: string) {
+    const category = await platformPrisma.expenseCategory.findUnique({
+      where: { id },
+      include: {
+        limits: {
+          include: {
+            grade: { select: { id: true, name: true, code: true } },
+            designation: { select: { id: true, name: true, code: true } },
+          },
+        },
+      },
+    });
+    if (!category || category.companyId !== companyId) {
+      throw ApiError.notFound('Expense category not found');
+    }
+    return category;
+  }
+
+  async createExpenseCategory(companyId: string, data: any) {
+    // Check for duplicate code
+    const existing = await platformPrisma.expenseCategory.findUnique({
+      where: { companyId_code: { companyId, code: data.code } },
+    });
+    if (existing) {
+      throw ApiError.badRequest(`Expense category with code "${data.code}" already exists`);
+    }
+
+    return platformPrisma.expenseCategory.create({
+      data: {
+        companyId,
+        name: data.name,
+        code: data.code,
+        description: n(data.description),
+        isActive: data.isActive ?? true,
+        requiresReceipt: data.requiresReceipt ?? true,
+        receiptThreshold: data.receiptThreshold ?? null,
+        maxAmountPerClaim: data.maxAmountPerClaim ?? null,
+        maxAmountPerMonth: data.maxAmountPerMonth ?? null,
+        maxAmountPerYear: data.maxAmountPerYear ?? null,
+      },
+    });
+  }
+
+  async updateExpenseCategory(companyId: string, id: string, data: any) {
+    const category = await platformPrisma.expenseCategory.findUnique({ where: { id } });
+    if (!category || category.companyId !== companyId) {
+      throw ApiError.notFound('Expense category not found');
+    }
+
+    return platformPrisma.expenseCategory.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.code !== undefined && { code: data.code }),
+        ...(data.description !== undefined && { description: n(data.description) }),
+        ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.requiresReceipt !== undefined && { requiresReceipt: data.requiresReceipt }),
+        ...(data.receiptThreshold !== undefined && { receiptThreshold: data.receiptThreshold }),
+        ...(data.maxAmountPerClaim !== undefined && { maxAmountPerClaim: data.maxAmountPerClaim }),
+        ...(data.maxAmountPerMonth !== undefined && { maxAmountPerMonth: data.maxAmountPerMonth }),
+        ...(data.maxAmountPerYear !== undefined && { maxAmountPerYear: data.maxAmountPerYear }),
+      },
+    });
+  }
+
+  async deleteExpenseCategory(companyId: string, id: string) {
+    const category = await platformPrisma.expenseCategory.findUnique({
+      where: { id },
+      include: { _count: { select: { items: true } } },
+    });
+    if (!category || category.companyId !== companyId) {
+      throw ApiError.notFound('Expense category not found');
+    }
+    if (category._count.items > 0) {
+      throw ApiError.badRequest('Cannot delete category that has been used in expense claim items. Deactivate it instead.');
+    }
+
+    await platformPrisma.expenseCategory.delete({ where: { id } });
+    return { message: 'Expense category deleted' };
+  }
+
+  // ── Expense Category Limits (per grade/designation) ──────────────
+
+  async createExpenseCategoryLimit(companyId: string, data: any) {
+    const category = await platformPrisma.expenseCategory.findUnique({ where: { id: data.categoryId } });
+    if (!category || category.companyId !== companyId) {
+      throw ApiError.notFound('Expense category not found');
+    }
+
+    return platformPrisma.expenseCategoryLimit.create({
+      data: {
+        companyId,
+        categoryId: data.categoryId,
+        gradeId: data.gradeId ?? null,
+        designationId: data.designationId ?? null,
+        maxAmountPerClaim: data.maxAmountPerClaim ?? null,
+        maxAmountPerMonth: data.maxAmountPerMonth ?? null,
+        maxAmountPerYear: data.maxAmountPerYear ?? null,
+      },
+      include: {
+        category: { select: { id: true, name: true, code: true } },
+        grade: { select: { id: true, name: true, code: true } },
+        designation: { select: { id: true, name: true, code: true } },
+      },
+    });
+  }
+
+  async updateExpenseCategoryLimit(companyId: string, id: string, data: any) {
+    const limit = await platformPrisma.expenseCategoryLimit.findUnique({ where: { id } });
+    if (!limit || limit.companyId !== companyId) {
+      throw ApiError.notFound('Expense category limit not found');
+    }
+
+    return platformPrisma.expenseCategoryLimit.update({
+      where: { id },
+      data: {
+        ...(data.maxAmountPerClaim !== undefined && { maxAmountPerClaim: data.maxAmountPerClaim }),
+        ...(data.maxAmountPerMonth !== undefined && { maxAmountPerMonth: data.maxAmountPerMonth }),
+        ...(data.maxAmountPerYear !== undefined && { maxAmountPerYear: data.maxAmountPerYear }),
+      },
+      include: {
+        category: { select: { id: true, name: true, code: true } },
+        grade: { select: { id: true, name: true, code: true } },
+        designation: { select: { id: true, name: true, code: true } },
+      },
+    });
+  }
+
+  async deleteExpenseCategoryLimit(companyId: string, id: string) {
+    const limit = await platformPrisma.expenseCategoryLimit.findUnique({ where: { id } });
+    if (!limit || limit.companyId !== companyId) {
+      throw ApiError.notFound('Expense category limit not found');
+    }
+
+    await platformPrisma.expenseCategoryLimit.delete({ where: { id } });
+    return { message: 'Expense category limit deleted' };
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // EXPENSE CLAIMS (Admin)
+  // ════════════════════════════════════════════════════════════════
+
   async listExpenseClaims(companyId: string, options: ExpenseClaimListOptions = {}) {
     const { page = 1, limit = 25, employeeId, status, category } = options;
     const offset = (page - 1) * limit;
@@ -1230,7 +1395,18 @@ export class AdvancedHRService {
       platformPrisma.expenseClaim.findMany({
         where,
         include: {
-          employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+          employee: {
+            select: {
+              id: true, employeeId: true, firstName: true, lastName: true,
+              department: { select: { id: true, name: true } },
+              designation: { select: { id: true, name: true } },
+              grade: { select: { id: true, name: true } },
+            },
+          },
+          items: {
+            include: { category: { select: { id: true, name: true, code: true } } },
+            orderBy: { expenseDate: 'asc' },
+          },
         },
         skip: offset,
         take: limit,
@@ -1250,7 +1426,13 @@ export class AdvancedHRService {
           select: {
             id: true, employeeId: true, firstName: true, lastName: true,
             department: { select: { id: true, name: true } },
+            designation: { select: { id: true, name: true } },
+            grade: { select: { id: true, name: true } },
           },
+        },
+        items: {
+          include: { category: { select: { id: true, name: true, code: true } } },
+          orderBy: { expenseDate: 'asc' },
         },
       },
     });
@@ -1269,20 +1451,51 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Employee not found in this company');
     }
 
+    // Calculate total from items if provided
+    let totalAmount = data.amount;
+    if (data.items && data.items.length > 0) {
+      totalAmount = data.items.reduce((sum: number, item: any) => sum + item.amount, 0);
+    }
+
+    const createData: any = {
+      companyId,
+      employeeId: data.employeeId,
+      title: data.title,
+      amount: totalAmount,
+      category: data.category,
+      receipts: data.receipts ?? Prisma.JsonNull,
+      description: n(data.description),
+      tripDate: data.tripDate ? new Date(data.tripDate) : null,
+      fromDate: data.fromDate ? new Date(data.fromDate) : null,
+      toDate: data.toDate ? new Date(data.toDate) : null,
+      paymentMethod: data.paymentMethod ?? 'CASH',
+      merchantName: n(data.merchantName),
+      projectCode: n(data.projectCode),
+      currency: data.currency ?? 'INR',
+      status: 'DRAFT',
+    };
+
+    if (data.items && data.items.length > 0) {
+      createData.items = {
+        create: data.items.map((item: any) => ({
+          categoryCode: item.categoryCode,
+          categoryId: item.categoryId ?? null,
+          description: item.description,
+          amount: item.amount,
+          expenseDate: new Date(item.expenseDate),
+          merchantName: item.merchantName ?? null,
+          receipts: item.receipts ?? Prisma.JsonNull,
+          distanceKm: item.distanceKm ?? null,
+          ratePerKm: item.ratePerKm ?? null,
+        })),
+      };
+    }
+
     return platformPrisma.expenseClaim.create({
-      data: {
-        companyId,
-        employeeId: data.employeeId,
-        title: data.title,
-        amount: data.amount,
-        category: data.category,
-        receipts: data.receipts ?? Prisma.JsonNull,
-        description: n(data.description),
-        tripDate: data.tripDate ? new Date(data.tripDate) : null,
-        status: 'DRAFT',
-      },
+      data: createData,
       include: {
         employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+        items: { orderBy: { expenseDate: 'asc' } },
       },
     });
   }
@@ -1296,24 +1509,58 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Only DRAFT claims can be updated');
     }
 
+    // If items are being replaced, recalculate total
+    let newAmount = data.amount;
+    if (data.items && data.items.length > 0) {
+      newAmount = data.items.reduce((sum: number, item: any) => sum + item.amount, 0);
+      await platformPrisma.expenseClaimItem.deleteMany({ where: { claimId: id } });
+    }
+
+    const updateData: any = {
+      ...(data.title !== undefined && { title: data.title }),
+      ...(newAmount !== undefined && { amount: newAmount }),
+      ...(data.category !== undefined && { category: data.category }),
+      ...(data.receipts !== undefined && { receipts: data.receipts ?? Prisma.JsonNull }),
+      ...(data.description !== undefined && { description: n(data.description) }),
+      ...(data.tripDate !== undefined && { tripDate: data.tripDate ? new Date(data.tripDate) : null }),
+      ...(data.fromDate !== undefined && { fromDate: data.fromDate ? new Date(data.fromDate) : null }),
+      ...(data.toDate !== undefined && { toDate: data.toDate ? new Date(data.toDate) : null }),
+      ...(data.paymentMethod !== undefined && { paymentMethod: data.paymentMethod }),
+      ...(data.merchantName !== undefined && { merchantName: n(data.merchantName) }),
+      ...(data.projectCode !== undefined && { projectCode: n(data.projectCode) }),
+    };
+
+    if (data.items && data.items.length > 0) {
+      updateData.items = {
+        create: data.items.map((item: any) => ({
+          categoryCode: item.categoryCode,
+          categoryId: item.categoryId ?? null,
+          description: item.description,
+          amount: item.amount,
+          expenseDate: new Date(item.expenseDate),
+          merchantName: item.merchantName ?? null,
+          receipts: item.receipts ?? Prisma.JsonNull,
+          distanceKm: item.distanceKm ?? null,
+          ratePerKm: item.ratePerKm ?? null,
+        })),
+      };
+    }
+
     return platformPrisma.expenseClaim.update({
       where: { id },
-      data: {
-        ...(data.title !== undefined && { title: data.title }),
-        ...(data.amount !== undefined && { amount: data.amount }),
-        ...(data.category !== undefined && { category: data.category }),
-        ...(data.receipts !== undefined && { receipts: data.receipts ?? Prisma.JsonNull }),
-        ...(data.description !== undefined && { description: n(data.description) }),
-        ...(data.tripDate !== undefined && { tripDate: data.tripDate ? new Date(data.tripDate) : null }),
-      },
+      data: updateData,
       include: {
         employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+        items: { orderBy: { expenseDate: 'asc' } },
       },
     });
   }
 
   async submitExpenseClaim(companyId: string, id: string) {
-    const claim = await platformPrisma.expenseClaim.findUnique({ where: { id } });
+    const claim = await platformPrisma.expenseClaim.findUnique({
+      where: { id },
+      include: { items: true },
+    });
     if (!claim || claim.companyId !== companyId) {
       throw ApiError.notFound('Expense claim not found');
     }
@@ -1324,38 +1571,137 @@ export class AdvancedHRService {
     const updatedClaim = await platformPrisma.expenseClaim.update({
       where: { id },
       data: { status: 'SUBMITTED' },
+      include: { items: true },
     });
 
     // Wire approval workflow
-    await essService.createRequest(companyId, {
+    const approvalRequest = await essService.createRequest(companyId, {
       requesterId: claim.employeeId,
       entityType: 'ExpenseClaim',
       entityId: claim.id,
       triggerEvent: 'REIMBURSEMENT',
-      data: { amount: Number(claim.amount), category: claim.category, title: claim.title },
+      data: {
+        amount: Number(claim.amount),
+        category: claim.category,
+        title: claim.title,
+        itemCount: claim.items.length,
+        claimNumber: claim.claimNumber,
+      },
     });
 
-    return updatedClaim;
+    // If no workflow, auto-approve
+    if (!approvalRequest) {
+      return platformPrisma.expenseClaim.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          approvedBy: 'auto',
+          approvedAt: new Date(),
+          approvedAmount: claim.amount,
+        },
+        include: { items: true },
+      });
+    }
+
+    // Update to PENDING_APPROVAL since a workflow exists
+    return platformPrisma.expenseClaim.update({
+      where: { id },
+      data: { status: 'PENDING_APPROVAL' },
+      include: { items: true },
+    });
   }
 
-  async approveRejectExpenseClaim(companyId: string, id: string, action: 'approve' | 'reject', approvedBy?: string) {
-    const claim = await platformPrisma.expenseClaim.findUnique({ where: { id } });
+  async approveRejectExpenseClaim(companyId: string, id: string, data: {
+    action: 'approve' | 'reject';
+    approvedBy?: string;
+    rejectionReason?: string;
+    approvedAmount?: number;
+    itemApprovals?: Array<{ itemId: string; approved: boolean; approvedAmount?: number; reason?: string }>;
+  }) {
+    const claim = await platformPrisma.expenseClaim.findUnique({
+      where: { id },
+      include: { items: true },
+    });
     if (!claim || claim.companyId !== companyId) {
       throw ApiError.notFound('Expense claim not found');
     }
-    if (claim.status !== 'SUBMITTED') {
-      throw ApiError.badRequest('Only SUBMITTED claims can be approved or rejected');
+    if (!['SUBMITTED', 'PENDING_APPROVAL'].includes(claim.status)) {
+      throw ApiError.badRequest('Only SUBMITTED or PENDING_APPROVAL claims can be approved or rejected');
     }
 
-    const newStatus = action === 'approve' ? 'APPROVED' : 'REJECTED';
+    if (data.action === 'reject') {
+      // Full rejection
+      const updated = await platformPrisma.expenseClaim.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          approvedBy: n(data.approvedBy),
+          approvedAt: new Date(),
+          rejectionReason: data.rejectionReason ?? null,
+        },
+        include: { items: true },
+      });
+      // Mark all items as rejected
+      if (claim.items.length > 0) {
+        await platformPrisma.expenseClaimItem.updateMany({
+          where: { claimId: id },
+          data: { isApproved: false, rejectionReason: data.rejectionReason ?? 'Claim rejected' },
+        });
+      }
+      return updated;
+    }
 
+    // Approval (full or partial)
+    if (data.itemApprovals && data.itemApprovals.length > 0) {
+      // Partial approval — process per-item decisions
+      let totalApproved = 0;
+      let hasRejections = false;
+
+      for (const itemApproval of data.itemApprovals) {
+        const item = claim.items.find((i) => i.id === itemApproval.itemId);
+        if (!item) continue;
+
+        await platformPrisma.expenseClaimItem.update({
+          where: { id: itemApproval.itemId },
+          data: {
+            isApproved: itemApproval.approved,
+            approvedAmount: itemApproval.approved
+              ? (itemApproval.approvedAmount ?? Number(item.amount))
+              : 0,
+            rejectionReason: !itemApproval.approved ? (itemApproval.reason ?? null) : null,
+          },
+        });
+
+        if (itemApproval.approved) {
+          totalApproved += itemApproval.approvedAmount ?? Number(item.amount);
+        } else {
+          hasRejections = true;
+        }
+      }
+
+      const newStatus = hasRejections ? 'PARTIALLY_APPROVED' : 'APPROVED';
+      return platformPrisma.expenseClaim.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          approvedAmount: totalApproved,
+          approvedBy: n(data.approvedBy),
+          approvedAt: new Date(),
+        },
+        include: { items: true },
+      });
+    }
+
+    // Full approval
     return platformPrisma.expenseClaim.update({
       where: { id },
       data: {
-        status: newStatus as any,
-        approvedBy: n(approvedBy),
+        status: 'APPROVED',
+        approvedAmount: data.approvedAmount ?? claim.amount,
+        approvedBy: n(data.approvedBy),
         approvedAt: new Date(),
       },
+      include: { items: true },
     });
   }
 
@@ -1364,12 +1710,99 @@ export class AdvancedHRService {
     if (!claim || claim.companyId !== companyId) {
       throw ApiError.notFound('Expense claim not found');
     }
-    if (claim.status !== 'DRAFT') {
-      throw ApiError.badRequest('Only DRAFT claims can be deleted');
+    if (!['DRAFT', 'CANCELLED'].includes(claim.status)) {
+      throw ApiError.badRequest('Only DRAFT or CANCELLED claims can be deleted');
     }
 
+    // Items are cascade-deleted
     await platformPrisma.expenseClaim.delete({ where: { id } });
     return { message: 'Expense claim deleted' };
+  }
+
+  async getExpenseClaimReport(companyId: string, options: {
+    fromDate?: string;
+    toDate?: string;
+    employeeId?: string;
+    departmentId?: string;
+    status?: string;
+  } = {}) {
+    const where: any = { companyId };
+    if (options.status) where.status = options.status.toUpperCase();
+    if (options.employeeId) where.employeeId = options.employeeId;
+
+    if (options.fromDate || options.toDate) {
+      where.createdAt = {};
+      if (options.fromDate) where.createdAt.gte = new Date(options.fromDate);
+      if (options.toDate) where.createdAt.lte = new Date(options.toDate);
+    }
+
+    if (options.departmentId) {
+      where.employee = { departmentId: options.departmentId };
+    }
+
+    const claims = await platformPrisma.expenseClaim.findMany({
+      where,
+      include: {
+        employee: {
+          select: {
+            id: true, employeeId: true, firstName: true, lastName: true,
+            department: { select: { id: true, name: true } },
+          },
+        },
+        items: { select: { categoryCode: true, amount: true, approvedAmount: true, isApproved: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Build summary
+    const summary = {
+      totalClaims: claims.length,
+      totalClaimed: 0,
+      totalApproved: 0,
+      totalPaid: 0,
+      totalRejected: 0,
+      totalPending: 0,
+      byCategory: {} as Record<string, { count: number; claimed: number; approved: number }>,
+      byDepartment: {} as Record<string, { count: number; claimed: number; approved: number }>,
+      byStatus: {} as Record<string, number>,
+    };
+
+    for (const claim of claims) {
+      const amt = Number(claim.amount);
+      const approved = Number(claim.approvedAmount ?? 0);
+      summary.totalClaimed += amt;
+      summary.byStatus[claim.status] = (summary.byStatus[claim.status] ?? 0) + 1;
+
+      const deptName = claim.employee.department?.name ?? 'Unassigned';
+      if (!summary.byDepartment[deptName]) {
+        summary.byDepartment[deptName] = { count: 0, claimed: 0, approved: 0 };
+      }
+      summary.byDepartment[deptName]!.count++;
+      summary.byDepartment[deptName]!.claimed += amt;
+
+      if (!summary.byCategory[claim.category]) {
+        summary.byCategory[claim.category] = { count: 0, claimed: 0, approved: 0 };
+      }
+      summary.byCategory[claim.category]!.count++;
+      summary.byCategory[claim.category]!.claimed += amt;
+
+      if (['APPROVED', 'PARTIALLY_APPROVED', 'PAID'].includes(claim.status)) {
+        summary.totalApproved += approved;
+        summary.byDepartment[deptName]!.approved += approved;
+        summary.byCategory[claim.category]!.approved += approved;
+      }
+      if (claim.status === 'PAID') {
+        summary.totalPaid += approved;
+      }
+      if (claim.status === 'REJECTED') {
+        summary.totalRejected += amt;
+      }
+      if (['SUBMITTED', 'PENDING_APPROVAL'].includes(claim.status)) {
+        summary.totalPending += amt;
+      }
+    }
+
+    return { claims, summary };
   }
 
   // ════════════════════════════════════════════════════════════════

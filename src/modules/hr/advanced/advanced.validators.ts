@@ -147,8 +147,53 @@ export const returnAssetSchema = z.object({
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// EXPENSE CATEGORIES
+// ═══════════════════════════════════════════════════════════════════
+
+export const createExpenseCategorySchema = z.object({
+  name: z.string().min(1, 'Category name is required'),
+  code: z.string().min(1, 'Category code is required').toUpperCase(),
+  description: z.string().optional(),
+  isActive: z.boolean().optional(),
+  requiresReceipt: z.boolean().optional(),
+  receiptThreshold: z.number().min(0).optional(),
+  maxAmountPerClaim: z.number().min(0).optional(),
+  maxAmountPerMonth: z.number().min(0).optional(),
+  maxAmountPerYear: z.number().min(0).optional(),
+});
+
+export const updateExpenseCategorySchema = createExpenseCategorySchema.partial();
+
+export const createExpenseCategoryLimitSchema = z.object({
+  categoryId: z.string().min(1, 'Category ID is required'),
+  gradeId: z.string().optional(),
+  designationId: z.string().optional(),
+  maxAmountPerClaim: z.number().min(0).optional(),
+  maxAmountPerMonth: z.number().min(0).optional(),
+  maxAmountPerYear: z.number().min(0).optional(),
+});
+
+export const updateExpenseCategoryLimitSchema = z.object({
+  maxAmountPerClaim: z.number().min(0).optional(),
+  maxAmountPerMonth: z.number().min(0).optional(),
+  maxAmountPerYear: z.number().min(0).optional(),
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // EXPENSE CLAIMS
 // ═══════════════════════════════════════════════════════════════════
+
+const expenseClaimItemSchema = z.object({
+  categoryCode: z.string().min(1, 'Category code is required'),
+  categoryId: z.string().optional(),
+  description: z.string().min(1, 'Item description is required'),
+  amount: z.number().positive('Amount must be positive'),
+  expenseDate: z.string().min(1, 'Expense date is required'),
+  merchantName: z.string().optional(),
+  receipts: z.array(z.object({ fileName: z.string(), fileUrl: z.string() })).optional(),
+  distanceKm: z.number().positive().optional(),
+  ratePerKm: z.number().positive().optional(),
+});
 
 export const createExpenseClaimSchema = z.object({
   employeeId: z.string().min(1, 'Employee ID is required'),
@@ -161,13 +206,30 @@ export const createExpenseClaimSchema = z.object({
   })).optional(),
   description: z.string().optional(),
   tripDate: z.string().optional(),
+  fromDate: z.string().optional(),
+  toDate: z.string().optional(),
+  paymentMethod: z.enum(['CASH', 'PERSONAL_CARD', 'COMPANY_CARD', 'BANK_TRANSFER', 'UPI', 'OTHER']).optional(),
+  merchantName: z.string().optional(),
+  projectCode: z.string().optional(),
+  currency: z.string().optional(),
+  items: z.array(expenseClaimItemSchema).optional(),
 });
 
 export const updateExpenseClaimSchema = createExpenseClaimSchema.partial().omit({ employeeId: true });
 
+const itemApprovalSchema = z.object({
+  itemId: z.string().min(1),
+  approved: z.boolean(),
+  approvedAmount: z.number().min(0).optional(),
+  reason: z.string().optional(),
+});
+
 export const approveRejectClaimSchema = z.object({
   action: z.enum(['approve', 'reject']),
   approvedBy: z.string().optional(),
+  rejectionReason: z.string().optional(),
+  approvedAmount: z.number().min(0).optional(),
+  itemApprovals: z.array(itemApprovalSchema).optional(),
 });
 
 // ═══════════════════════════════════════════════════════════════════

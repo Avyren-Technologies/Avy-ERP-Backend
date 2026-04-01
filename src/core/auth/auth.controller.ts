@@ -6,6 +6,7 @@ import { validateLogin, validateRegister, validateRefreshToken, validateChangePa
 import { createSuccessResponse } from '../../shared/utils';
 import type { LoginRequest, RegisterRequest, RefreshTokenRequest, ChangePasswordRequest, ForgotPasswordRequest, VerifyResetCodeRequest, ResetPasswordRequest } from './auth.types';
 import { asyncHandler } from '../../middleware/error.middleware';
+import { platformPrisma } from '../../config/database';
 
 export class AuthController {
   // Login
@@ -85,6 +86,24 @@ export class AuthController {
   // Get current user profile
   getProfile = asyncHandler(async (req: Request, res: Response) => {
     const user = req.user!;
+    let roleName: string | null = null;
+
+    if (user.tenantId) {
+      const tenantUser = await platformPrisma.tenantUser.findUnique({
+        where: {
+          userId_tenantId: {
+            userId: user.id,
+            tenantId: user.tenantId,
+          },
+        },
+        select: {
+          role: {
+            select: { name: true },
+          },
+        },
+      });
+      roleName = tenantUser?.role?.name ?? null;
+    }
 
     res.json(createSuccessResponse({
       user: {
@@ -93,6 +112,7 @@ export class AuthController {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.roleId,
+        roleName,
         permissions: user.permissions,
         tenantId: user.tenantId,
         companyId: user.companyId,

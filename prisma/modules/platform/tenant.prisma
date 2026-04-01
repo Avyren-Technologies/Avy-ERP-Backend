@@ -197,8 +197,10 @@ model Company {
   chatConversations          ChatConversation[]
 
   // Expense, Letters, Grievance & Discipline Relations
-  expenseClaims       ExpenseClaim[]
-  hrLetterTemplates   HRLetterTemplate[]
+  expenseCategories     ExpenseCategory[]
+  expenseCategoryLimits ExpenseCategoryLimit[]
+  expenseClaims         ExpenseClaim[]
+  hrLetterTemplates     HRLetterTemplate[]
   hrLetters           HRLetter[]
   grievanceCategories GrievanceCategory[]
   grievanceCases      GrievanceCase[]

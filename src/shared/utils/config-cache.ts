@@ -176,8 +176,28 @@ export async function getCachedOvertimeRules(companyId: string): Promise<Overtim
 }
 
 /**
+ * Default ESS feature flags — all features enabled by default.
+ * Company admins can disable specific features via the ESS Config admin screen.
+ */
+const ESS_DEFAULT_FEATURES = {
+  viewPayslips: true, downloadPayslips: true, downloadForm16: true,
+  viewSalaryStructure: true, itDeclaration: true,
+  leaveApplication: true, leaveBalanceView: true, leaveCancellation: true,
+  attendanceView: true, attendanceRegularization: true,
+  viewShiftSchedule: true, shiftSwapRequest: true, wfhRequest: true,
+  profileUpdate: true, documentUpload: true, employeeDirectory: true, viewOrgChart: true,
+  reimbursementClaims: true, loanApplication: true, assetView: true,
+  performanceGoals: true, appraisalAccess: true, feedback360: true, trainingEnrollment: true,
+  helpDesk: true, grievanceSubmission: true, holidayCalendar: true,
+  policyDocuments: true, announcementBoard: true,
+  mssViewTeam: true, mssApproveLeave: true, mssApproveAttendance: true, mssViewTeamAttendance: true,
+  mobileOfflinePunch: true,
+};
+
+/**
  * Get cached ESSConfig for a company.
- * Auto-seeds with Prisma defaults if no record exists.
+ * Auto-seeds with all features enabled if no record exists.
+ * Auto-repairs records created with old restrictive defaults.
  */
 export async function getCachedESSConfig(companyId: string): Promise<ESSConfig> {
   const key = essConfigKey(companyId);
@@ -187,8 +207,22 @@ export async function getCachedESSConfig(companyId: string): Promise<ESSConfig> 
 
   let config = await platformPrisma.eSSConfig.findUnique({ where: { companyId } });
   if (!config) {
-    logger.info(`ESSConfig missing for company ${companyId}, auto-seeding defaults`);
-    config = await platformPrisma.eSSConfig.create({ data: { companyId } });
+    logger.info(`ESSConfig missing for company ${companyId}, auto-seeding with all features enabled`);
+    config = await platformPrisma.eSSConfig.create({
+      data: { companyId, ...ESS_DEFAULT_FEATURES },
+    });
+  } else {
+    // Auto-repair records created with old restrictive defaults (pre-migration).
+    // If most features are disabled, this was likely auto-seeded with old defaults.
+    const booleanKeys = Object.keys(ESS_DEFAULT_FEATURES) as (keyof typeof ESS_DEFAULT_FEATURES)[];
+    const disabledCount = booleanKeys.filter(k => (config as Record<string, unknown>)[k] === false).length;
+    if (disabledCount >= 20) {
+      logger.info(`ESSConfig for company ${companyId} has ${disabledCount} features disabled (old defaults), auto-repairing`);
+      config = await platformPrisma.eSSConfig.update({
+        where: { companyId },
+        data: ESS_DEFAULT_FEATURES,
+      });
+    }
   }
 
   await tryWriteCache(key, config, 'ess-config');

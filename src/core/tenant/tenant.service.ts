@@ -3,7 +3,7 @@ import {
   DEFAULT_ROLES, DEFAULT_DEPARTMENTS, DEFAULT_GRADES, DEFAULT_EMPLOYEE_TYPES,
   DEFAULT_DESIGNATIONS, DEFAULT_LEAVE_TYPES, DEFAULT_SALARY_COMPONENTS,
   DEFAULT_LOAN_POLICIES, DEFAULT_ASSET_CATEGORIES, DEFAULT_GRIEVANCE_CATEGORIES,
-  DEFAULT_APPROVAL_WORKFLOWS, DEFAULT_NOTIFICATION_TEMPLATES, DEFAULT_NOTIFICATION_RULES,
+  DEFAULT_APPROVAL_WORKFLOWS, DEFAULT_NOTIFICATION_TEMPLATES, DEFAULT_NOTIFICATION_RULES, DEFAULT_EXPENSE_CATEGORIES,
   DEFAULT_TAX_CONFIG, DEFAULT_ROSTERS, getDefaultHolidays,
 } from '../../shared/constants/company-defaults';
 import { platformPrisma } from '../../config/database';
@@ -570,6 +570,20 @@ export class TenantService {
             code: `CC-${dept.code}`,
             name: `${dept.name} Cost Centre`,
             departmentId: dept.id,
+          },
+        });
+      }
+
+      // Expense Categories (default set)
+      for (const ec of DEFAULT_EXPENSE_CATEGORIES) {
+        await tx.expenseCategory.create({
+          data: {
+            companyId: company.id,
+            name: ec.name,
+            code: ec.code,
+            description: ec.description,
+            requiresReceipt: ec.requiresReceipt,
+            receiptThreshold: (ec as any).receiptThreshold ?? null,
           },
         });
       }

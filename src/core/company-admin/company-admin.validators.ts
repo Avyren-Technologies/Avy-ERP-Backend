@@ -7,6 +7,7 @@ import {
   BreakType,
   DeviceType,
 } from '@prisma/client';
+import { VALID_LINKED_SCREEN_VALUES } from '../../shared/constants/linked-screens';
 
 // ── Location ────────────────────────────────────────────────────────
 
@@ -98,7 +99,10 @@ export const updateContactSchema = createContactSchema.partial();
 
 export const createNoSeriesSchema = z.object({
   code: z.string().min(1),
-  linkedScreen: z.string().min(1),
+  linkedScreen: z.string().min(1).refine(
+    (v) => VALID_LINKED_SCREEN_VALUES.has(v),
+    { message: 'Invalid linked screen value. Use GET /company/no-series/linked-screens for valid options.' },
+  ),
   description: z.string().optional(),
   prefix: z.string().min(1),
   suffix: z.string().optional(),

@@ -19,7 +19,7 @@
     "worker:reports": "ts-node src/workers/report.worker.ts",
     "worker:analytics": "ts-node src/workers/analytics.worker.ts",
     "worker:notifications": "ts-node src/workers/notification.worker.ts",
-    "comapny:seed": "npx tsx scripts/seed-company.ts --api-url http://localhost:3030/api/v1 --email superadmin@avyerp.local --password SuperAdmin@12345"
+    "company:seed": "npx tsx scripts/seed-company.ts --api-url http://localhost:3030/api/v1 --email superadmin@avyerp.local --password SuperAdmin@12345"
   },
   "keywords": [
     "erp",

@@ -263,3 +263,7 @@ export const {
   GST_RATES,
   TIME,
 } = APP_CONSTANTS;
+
+// Linked screens for Number Series
+export { LINKED_SCREENS, VALID_LINKED_SCREEN_VALUES, isValidLinkedScreen } from './linked-screens';
+export type { LinkedScreenOption } from './linked-screens';

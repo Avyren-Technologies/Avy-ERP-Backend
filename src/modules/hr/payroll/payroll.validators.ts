@@ -95,6 +95,8 @@ const ptSlabSchema = z.object({
 export const createPTConfigSchema = z.object({
   state: z.string().min(1, 'State is required'),
   slabs: z.array(ptSlabSchema).min(1, 'At least one slab is required'),
+  monthlyOverrides: z.record(z.string(), z.number().min(0)).optional(), // { "2": 300 } — month number to override amount
+  financialYear: z.string().regex(/^\d{4}-\d{2}$/, 'Financial year must be in format YYYY-YY (e.g. 2025-26)').optional(),
   frequency: z.enum(['MONTHLY', 'SEMI_ANNUAL']).default('MONTHLY'),
   registrationNumber: z.string().optional(),
 });
@@ -211,7 +213,7 @@ export const settleTravelAdvanceSchema = z.object({
 
 const taxSlabSchema = z.object({
   fromAmount: z.coerce.number().min(0),
-  toAmount: z.coerce.number().min(0),
+  toAmount: z.coerce.number().min(0).nullable(), // null = no upper limit (top slab)
   rate: z.coerce.number().min(0).max(100),
 });
 

@@ -109,6 +109,8 @@ model PTConfig {
   id                 String   @id @default(cuid())
   state              String
   slabs              Json // Array of { fromAmount, toAmount, taxAmount }
+  monthlyOverrides   Json? // { "2": 300, "11": 200 } — month number (1-12) to override amount
+  financialYear      String?  // e.g. "2025-26" — allows different slabs per FY
   frequency          String   @default("MONTHLY") // MONTHLY, SEMI_ANNUAL
   registrationNumber String?
   companyId          String

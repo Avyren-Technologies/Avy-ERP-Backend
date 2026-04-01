@@ -742,6 +742,8 @@ export class PayrollConfigService {
         companyId,
         state: data.state,
         slabs: data.slabs,
+        monthlyOverrides: data.monthlyOverrides ?? undefined,
+        financialYear: data.financialYear ?? undefined,
         frequency: data.frequency ?? 'MONTHLY',
         registrationNumber: n(data.registrationNumber),
       },
@@ -759,6 +761,8 @@ export class PayrollConfigService {
       data: {
         ...(data.state !== undefined && { state: data.state }),
         ...(data.slabs !== undefined && { slabs: data.slabs }),
+        ...(data.monthlyOverrides !== undefined && { monthlyOverrides: data.monthlyOverrides }),
+        ...(data.financialYear !== undefined && { financialYear: data.financialYear }),
         ...(data.frequency !== undefined && { frequency: data.frequency }),
         ...(data.registrationNumber !== undefined && { registrationNumber: n(data.registrationNumber) }),
       },

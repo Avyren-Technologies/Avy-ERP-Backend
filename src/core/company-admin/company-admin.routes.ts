@@ -38,6 +38,7 @@ router.patch('/contacts/:id', requirePermissions(['company:update']), controller
 router.delete('/contacts/:id', requirePermissions(['company:delete']), controller.deleteContact);
 
 // ── No. Series ──────────────────────────────────────────────────────
+router.get('/no-series/linked-screens', requirePermissions(['company:read']), controller.getLinkedScreens);
 router.get('/no-series', requirePermissions(['company:read']), controller.listNoSeries);
 router.get('/no-series/:id', requirePermissions(['company:read']), controller.getNoSeries);
 router.post('/no-series', requirePermissions(['company:create']), controller.createNoSeries);

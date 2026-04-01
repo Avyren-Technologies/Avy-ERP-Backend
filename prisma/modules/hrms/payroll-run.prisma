@@ -6,6 +6,7 @@
 
 model PayrollRun {
   id              String           @id @default(cuid())
+  referenceNumber String?
   month           Int // 1-12
   year            Int
   status          PayrollRunStatus @default(DRAFT)
