@@ -12,6 +12,8 @@ import {
 import { resolvePolicy, type EvaluationContext } from '../../../shared/services/policy-resolver.service';
 import { resolveAttendanceStatus, type ShiftInfo, type AttendanceRulesInput } from '../../../shared/services/attendance-status-resolver.service';
 import { validateLocationConstraints } from '../../../shared/services/location-validator.service';
+import { DateTime } from 'luxon';
+import { parseInCompanyTimezone } from '../../../shared/utils/timezone';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -318,12 +320,61 @@ export class AttendanceService {
       await this.processOvertimeForRecord(companyId, record, statusResult.overtimeHours, evaluationContext, employee.employeeTypeId ?? null, shiftInfo);
     }
 
+    // ── Step 10: Late Arrivals Monthly Limit Check ──
+    if (statusResult.isLate && rules.lateArrivalsAllowedPerMonth > 0) {
+      await this.checkMonthlyLateLimit(companyId, record, rules.lateArrivalsAllowedPerMonth);
+    }
+
     return record;
   }
 
   /**
+   * Check if this employee has exceeded the monthly late arrival limit.
+   * When the limit is exceeded, flags the record with a remark for HR review.
+   * Does NOT automatically change attendance status — that is left for HR.
+   */
+  private async checkMonthlyLateLimit(
+    companyId: string,
+    record: any,
+    allowedPerMonth: number,
+  ) {
+    const recordDate = new Date(record.date);
+    const monthStart = new Date(recordDate.getFullYear(), recordDate.getMonth(), 1);
+    const monthEnd = new Date(recordDate.getFullYear(), recordDate.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const lateCountThisMonth = await platformPrisma.attendanceRecord.count({
+      where: {
+        companyId,
+        employeeId: record.employeeId,
+        date: { gte: monthStart, lte: monthEnd },
+        isLate: true,
+      },
+    });
+
+    if (lateCountThisMonth > allowedPerMonth) {
+      const flagNote = `[LATE LIMIT EXCEEDED] ${lateCountThisMonth}/${allowedPerMonth} late arrivals this month — flagged for HR review`;
+      const existingRemarks = record.remarks ?? '';
+      const updatedRemarks = existingRemarks ? `${existingRemarks} | ${flagNote}` : flagNote;
+
+      await platformPrisma.attendanceRecord.update({
+        where: { id: record.id },
+        data: {
+          remarks: updatedRemarks,
+          finalStatusReason: `${record.finalStatusReason ?? ''} | ${flagNote}`,
+        },
+      });
+
+      logger.warn(
+        `Late limit exceeded [employee=${record.employeeId}, month=${recordDate.getMonth() + 1}/${recordDate.getFullYear()}, count=${lateCountThisMonth}, limit=${allowedPerMonth}]`,
+      );
+    }
+  }
+
+  /**
    * Process overtime for a newly created attendance record.
-   * Checks eligibility, applies thresholds, selects multiplier, and creates OT request.
+   * Checks eligibility, applies calculation basis (AFTER_SHIFT / TOTAL_HOURS),
+   * includeBreaksInOT, OT-specific rounding, caps (daily/weekly/monthly/continuous),
+   * night shift detection, selects multiplier, and creates OT request.
    */
   private async processOvertimeForRecord(
     companyId: string,
@@ -346,25 +397,178 @@ export class AttendanceService {
       }
     }
 
-    // Check minimum OT minutes
-    const otMinutes = overtimeHours * 60;
-    if (otMinutes < otRule.minimumOtMinutes) {
-      logger.info(`OT ${otMinutes}min below minimum ${otRule.minimumOtMinutes}min for employee ${record.employeeId}`);
-      return;
-    }
-
-    // Apply daily cap if enforceCaps is true
-    let cappedHours = overtimeHours;
-    if (otRule.enforceCaps && otRule.dailyCapHours) {
-      const dailyCap = Number(otRule.dailyCapHours);
-      if (cappedHours > dailyCap) {
-        cappedHours = dailyCap;
+    // ── minWorkingHoursForOT: skip OT if employee hasn't met the minimum working hours threshold ──
+    if (record.shiftId) {
+      const shift = await platformPrisma.companyShift.findUnique({
+        where: { id: record.shiftId },
+        select: { minWorkingHoursForOT: true },
+      });
+      if (shift?.minWorkingHoursForOT) {
+        const minHours = Number(shift.minWorkingHoursForOT);
+        const workedHours = record.workedHours ? Number(record.workedHours) : 0;
+        if (workedHours < minHours) {
+          logger.info(`OT skipped for employee ${record.employeeId}: worked ${workedHours}h < minWorkingHoursForOT ${minHours}h`);
+          return;
+        }
       }
     }
 
-    // Determine multiplier source based on context
+    // ── OT Calculation Basis ──
+    // AFTER_SHIFT (default): OT = hours beyond shift threshold (already computed by status resolver)
+    // TOTAL_HOURS: OT = total worked hours (entire shift is paid as OT, e.g. for holiday/weekend work)
+    let effectiveOtHours = overtimeHours;
+    if (otRule.calculationBasis === 'TOTAL_HOURS') {
+      const workedHours = record.workedHours ? Number(record.workedHours) : 0;
+      effectiveOtHours = workedHours;
+    }
+
+    // ── includeBreaksInOT ──
+    // The status resolver already deducted break minutes from workedHours (and thus from OT).
+    // When includeBreaksInOT is true, breaks should count toward OT hours.
+    if (otRule.includeBreaksInOT && record.appliedBreakDeductionMinutes) {
+      const breakHours = Number(record.appliedBreakDeductionMinutes) / 60;
+      effectiveOtHours += breakHours;
+    }
+
+    // ── Apply OT-specific rounding strategy ──
+    if (otRule.roundingStrategy && otRule.roundingStrategy !== 'NONE') {
+      effectiveOtHours = this.applyOtRounding(effectiveOtHours, otRule.roundingStrategy as string);
+    }
+
+    // Check minimum OT minutes (after calculation basis and rounding adjustments)
+    const otMinutes = effectiveOtHours * 60;
+    if (otMinutes < otRule.minimumOtMinutes) {
+      logger.info(`OT ${otMinutes.toFixed(1)}min below minimum ${otRule.minimumOtMinutes}min for employee ${record.employeeId}`);
+      return;
+    }
+
+    // ── Apply caps if enforceCaps is true ──
+    let cappedHours = effectiveOtHours;
+
+    if (otRule.enforceCaps) {
+      // Daily cap
+      if (otRule.dailyCapHours) {
+        const dailyCap = Number(otRule.dailyCapHours);
+        if (cappedHours > dailyCap) {
+          cappedHours = dailyCap;
+        }
+      }
+
+      // Weekly cap: sum approved/pending OT for this employee in the same ISO week
+      if (otRule.weeklyCapHours) {
+        const weeklyCap = Number(otRule.weeklyCapHours);
+        const recordDate = new Date(record.date);
+        const dayOfWeek = recordDate.getDay(); // 0=Sun, 1=Mon, ...
+        const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        const weekStart = new Date(recordDate);
+        weekStart.setDate(recordDate.getDate() + mondayOffset);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        weekEnd.setHours(23, 59, 59, 999);
+
+        const weeklyOtAgg = await platformPrisma.overtimeRequest.aggregate({
+          where: {
+            companyId,
+            employeeId: record.employeeId,
+            date: { gte: weekStart, lte: weekEnd },
+            status: { in: ['PENDING', 'APPROVED'] },
+          },
+          _sum: { requestedHours: true },
+        });
+        const weeklyOtSoFar = Number(weeklyOtAgg._sum.requestedHours ?? 0);
+        const weeklyRemaining = Math.max(0, weeklyCap - weeklyOtSoFar);
+        if (cappedHours > weeklyRemaining) {
+          logger.info(`Weekly OT cap applied [employee=${record.employeeId}, weeklyUsed=${weeklyOtSoFar}h, cap=${weeklyCap}h, requested=${cappedHours}h, allowed=${weeklyRemaining}h]`);
+          cappedHours = weeklyRemaining;
+        }
+      }
+
+      // Monthly cap: sum approved/pending OT for this employee in the same month
+      if (otRule.monthlyCapHours) {
+        const monthlyCap = Number(otRule.monthlyCapHours);
+        const recordDate = new Date(record.date);
+        const monthStart = new Date(recordDate.getFullYear(), recordDate.getMonth(), 1);
+        const monthEnd = new Date(recordDate.getFullYear(), recordDate.getMonth() + 1, 0, 23, 59, 59, 999);
+
+        const monthlyOtAgg = await platformPrisma.overtimeRequest.aggregate({
+          where: {
+            companyId,
+            employeeId: record.employeeId,
+            date: { gte: monthStart, lte: monthEnd },
+            status: { in: ['PENDING', 'APPROVED'] },
+          },
+          _sum: { requestedHours: true },
+        });
+        const monthlyOtSoFar = Number(monthlyOtAgg._sum.requestedHours ?? 0);
+        const monthlyRemaining = Math.max(0, monthlyCap - monthlyOtSoFar);
+        if (cappedHours > monthlyRemaining) {
+          logger.info(`Monthly OT cap applied [employee=${record.employeeId}, monthlyUsed=${monthlyOtSoFar}h, cap=${monthlyCap}h, requested=${cappedHours}h, allowed=${monthlyRemaining}h]`);
+          cappedHours = monthlyRemaining;
+        }
+      }
+
+      // maxContinuousOtHours: check cumulative OT across consecutive days
+      if (otRule.maxContinuousOtHours) {
+        const maxContinuous = Number(otRule.maxContinuousOtHours);
+        const recordDate = new Date(record.date);
+
+        // Look back up to 30 days to find continuous OT streak
+        const lookbackStart = new Date(recordDate);
+        lookbackStart.setDate(lookbackStart.getDate() - 30);
+
+        const recentOtRecords = await platformPrisma.overtimeRequest.findMany({
+          where: {
+            companyId,
+            employeeId: record.employeeId,
+            date: { gte: lookbackStart, lt: recordDate },
+            status: { in: ['PENDING', 'APPROVED'] },
+          },
+          select: { date: true, requestedHours: true },
+          orderBy: { date: 'desc' },
+        });
+
+        // Build a map of OT hours by date string
+        const otByDate = new Map<string, number>();
+        for (const r of recentOtRecords) {
+          const dateStr = new Date(r.date).toISOString().split('T')[0]!;
+          otByDate.set(dateStr, (otByDate.get(dateStr) ?? 0) + Number(r.requestedHours));
+        }
+
+        // Walk backwards from yesterday to count continuous OT hours
+        let continuousOtHours = 0;
+        const checkDate = new Date(recordDate);
+        checkDate.setDate(checkDate.getDate() - 1);
+
+        while (true) {
+          const dateStr = checkDate.toISOString().split('T')[0]!;
+          const dayOt = otByDate.get(dateStr);
+          if (!dayOt) break; // No OT on this day — streak broken
+          continuousOtHours += dayOt;
+          checkDate.setDate(checkDate.getDate() - 1);
+        }
+
+        const totalWithToday = continuousOtHours + cappedHours;
+        if (totalWithToday > maxContinuous) {
+          const allowed = Math.max(0, maxContinuous - continuousOtHours);
+          logger.warn(`Continuous OT limit applied [employee=${record.employeeId}, streak=${continuousOtHours}h, today=${cappedHours}h, maxContinuous=${maxContinuous}h, allowed=${allowed}h]`);
+          cappedHours = allowed;
+        }
+      }
+    }
+
+    // If all caps reduce OT to zero, skip creating the request
+    if (cappedHours <= 0) {
+      logger.info(`OT request skipped — capped to 0h [employee=${record.employeeId}]`);
+      return;
+    }
+
+    // ── Determine multiplier source based on context ──
+    // Night shift detection: check isCrossDay, shiftType, and shift start time heuristic
     let multiplierSource: OTMultiplierSource;
     let appliedMultiplier: number;
+
+    const isNightShift = await this.detectNightShift(shiftInfo, record.shiftId);
 
     if (context.isHoliday) {
       multiplierSource = 'HOLIDAY';
@@ -372,8 +576,7 @@ export class AttendanceService {
     } else if (context.isWeekOff) {
       multiplierSource = 'WEEKEND';
       appliedMultiplier = otRule.weekendMultiplier ? Number(otRule.weekendMultiplier) : Number(otRule.weekdayMultiplier);
-    } else if (shiftInfo && shiftInfo.isCrossDay) {
-      // Night shift detection: cross-day shifts are considered night shifts
+    } else if (isNightShift) {
       multiplierSource = 'NIGHT_SHIFT';
       appliedMultiplier = otRule.nightShiftMultiplier ? Number(otRule.nightShiftMultiplier) : Number(otRule.weekdayMultiplier);
     } else {
@@ -406,10 +609,53 @@ export class AttendanceService {
     });
 
     logger.info(
-      `OT request created [employee=${record.employeeId}, hours=${cappedHours}, multiplier=${appliedMultiplier}x (${multiplierSource}), status=${status}]`,
+      `OT request created [employee=${record.employeeId}, hours=${cappedHours}, basis=${otRule.calculationBasis}, multiplier=${appliedMultiplier}x (${multiplierSource}), status=${status}]`,
     );
 
     return otRequest;
+  }
+
+  /**
+   * Detect if a shift is a night shift by checking:
+   * 1. isCrossDay flag on ShiftInfo
+   * 2. ShiftType.NIGHT from the shift record in DB
+   * 3. Heuristic: shift start time >= 20:00 (covers e.g. 22:00-23:30 non-cross-day)
+   */
+  private async detectNightShift(shiftInfo: ShiftInfo | null, shiftId: string | null): Promise<boolean> {
+    if (shiftInfo?.isCrossDay) return true;
+
+    if (shiftId) {
+      const shift = await platformPrisma.companyShift.findUnique({
+        where: { id: shiftId },
+        select: { shiftType: true, startTime: true },
+      });
+      if (shift) {
+        if (shift.shiftType === 'NIGHT') return true;
+        const [hours] = shift.startTime.split(':').map(Number);
+        if (hours !== undefined && hours >= 20) return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Apply OT-specific rounding strategy to OT hours.
+   */
+  private applyOtRounding(hours: number, strategy: string): number {
+    switch (strategy) {
+      case 'NEAREST_15':
+        return Math.round(hours * 4) / 4;
+      case 'NEAREST_30':
+        return Math.round(hours * 2) / 2;
+      case 'FLOOR_15':
+        return Math.floor(hours * 4) / 4;
+      case 'CEIL_15':
+        return Math.ceil(hours * 4) / 4;
+      case 'NONE':
+      default:
+        return Math.round(hours * 100) / 100;
+    }
   }
 
   async updateRecord(companyId: string, id: string, data: any) {
@@ -419,6 +665,21 @@ export class AttendanceService {
     });
     if (!record || record.companyId !== companyId) {
       throw ApiError.notFound('Attendance record not found');
+    }
+
+    // Check if payroll is locked for this record's month
+    const recordDate = new Date(record.date);
+    const recordMonth = recordDate.getMonth() + 1;
+    const recordYear = recordDate.getFullYear();
+
+    const payrollRun = await platformPrisma.payrollRun.findUnique({
+      where: { companyId_month_year: { companyId, month: recordMonth, year: recordYear } },
+    });
+
+    if (payrollRun && payrollRun.status !== 'DRAFT') {
+      throw ApiError.badRequest(
+        `Cannot update record: attendance for ${recordMonth}/${recordYear} is locked for payroll processing (status: ${payrollRun.status})`
+      );
     }
 
     // Recalculate metrics if punch times changed
@@ -801,6 +1062,19 @@ export class AttendanceService {
       throw ApiError.notFound('Attendance record not found');
     }
 
+    // Enforce regularization window — prevent overrides for dates older than N days
+    const rules = await getCachedAttendanceRules(companyId);
+    const windowDays = rules.regularizationWindowDays ?? 7;
+    if (windowDays > 0) {
+      const recordDate = DateTime.fromJSDate(new Date(record.date)).startOf('day');
+      const cutoff = DateTime.now().startOf('day').minus({ days: windowDays });
+      if (recordDate < cutoff) {
+        throw ApiError.badRequest(
+          `Cannot create override: attendance date is older than the ${windowDays}-day regularization window`
+        );
+      }
+    }
+
     // Check if payroll is locked for this record's month
     const recordDate = new Date(record.date);
     const recordMonth = recordDate.getMonth() + 1;
@@ -867,7 +1141,7 @@ export class AttendanceService {
       },
     });
 
-    // If approved, update the parent attendance record
+    // If approved, update the parent attendance record using the full status resolver
     if (status === 'APPROVED') {
       const record = override.attendanceRecord;
       const updateData: any = {};
@@ -879,50 +1153,118 @@ export class AttendanceService {
         updateData.punchOut = override.correctedPunchOut;
       }
 
-      // Recalculate worked hours if punches changed
+      // Resolve new punch times
       const newPunchIn = override.correctedPunchIn ?? record.punchIn;
       const newPunchOut = override.correctedPunchOut ?? record.punchOut;
 
+      // Re-evaluate using the full attendance status resolver (same as createRecord)
       if (newPunchIn && newPunchOut) {
-        const diffMs = newPunchOut.getTime() - newPunchIn.getTime();
-        const workedHours = Math.max(0, diffMs / (1000 * 60 * 60));
-        updateData.workedHours = Math.round(workedHours * 100) / 100;
+        const effectiveShiftId = record.shiftId;
+        const attendanceDate = new Date(record.date);
+        const dateStr = attendanceDate.toISOString().split('T')[0]!;
 
-        // Re-evaluate status based on rules
-        const rules = await this.getRules(companyId);
-        const fullDayThreshold = rules.fullDayThresholdHours ? Number(rules.fullDayThresholdHours) : 8;
-        const halfDayThreshold = rules.halfDayThresholdHours ? Number(rules.halfDayThresholdHours) : 5;
+        // Build evaluation context
+        const holiday = await platformPrisma.holidayCalendar.findFirst({
+          where: { companyId, date: attendanceDate },
+          select: { name: true },
+        });
 
-        if (workedHours >= fullDayThreshold) {
-          updateData.status = 'PRESENT';
-        } else if (workedHours >= halfDayThreshold) {
-          updateData.status = 'HALF_DAY';
-        }
+        const roster = await platformPrisma.roster.findFirst({
+          where: { companyId, isDefault: true },
+          select: { weekOff1: true, weekOff2: true },
+        });
+        const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const dow = dayOfWeek[attendanceDate.getDay()];
+        const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
 
-        // Re-evaluate late/early exit
-        const shiftId = record.shiftId;
-        if (shiftId) {
-          const shift = await platformPrisma.companyShift.findUnique({ where: { id: shiftId } });
+        const evaluationContext: EvaluationContext = {
+          employeeId: record.employeeId,
+          shiftId: effectiveShiftId,
+          locationId: record.locationId,
+          date: attendanceDate,
+          isHoliday: !!holiday,
+          isWeekOff,
+          ...(holiday?.name && { holidayName: holiday.name }),
+          ...(roster && { rosterPattern: `${roster.weekOff1 ?? ''}${roster.weekOff2 ? '/' + roster.weekOff2 : ''}` }),
+        };
+
+        // Resolve policy
+        const { policy } = await resolvePolicy(companyId, evaluationContext);
+
+        // Get company timezone
+        const companySettings = await getCachedCompanySettings(companyId);
+        const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+
+        // Fetch shift info
+        let shiftInfo: ShiftInfo | null = null;
+        if (effectiveShiftId) {
+          const shift = await platformPrisma.companyShift.findUnique({
+            where: { id: effectiveShiftId },
+            select: { startTime: true, endTime: true, isCrossDay: true },
+          });
           if (shift) {
-            const { isLate, lateMinutes, isEarlyExit, earlyMinutes } =
-              this.detectLateAndEarlyExit(newPunchIn, newPunchOut, shift, rules);
-            updateData.isLate = isLate;
-            updateData.lateMinutes = lateMinutes;
-            updateData.isEarlyExit = isEarlyExit;
-            updateData.earlyMinutes = earlyMinutes;
+            shiftInfo = {
+              startTime: shift.startTime,
+              endTime: shift.endTime,
+              isCrossDay: shift.isCrossDay,
+            };
           }
         }
+
+        // Fetch attendance rules
+        const rules = await getCachedAttendanceRules(companyId);
+        const rulesInput: AttendanceRulesInput = {
+          lopAutoDeduct: rules.lopAutoDeduct,
+          autoMarkAbsentIfNoPunch: rules.autoMarkAbsentIfNoPunch,
+          autoHalfDayEnabled: rules.autoHalfDayEnabled,
+          lateDeductionType: rules.lateDeductionType,
+          lateDeductionValue: rules.lateDeductionValue ? Number(rules.lateDeductionValue) : null,
+          earlyExitDeductionType: rules.earlyExitDeductionType,
+          earlyExitDeductionValue: rules.earlyExitDeductionValue ? Number(rules.earlyExitDeductionValue) : null,
+          ignoreLateOnLeaveDay: rules.ignoreLateOnLeaveDay,
+          ignoreLateOnHoliday: rules.ignoreLateOnHoliday,
+          ignoreLateOnWeekOff: rules.ignoreLateOnWeekOff,
+        };
+
+        // Run the full status resolver
+        const statusResult = resolveAttendanceStatus(
+          newPunchIn,
+          newPunchOut,
+          shiftInfo,
+          policy,
+          evaluationContext,
+          rulesInput,
+          companyTimezone,
+        );
+
+        updateData.workedHours = statusResult.workedHours;
+        updateData.status = statusResult.status;
+        updateData.isLate = statusResult.isLate;
+        updateData.lateMinutes = statusResult.lateMinutes || null;
+        updateData.isEarlyExit = statusResult.isEarlyExit;
+        updateData.earlyMinutes = statusResult.earlyMinutes || null;
+        updateData.overtimeHours = statusResult.overtimeHours > 0 ? statusResult.overtimeHours : null;
+        updateData.appliedLateDeduction = statusResult.appliedLateDeduction;
+        updateData.appliedEarlyExitDeduction = statusResult.appliedEarlyExitDeduction;
+        updateData.finalStatusReason = statusResult.finalStatusReason;
       }
 
       // Handle absent override — mark as present
       if (override.issueType === 'ABSENT_OVERRIDE') {
         updateData.status = 'PRESENT';
+        updateData.finalStatusReason = 'Regularized: absent override approved';
       }
 
-      // Handle late override — clear late flag
+      // Handle late override — clear late flag and deduction
       if (override.issueType === 'LATE_OVERRIDE') {
         updateData.isLate = false;
         updateData.lateMinutes = 0;
+        updateData.appliedLateDeduction = null;
+        updateData.finalStatusReason = 'Regularized: late override approved';
+        // If status was LATE, upgrade to PRESENT
+        if (updateData.status === 'LATE' || record.status === 'LATE') {
+          updateData.status = 'PRESENT';
+        }
       }
 
       // Mark as regularized
@@ -1087,6 +1429,27 @@ export class AttendanceService {
   }
 
   async createRoster(companyId: string, data: any) {
+    // Validate day name values
+    const VALID_DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    if (data.weekOff1 && !VALID_DAYS.includes(data.weekOff1.toUpperCase())) {
+      throw ApiError.badRequest(`Invalid weekOff1 value: ${data.weekOff1}. Must be one of: ${VALID_DAYS.join(', ')}`);
+    }
+    if (data.weekOff2 && !VALID_DAYS.includes(data.weekOff2.toUpperCase())) {
+      throw ApiError.badRequest(`Invalid weekOff2 value: ${data.weekOff2}. Must be one of: ${VALID_DAYS.join(', ')}`);
+    }
+
+    // Validate weekOff1 != weekOff2 when both are provided
+    if (data.weekOff1 && data.weekOff2 && data.weekOff1.toUpperCase() === data.weekOff2.toUpperCase()) {
+      throw ApiError.badRequest('weekOff1 and weekOff2 must be different days');
+    }
+
+    // Validate applicableTypeIds if provided (must be non-empty array of strings)
+    if (data.applicableTypeIds !== undefined && data.applicableTypeIds !== null) {
+      if (!Array.isArray(data.applicableTypeIds) || data.applicableTypeIds.length === 0) {
+        throw ApiError.badRequest('applicableTypeIds must be a non-empty array when provided');
+      }
+    }
+
     // Validate unique name
     const existing = await platformPrisma.roster.findUnique({
       where: { companyId_name: { companyId, name: data.name } },
@@ -1356,6 +1719,69 @@ export class AttendanceService {
     });
 
     logger.info(`Overtime request ${id} approved by ${userId}, amount: ${calculatedAmount}`);
+
+    // Grant comp-off leave balance if company has compOffEnabled
+    try {
+      const otRules = await getCachedOvertimeRules(companyId);
+      if (otRules.compOffEnabled) {
+        const compOffType = await platformPrisma.leaveType.findFirst({
+          where: { companyId, category: 'COMPENSATORY', isActive: true },
+        });
+
+        if (compOffType) {
+          const otYear = new Date(request.date).getFullYear();
+          const attendanceRulesForCompOff = await getCachedAttendanceRules(companyId);
+          const fullDayHours = attendanceRulesForCompOff.fullDayThresholdHours
+            ? Number(attendanceRulesForCompOff.fullDayThresholdHours)
+            : 8;
+          const credit = Number(request.requestedHours) >= fullDayHours ? 1 : 0.5;
+
+          const existingBalance = await platformPrisma.leaveBalance.findUnique({
+            where: {
+              employeeId_leaveTypeId_year: {
+                employeeId: request.employeeId,
+                leaveTypeId: compOffType.id,
+                year: otYear,
+              },
+            },
+          });
+
+          if (existingBalance) {
+            await platformPrisma.leaveBalance.update({
+              where: { id: existingBalance.id },
+              data: {
+                accrued: { increment: credit },
+                balance: { increment: credit },
+              },
+            });
+          } else {
+            await platformPrisma.leaveBalance.create({
+              data: {
+                companyId,
+                employeeId: request.employeeId,
+                leaveTypeId: compOffType.id,
+                year: otYear,
+                accrued: credit,
+                taken: 0,
+                balance: credit,
+              },
+            });
+          }
+
+          // Mark comp-off as granted on the OT request
+          await platformPrisma.overtimeRequest.update({
+            where: { id },
+            data: { compOffGranted: true },
+          });
+
+          logger.info(`Comp-off ${credit} day(s) credited for employee ${request.employeeId} from OT request ${id}`);
+        }
+      }
+    } catch (err) {
+      // Log but don't fail the approval — comp-off grant is secondary
+      logger.error(`Failed to grant comp-off for OT request ${id}:`, err);
+    }
+
     return updated;
   }
 
@@ -1692,6 +2118,32 @@ export class AttendanceService {
       throw ApiError.conflict(`Rotation schedule "${data.name}" already exists`);
     }
 
+    // Validate shifts array is not empty
+    if (!Array.isArray(data.shifts) || data.shifts.length === 0) {
+      throw ApiError.badRequest('At least one shift is required in the rotation schedule');
+    }
+
+    // Validate all shiftIds exist and belong to this company
+    const shiftIds = data.shifts.map((s: any) => s.shiftId);
+    const existingShifts = await platformPrisma.companyShift.findMany({
+      where: { id: { in: shiftIds }, companyId },
+      select: { id: true },
+    });
+    const foundIds = new Set(existingShifts.map((s) => s.id));
+    const missingIds = shiftIds.filter((id: string) => !foundIds.has(id));
+    if (missingIds.length > 0) {
+      throw ApiError.badRequest(`Shift(s) not found: ${missingIds.join(', ')}`);
+    }
+
+    // Validate effectiveFrom < effectiveTo when both are provided
+    if (data.effectiveTo) {
+      const from = new Date(data.effectiveFrom);
+      const to = new Date(data.effectiveTo);
+      if (from >= to) {
+        throw ApiError.badRequest('effectiveFrom must be before effectiveTo');
+      }
+    }
+
     return platformPrisma.shiftRotationSchedule.create({
       data: {
         companyId,
@@ -1900,14 +2352,16 @@ export class AttendanceService {
       workedHours = Math.max(0, Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100);
     }
 
-    // Detect late arrival and early exit using shift + rules
+    // Detect late arrival and early exit using shift + rules (timezone-aware)
     const shiftId = data.shiftId ?? employeeShiftId;
     if (shiftId && (punchIn || punchOut)) {
       const shift = await platformPrisma.companyShift.findUnique({ where: { id: shiftId } });
       const rules = await this.getRules(companyId);
+      const companySettings = await getCachedCompanySettings(companyId);
+      const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
 
       if (shift) {
-        const result = this.detectLateAndEarlyExit(punchIn, punchOut, shift, rules);
+        const result = this.detectLateAndEarlyExit(punchIn, punchOut, shift, rules, companyTimezone);
         isLate = result.isLate;
         lateMinutes = result.lateMinutes;
         isEarlyExit = result.isEarlyExit;
@@ -1921,8 +2375,9 @@ export class AttendanceService {
   private detectLateAndEarlyExit(
     punchIn: Date | null,
     punchOut: Date | null,
-    shift: { startTime: string; endTime: string },
-    rules: any
+    shift: { startTime: string; endTime: string; isCrossDay?: boolean },
+    rules: any,
+    companyTimezone: string,
   ) {
     let isLate = false;
     let lateMinutes: number | null = null;
@@ -1932,47 +2387,41 @@ export class AttendanceService {
     const gracePeriod = rules.gracePeriodMinutes ? Number(rules.gracePeriodMinutes) : 0;
     const earlyExitTolerance = rules.earlyExitToleranceMinutes ? Number(rules.earlyExitToleranceMinutes) : 0;
 
+    // Use the punch-in date as the reference attendance date
+    const refDate = punchIn ?? punchOut;
+    if (!refDate) return { isLate, lateMinutes, isEarlyExit, earlyMinutes };
+
+    const dateStr = DateTime.fromJSDate(refDate).setZone(companyTimezone).toFormat('yyyy-MM-dd');
+
+    // Parse shift times in company timezone (consistent with resolveAttendanceStatus)
+    const shiftStart = parseInCompanyTimezone(dateStr, shift.startTime, companyTimezone);
+    let shiftEnd = parseInCompanyTimezone(dateStr, shift.endTime, companyTimezone);
+
+    // Handle cross-day / overnight shifts
+    const isCrossDay = shift.isCrossDay ?? (shiftEnd <= shiftStart);
+    if (isCrossDay) {
+      shiftEnd = shiftEnd.plus({ days: 1 });
+    }
+
     // Check late arrival
     if (punchIn && shift.startTime) {
-      const parts = shift.startTime.split(':').map(Number);
-      const shiftHour = parts[0] ?? 0;
-      const shiftMin = parts[1] ?? 0;
-      const shiftStart = new Date(punchIn);
-      shiftStart.setHours(shiftHour, shiftMin, 0, 0);
+      const punchInDt = DateTime.fromJSDate(punchIn).setZone(companyTimezone);
+      const delayMinutes = punchInDt.diff(shiftStart, 'minutes').minutes;
 
-      // Add grace period
-      const graceEnd = new Date(shiftStart.getTime() + gracePeriod * 60 * 1000);
-      const diffMs = punchIn.getTime() - graceEnd.getTime();
-
-      if (diffMs > 0) {
+      if (delayMinutes > gracePeriod) {
         isLate = true;
-        lateMinutes = Math.ceil(diffMs / (60 * 1000));
+        lateMinutes = Math.ceil(delayMinutes);
       }
     }
 
-    // Check early exit (with night-shift cross-midnight support)
+    // Check early exit
     if (punchOut && shift.endTime) {
-      const fromParts = shift.startTime.split(':').map(Number);
-      const toParts = shift.endTime.split(':').map(Number);
-      const fromMinutes = (fromParts[0] ?? 0) * 60 + (fromParts[1] ?? 0);
-      const toMinutes = (toParts[0] ?? 0) * 60 + (toParts[1] ?? 0);
-      const isOvernightShift = toMinutes < fromMinutes;
+      const punchOutDt = DateTime.fromJSDate(punchOut).setZone(companyTimezone);
+      const earlyByMinutes = shiftEnd.diff(punchOutDt, 'minutes').minutes;
 
-      const shiftEnd = new Date(punchOut);
-      shiftEnd.setHours(toParts[0] ?? 0, toParts[1] ?? 0, 0, 0);
-
-      // If overnight shift and punchOut is still on the first day (before midnight),
-      // the shift end is on the next day
-      if (isOvernightShift && punchOut.getHours() >= (fromParts[0] ?? 0)) {
-        shiftEnd.setDate(shiftEnd.getDate() + 1);
-      }
-
-      const toleranceEnd = new Date(shiftEnd.getTime() - earlyExitTolerance * 60 * 1000);
-      const diffMs = toleranceEnd.getTime() - punchOut.getTime();
-
-      if (diffMs > 0) {
+      if (earlyByMinutes > earlyExitTolerance) {
         isEarlyExit = true;
-        earlyMinutes = Math.ceil(diffMs / (60 * 1000));
+        earlyMinutes = Math.ceil(earlyByMinutes);
       }
     }
 

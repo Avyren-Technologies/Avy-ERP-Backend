@@ -84,6 +84,11 @@ router.get('/ess/my-training', requireESSFeature('trainingEnrollment'), requireP
 router.get('/ess/my-assets', requireESSFeature('assetView'), requirePermissions(['hr:read', 'ess:view-assets']), controller.getMyAssets);
 router.get('/ess/my-form16', requireESSFeature('downloadForm16'), requirePermissions(['hr:read', 'ess:download-form16']), controller.getMyForm16);
 
+// ── Shift Swap — Admin / Manager ────────────────────────────────────
+router.get('/shift-swaps', requirePermissions(['hr:read']), controller.listShiftSwaps);
+router.patch('/shift-swaps/:id/approve', requirePermissions(['hr:approve']), controller.adminApproveShiftSwap);
+router.patch('/shift-swaps/:id/reject', requirePermissions(['hr:approve']), controller.adminRejectShiftSwap);
+
 // ── Shift Swap (ESS feature gated) ──────────────────────────────────
 router.get('/ess/my-shift-swaps', requireESSFeature('shiftSwapRequest'), requirePermissions(['hr:read', 'ess:swap-shift']), controller.getMyShiftSwaps);
 router.post('/ess/shift-swap', requireESSFeature('shiftSwapRequest'), requirePermissions(['hr:create', 'ess:swap-shift']), controller.createShiftSwap);

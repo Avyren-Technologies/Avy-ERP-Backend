@@ -300,71 +300,90 @@ export class ESSService {
   }
 
   async approveStep(companyId: string, requestId: string, userId: string, note?: string) {
-    const request = await platformPrisma.approvalRequest.findUnique({
-      where: { id: requestId },
-      include: { workflow: true },
-    });
+    // Use a transaction with optimistic concurrency to prevent two approvers
+    // from simultaneously approving the same step.
+    return platformPrisma.$transaction(async (tx) => {
+      const request = await tx.approvalRequest.findUnique({
+        where: { id: requestId },
+        include: { workflow: true },
+      });
 
-    if (!request || request.companyId !== companyId) {
-      throw ApiError.notFound('Approval request not found');
-    }
+      if (!request || request.companyId !== companyId) {
+        throw ApiError.notFound('Approval request not found');
+      }
 
-    if (request.status !== 'PENDING' && request.status !== 'IN_PROGRESS') {
-      throw ApiError.badRequest('Request is not in a pending state');
-    }
+      if (request.status !== 'PENDING' && request.status !== 'IN_PROGRESS') {
+        throw ApiError.badRequest('Request is not in a pending state');
+      }
 
-    const steps = request.workflow.steps as any[];
-    const currentStep = request.currentStep;
-    const totalSteps = steps.length;
+      const steps = request.workflow.steps as any[];
+      const currentStep = request.currentStep;
+      const totalSteps = steps.length;
 
-    // Role-based approval validation: check if the current step has an approverRole restriction
-    const stepConfig = steps.find((s: any) => s.stepOrder === currentStep);
-    if (stepConfig && stepConfig.approverRole) {
-      await this.validateApproverRole(companyId, request.requesterId, userId, stepConfig.approverRole);
-    }
+      // Role-based approval validation: check if the current step has an approverRole restriction
+      const stepConfig = steps.find((s: any) => s.stepOrder === currentStep);
+      if (stepConfig && stepConfig.approverRole) {
+        await this.validateApproverRole(companyId, request.requesterId, userId, stepConfig.approverRole);
+      }
 
-    // Build step history entry
-    const historyEntry = {
-      step: currentStep,
-      action: 'approve',
-      by: userId,
-      at: new Date().toISOString(),
-      note: note ?? null,
-    };
+      // Optimistic concurrency: ensure the step hasn't already been acted on by
+      // another concurrent approver. We use currentStep + status as the concurrency guard.
+      const guard = await tx.approvalRequest.updateMany({
+        where: {
+          id: requestId,
+          currentStep,
+          status: request.status,
+        },
+        data: { updatedAt: new Date() }, // Touch to acquire the row
+      });
 
-    const existingHistory = (request.stepHistory as any[]) ?? [];
-    const updatedHistory = [...existingHistory, historyEntry];
+      if (guard.count === 0) {
+        throw ApiError.conflict('This approval step has already been processed by another approver');
+      }
 
-    if (currentStep >= totalSteps) {
-      // Last step — mark as APPROVED
-      const updatedRequest = await platformPrisma.approvalRequest.update({
+      // Build step history entry
+      const historyEntry = {
+        step: currentStep,
+        action: 'approve',
+        by: userId,
+        at: new Date().toISOString(),
+        note: note ?? null,
+      };
+
+      const existingHistory = (request.stepHistory as any[]) ?? [];
+      const updatedHistory = [...existingHistory, historyEntry];
+
+      if (currentStep >= totalSteps) {
+        // Last step — mark as APPROVED
+        const updatedRequest = await tx.approvalRequest.update({
+          where: { id: requestId },
+          data: {
+            status: 'APPROVED',
+            stepHistory: updatedHistory,
+          },
+          include: {
+            workflow: { select: { id: true, name: true, triggerEvent: true } },
+          },
+        });
+
+        // Callback: update source entity status based on entityType
+        await this.onApprovalComplete(companyId, request.entityType, request.entityId, 'APPROVED');
+
+        return updatedRequest;
+      }
+
+      // Advance to next step
+      return tx.approvalRequest.update({
         where: { id: requestId },
         data: {
-          status: 'APPROVED',
+          currentStep: currentStep + 1,
+          status: 'IN_PROGRESS',
           stepHistory: updatedHistory,
         },
         include: {
           workflow: { select: { id: true, name: true, triggerEvent: true } },
         },
       });
-
-      // Callback: update source entity status based on entityType
-      await this.onApprovalComplete(companyId, request.entityType, request.entityId, 'APPROVED');
-
-      return updatedRequest;
-    }
-
-    // Advance to next step
-    return platformPrisma.approvalRequest.update({
-      where: { id: requestId },
-      data: {
-        currentStep: currentStep + 1,
-        status: 'IN_PROGRESS',
-        stepHistory: updatedHistory,
-      },
-      include: {
-        workflow: { select: { id: true, name: true, triggerEvent: true } },
-      },
     });
   }
 
@@ -593,6 +612,19 @@ export class ESSService {
           }
           break;
 
+        case 'LeaveRequest': {
+          // Use dynamic import to avoid circular dependencies
+          const { leaveService } = await import('../leave/leave.service');
+          if (decision === 'APPROVED') {
+            // approveRequest handles: updating status, creating attendance records
+            await leaveService.approveRequest(companyId, entityId, 'system');
+          } else {
+            // Rejection via workflow — refund balance
+            await leaveService.rejectRequest(companyId, entityId, 'system', 'Rejected via approval workflow');
+          }
+          break;
+        }
+
         case 'AttendanceOverride': {
           // Check if the override is still PENDING before processing
           // (processOverride also checks this, avoiding double-update)
@@ -611,6 +643,39 @@ export class ESSService {
             // - Setting isRegularized flag
             // - Updating override status to APPROVED/REJECTED
             await attendanceService.processOverride(overrideCheck.companyId, entityId, 'system', decision);
+          }
+          break;
+        }
+
+        case 'ShiftSwapRequest': {
+          const swapReq = await platformPrisma.shiftSwapRequest.findUnique({
+            where: { id: entityId },
+          });
+          if (swapReq) {
+            if (decision === 'APPROVED') {
+              // Apply the shift change to the employee
+              await platformPrisma.employee.update({
+                where: { id: swapReq.employeeId },
+                data: { shiftId: swapReq.requestedShiftId },
+              });
+              await platformPrisma.shiftSwapRequest.update({
+                where: { id: entityId },
+                data: { status: 'APPROVED', approvedBy: 'system', approvedAt: new Date() },
+              });
+              // Update the shift on any existing attendance record for the swap date
+              await platformPrisma.attendanceRecord.updateMany({
+                where: {
+                  employeeId: swapReq.employeeId,
+                  date: swapReq.swapDate,
+                },
+                data: { shiftId: swapReq.requestedShiftId },
+              });
+            } else {
+              await platformPrisma.shiftSwapRequest.update({
+                where: { id: entityId },
+                data: { status: 'REJECTED' },
+              });
+            }
           }
           break;
         }
@@ -3007,7 +3072,42 @@ export class ESSService {
     const employeeId = await this.resolveEmployeeIdFromUser(userId);
     if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
 
-    return platformPrisma.shiftSwapRequest.create({
+    // Validate currentShiftId != requestedShiftId
+    if (data.currentShiftId === data.requestedShiftId) {
+      throw ApiError.badRequest('Current shift and requested shift must be different');
+    }
+
+    // Validate currentShiftId matches the employee's actual assigned shift
+    const employee = await platformPrisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { shiftId: true },
+    });
+    if (!employee?.shiftId || employee.shiftId !== data.currentShiftId) {
+      throw ApiError.badRequest('Current shift ID does not match your assigned shift');
+    }
+
+    // Validate requestedShiftId exists and belongs to the same company
+    const requestedShift = await platformPrisma.companyShift.findUnique({
+      where: { id: data.requestedShiftId },
+      select: { companyId: true },
+    });
+    if (!requestedShift || requestedShift.companyId !== companyId) {
+      throw ApiError.badRequest('Requested shift not found');
+    }
+
+    // Prevent duplicate pending swap for the same employee + date
+    const existingSwap = await platformPrisma.shiftSwapRequest.findFirst({
+      where: {
+        employeeId,
+        swapDate: new Date(data.swapDate),
+        status: 'PENDING',
+      },
+    });
+    if (existingSwap) {
+      throw ApiError.badRequest('You already have a pending shift swap request for this date');
+    }
+
+    const swapRequest = await platformPrisma.shiftSwapRequest.create({
       data: {
         employeeId,
         currentShiftId: data.currentShiftId,
@@ -3018,6 +3118,22 @@ export class ESSService {
         companyId,
       },
     });
+
+    // Create an approval request if a workflow is configured
+    const approvalResult = await this.createRequest(companyId, {
+      requesterId: userId,
+      entityType: 'ShiftSwapRequest',
+      entityId: swapRequest.id,
+      triggerEvent: 'shift_swap_requested',
+      data: { currentShiftId: data.currentShiftId, requestedShiftId: data.requestedShiftId, swapDate: data.swapDate },
+    });
+
+    // If no active workflow, auto-approve
+    if (!approvalResult) {
+      await this.onApprovalComplete(companyId, 'ShiftSwapRequest', swapRequest.id, 'APPROVED');
+    }
+
+    return swapRequest;
   }
 
   async cancelShiftSwap(companyId: string, userId: string, id: string) {
@@ -3036,6 +3152,59 @@ export class ESSService {
       where: { id },
       data: { status: 'CANCELLED' },
     });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Shift Swap — Admin / Manager endpoints
+  // ────────────────────────────────────────────────────────────────────
+
+  async listShiftSwaps(companyId: string, options: ListOptions & { status?: string }) {
+    const { page = 1, limit = 20, status } = options;
+    const where: any = { companyId };
+    if (status) where.status = status;
+
+    const [data, total] = await Promise.all([
+      platformPrisma.shiftSwapRequest.findMany({
+        where,
+        include: {
+          employee: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      platformPrisma.shiftSwapRequest.count({ where }),
+    ]);
+
+    return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  async adminApproveShiftSwap(companyId: string, id: string, approvedBy: string) {
+    const request = await platformPrisma.shiftSwapRequest.findUnique({ where: { id } });
+    if (!request || request.companyId !== companyId) {
+      throw ApiError.notFound('Shift swap request not found');
+    }
+    if (request.status !== 'PENDING') {
+      throw ApiError.badRequest('Only pending requests can be approved');
+    }
+
+    await this.onApprovalComplete(companyId, 'ShiftSwapRequest', id, 'APPROVED');
+
+    return platformPrisma.shiftSwapRequest.findUnique({ where: { id } });
+  }
+
+  async adminRejectShiftSwap(companyId: string, id: string) {
+    const request = await platformPrisma.shiftSwapRequest.findUnique({ where: { id } });
+    if (!request || request.companyId !== companyId) {
+      throw ApiError.notFound('Shift swap request not found');
+    }
+    if (request.status !== 'PENDING') {
+      throw ApiError.badRequest('Only pending requests can be rejected');
+    }
+
+    await this.onApprovalComplete(companyId, 'ShiftSwapRequest', id, 'REJECTED');
+
+    return platformPrisma.shiftSwapRequest.findUnique({ where: { id } });
   }
 
   // ────────────────────────────────────────────────────────────────────

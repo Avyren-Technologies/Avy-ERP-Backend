@@ -73,7 +73,7 @@ export const createShiftBreakSchema = z.object({
   name: z.string().min(1),
   type: z.nativeEnum(BreakType),
   startTime: z.string().nullable().optional(), // null for flexible breaks
-  duration: z.number().int().min(1),
+  duration: z.number().int().min(1).max(120, 'Break duration cannot exceed 120 minutes'),
   isPaid: z.boolean().optional(),
 });
 

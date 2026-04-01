@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
-import { requireModuleEnabled } from '../../../shared/middleware/config-enforcement.middleware';
+import { requireModuleEnabled, requireESSFeature } from '../../../shared/middleware/config-enforcement.middleware';
 import { leaveController as controller } from './leave.controller';
 
 const router = Router();
@@ -34,7 +34,7 @@ router.post('/leave-requests', requirePermissions(['hr:create', 'ess:apply-leave
 router.get('/leave-requests/:id', requirePermissions(['hr:read', 'ess:apply-leave']), controller.getRequest);
 router.patch('/leave-requests/:id/approve', requirePermissions(['hr:update']), controller.approveRequest);
 router.patch('/leave-requests/:id/reject', requirePermissions(['hr:update']), controller.rejectRequest);
-router.patch('/leave-requests/:id/cancel', requirePermissions(['hr:update', 'ess:apply-leave']), controller.cancelRequest);
+router.patch('/leave-requests/:id/cancel', requireESSFeature('leaveCancellation'), requirePermissions(['hr:update', 'ess:apply-leave']), controller.cancelRequest);
 router.patch('/leave-requests/:id/partial-cancel', requirePermissions(['hr:update']), controller.partialCancelRequest);
 
 // ── Summary ─────────────────────────────────────────────────────────

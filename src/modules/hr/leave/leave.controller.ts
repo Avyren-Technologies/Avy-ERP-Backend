@@ -268,7 +268,7 @@ export class LeaveController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const result = await leaveService.accrueBalances(companyId, parsed.data.month, parsed.data.year);
+    const result = await leaveService.accrueBalances(companyId, parsed.data.month, parsed.data.year, parsed.data.dayOfMonth);
     res.json(createSuccessResponse(result, 'Leave balances accrued'));
   });
 

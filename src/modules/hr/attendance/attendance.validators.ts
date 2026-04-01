@@ -138,8 +138,8 @@ export const cloneHolidaysSchema = z.object({
 export const createRosterSchema = z.object({
   name: z.string().min(1).max(100),
   pattern: z.enum(['MON_FRI', 'MON_SAT', 'MON_SAT_ALT', 'CUSTOM']),
-  weekOff1: z.string().optional(),
-  weekOff2: z.string().optional(),
+  weekOff1: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']).optional(),
+  weekOff2: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']).optional(),
   applicableTypeIds: z.array(z.string()).optional(),
   effectiveFrom: z.string().min(1, 'Effective date is required'), // ISO date
   isDefault: z.boolean().optional(),

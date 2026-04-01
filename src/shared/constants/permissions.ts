@@ -279,6 +279,8 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
       'ess:submit-feedback', 'ess:swap-shift', 'ess:request-wfh',
       'ess:upload-document', 'ess:view-policies', 'ess:claim-expense',
       'ess:apply-loan', 'ess:view-org-chart',
+      'ess:raise-grievance', 'ess:enroll-training', 'ess:view-assets',
+      'ess:raise-helpdesk',
     ],
   },
   'Manager': {

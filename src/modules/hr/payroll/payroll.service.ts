@@ -599,6 +599,30 @@ export class PayrollConfigService {
       }
     }
 
+    // H16: Fourth pass: FORMULA components
+    // Evaluate formula expressions that reference other components.
+    // Supported: "X% of BASIC", "X% of GROSS", or plain numeric formulaValue.
+    for (const comp of components) {
+      if (comp.calculationMethod === 'FORMULA') {
+        const formulaValue = comp.formulaValue ? Number(comp.formulaValue) : 0;
+        const formulaStr = (comp.formula ?? '').toLowerCase();
+
+        if (formulaStr.includes('gross')) {
+          // "X% of Gross" — use formulaValue as percentage
+          breakup[comp.componentId] = Math.round((formulaValue / 100) * grossAmount * 100) / 100;
+        } else if (formulaStr.includes('basic')) {
+          // "X% of Basic" — use formulaValue as percentage
+          breakup[comp.componentId] = Math.round((formulaValue / 100) * basicAmount * 100) / 100;
+        } else if (formulaValue > 0) {
+          // Plain numeric value (treat formulaValue as fixed amount)
+          breakup[comp.componentId] = Math.round(formulaValue * 100) / 100;
+        } else {
+          // Fallback: use comp.value if available, otherwise 0
+          breakup[comp.componentId] = comp.value ?? 0;
+        }
+      }
+    }
+
     return breakup;
   }
 

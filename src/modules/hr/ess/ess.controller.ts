@@ -730,6 +730,37 @@ export class ESSController {
     res.json(createSuccessResponse(swap, 'Shift swap request cancelled'));
   });
 
+  // ── Shift Swap — Admin / Manager ─────────────────────────────────
+
+  listShiftSwaps = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req);
+    const status = req.query.status as string | undefined;
+    const result = await essService.listShiftSwaps(companyId, { page, limit, ...(status ? { status } : {}) });
+    res.json(createPaginatedResponse(result.data, result.meta.page, result.meta.limit, result.meta.total, 'Shift swap requests retrieved'));
+  });
+
+  adminApproveShiftSwap = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const swap = await essService.adminApproveShiftSwap(companyId, req.params.id!, userId);
+    res.json(createSuccessResponse(swap, 'Shift swap request approved'));
+  });
+
+  adminRejectShiftSwap = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const swap = await essService.adminRejectShiftSwap(companyId, req.params.id!);
+    res.json(createSuccessResponse(swap, 'Shift swap request rejected'));
+  });
+
   // ── WFH Requests ──────────────────────────────────────────────────
 
   getMyWfhRequests = asyncHandler(async (req: Request, res: Response) => {

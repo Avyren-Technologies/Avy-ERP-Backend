@@ -85,6 +85,9 @@ model Employee {
   voterId        String?
   pran           String?
 
+  // VPF (Voluntary Provident Fund) — employee-level opt-in
+  vpfPercentage  Decimal?       @db.Decimal(5, 2) // Additional % of PF wage contributed voluntarily
+
   // Status
   status          EmployeeStatus @default(PROBATION)
   lastWorkingDate DateTime?

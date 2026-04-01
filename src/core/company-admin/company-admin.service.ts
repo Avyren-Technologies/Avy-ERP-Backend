@@ -423,9 +423,47 @@ export class CompanyAdminService {
   async createShiftBreak(companyId: string, shiftId: string, data: any) {
     const shift = await platformPrisma.companyShift.findUnique({
       where: { id: shiftId },
+      include: { breaks: { orderBy: { startTime: 'asc' } } },
     });
     if (!shift || shift.companyId !== companyId) {
       throw ApiError.notFound('Shift not found');
+    }
+
+    // Max break duration: 120 minutes (2 hours)
+    const MAX_BREAK_DURATION = 120;
+    if (data.duration > MAX_BREAK_DURATION) {
+      throw ApiError.badRequest(`Break duration cannot exceed ${MAX_BREAK_DURATION} minutes`);
+    }
+
+    // For FIXED breaks, validate startTime is within shift hours
+    if (data.type === 'FIXED' && data.startTime) {
+      const breakStart = data.startTime; // "HH:mm" format
+      const shiftStart = shift.startTime;
+      const shiftEnd = shift.endTime;
+
+      // For non-cross-day shifts, break must be between shift start and end
+      if (!shift.isCrossDay) {
+        if (breakStart < shiftStart || breakStart >= shiftEnd) {
+          throw ApiError.badRequest(`Break start time ${breakStart} must be within shift hours (${shiftStart} - ${shiftEnd})`);
+        }
+      } else {
+        // Cross-day: break can be after shiftStart OR before shiftEnd (next day)
+        if (breakStart < shiftStart && breakStart >= shiftEnd) {
+          throw ApiError.badRequest(`Break start time ${breakStart} must be within shift hours (${shiftStart} - ${shiftEnd} next day)`);
+        }
+      }
+
+      // Check overlap with existing breaks in the same shift
+      for (const existing of shift.breaks) {
+        if (!existing.startTime) continue; // Skip flexible breaks
+        const existingEnd = this.addMinutesToTime(existing.startTime, existing.duration);
+        const newEnd = this.addMinutesToTime(breakStart, data.duration);
+
+        // Overlap: newStart < existingEnd AND existingStart < newEnd
+        if (breakStart < existingEnd && existing.startTime < newEnd) {
+          throw ApiError.badRequest(`Break overlaps with existing break "${existing.name}" (${existing.startTime} - ${existingEnd})`);
+        }
+      }
     }
 
     const shiftBreak = await platformPrisma.shiftBreak.create({
@@ -441,6 +479,17 @@ export class CompanyAdminService {
 
     await invalidateShiftBreaks(shiftId);
     return shiftBreak;
+  }
+
+  /** Helper: add minutes to a "HH:mm" time string and return "HH:mm". */
+  private addMinutesToTime(time: string, minutes: number): string {
+    const parts = time.split(':').map(Number);
+    const h = parts[0] ?? 0;
+    const m = parts[1] ?? 0;
+    const totalMinutes = h * 60 + m + minutes;
+    const newH = Math.floor(totalMinutes / 60) % 24;
+    const newM = totalMinutes % 60;
+    return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
   }
 
   async updateShiftBreak(companyId: string, shiftId: string, breakId: string, data: any) {

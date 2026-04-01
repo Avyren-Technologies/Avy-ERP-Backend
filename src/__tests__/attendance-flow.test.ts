@@ -75,6 +75,16 @@ jest.mock('../config/database', () => ({
     shiftRotationAssignment: {
       createMany: jest.fn(),
     },
+    holidayCalendar: {
+      findFirst: jest.fn(),
+    },
+    roster: {
+      findFirst: jest.fn(),
+    },
+    overtimeRequest: {
+      aggregate: jest.fn(),
+      findMany: jest.fn(),
+    },
   },
 }));
 
@@ -123,6 +133,17 @@ const mockApprovalWorkflow = platformPrisma.approvalWorkflow as any;
 const mockApprovalRequest = platformPrisma.approvalRequest as any;
 const mockESSConfig = platformPrisma.eSSConfig as any;
 const mockShiftRotationSchedule = (platformPrisma as any).shiftRotationSchedule;
+const mockHolidayCalendar = (platformPrisma as any).holidayCalendar;
+const mockRoster = (platformPrisma as any).roster;
+
+// Mocked external services for override tests
+import { resolvePolicy } from '../shared/services/policy-resolver.service';
+import { resolveAttendanceStatus } from '../shared/services/attendance-status-resolver.service';
+import { getCachedAttendanceRules, getCachedCompanySettings } from '../shared/utils/config-cache';
+const mockResolvePolicy = resolvePolicy as jest.Mock;
+const mockResolveAttendanceStatus = resolveAttendanceStatus as jest.Mock;
+const mockGetCachedAttendanceRules = getCachedAttendanceRules as jest.Mock;
+const mockGetCachedCompanySettings = getCachedCompanySettings as jest.Mock;
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -464,6 +485,34 @@ describe('Attendance Flow', () => {
     beforeEach(async () => {
       const mod = await import('../modules/hr/attendance/attendance.service');
       attendanceService = mod.attendanceService;
+
+      // Set up mocks needed by the full resolver pipeline in processOverride
+      mockHolidayCalendar.findFirst.mockResolvedValue(null);
+      mockRoster.findFirst.mockResolvedValue({ weekOff1: 'Saturday', weekOff2: 'Sunday' });
+      mockGetCachedCompanySettings.mockResolvedValue({ timezone: 'Asia/Kolkata' });
+      mockGetCachedAttendanceRules.mockResolvedValue({
+        lopAutoDeduct: true,
+        autoMarkAbsentIfNoPunch: true,
+        autoHalfDayEnabled: true,
+        lateDeductionType: 'NONE',
+        lateDeductionValue: null,
+        earlyExitDeductionType: 'NONE',
+        earlyExitDeductionValue: null,
+        ignoreLateOnLeaveDay: false,
+        ignoreLateOnHoliday: true,
+        ignoreLateOnWeekOff: true,
+      });
+      mockResolvePolicy.mockResolvedValue({
+        policy: {
+          gracePeriodMinutes: 15,
+          earlyExitToleranceMinutes: 15,
+          halfDayThresholdHours: 4,
+          fullDayThresholdHours: 8,
+          maxLateCheckInMinutes: 240,
+          breakDeductionMinutes: 0,
+          workingHoursRounding: 'NONE',
+        },
+      });
     });
 
     test('should update attendance record when override approved', async () => {
@@ -478,8 +527,13 @@ describe('Attendance Flow', () => {
 
       mockAttendanceOverride.findUnique.mockResolvedValueOnce(override);
       mockAttendanceOverride.update.mockResolvedValueOnce({ ...override, status: 'APPROVED' });
-      mockAttendanceRule.findUnique.mockResolvedValueOnce(makeRules());
       mockCompanyShift.findUnique.mockResolvedValueOnce(makeShift());
+      mockResolveAttendanceStatus.mockReturnValueOnce({
+        status: 'PRESENT', workedHours: 8.5, isLate: false, lateMinutes: 0,
+        isEarlyExit: false, earlyMinutes: 0, overtimeHours: 0.5,
+        appliedLateDeduction: null, appliedEarlyExitDeduction: null,
+        finalStatusReason: 'Worked 8.5h',
+      });
       mockAttendanceRecord.update.mockResolvedValueOnce({
         ...record,
         punchOut: override.correctedPunchOut,
@@ -530,8 +584,13 @@ describe('Attendance Flow', () => {
 
       mockAttendanceOverride.findUnique.mockResolvedValueOnce(override);
       mockAttendanceOverride.update.mockResolvedValueOnce({ ...override, status: 'APPROVED' });
-      mockAttendanceRule.findUnique.mockResolvedValueOnce(makeRules());
       mockCompanyShift.findUnique.mockResolvedValueOnce(makeShift());
+      mockResolveAttendanceStatus.mockReturnValueOnce({
+        status: 'PRESENT', workedHours: 9, isLate: false, lateMinutes: 0,
+        isEarlyExit: false, earlyMinutes: 0, overtimeHours: 1,
+        appliedLateDeduction: null, appliedEarlyExitDeduction: null,
+        finalStatusReason: 'Worked 9h',
+      });
       mockAttendanceRecord.update.mockResolvedValueOnce({
         ...record,
         punchOut: correctedPunchOut,
@@ -567,9 +626,14 @@ describe('Attendance Flow', () => {
       mockAttendanceOverride.findUnique.mockResolvedValueOnce(override);
       mockAttendanceOverride.update.mockResolvedValueOnce({ ...override, status: 'APPROVED' });
       // processOverride enters the newPunchIn && newPunchOut block (record has both),
-      // so it needs getRules and companyShift mocks
-      mockAttendanceRule.findUnique.mockResolvedValueOnce(makeRules());
+      // so it needs companyShift mock + resolver
       mockCompanyShift.findUnique.mockResolvedValueOnce(makeShift());
+      mockResolveAttendanceStatus.mockReturnValueOnce({
+        status: 'PRESENT', workedHours: 8, isLate: false, lateMinutes: 0,
+        isEarlyExit: false, earlyMinutes: 0, overtimeHours: 0,
+        appliedLateDeduction: null, appliedEarlyExitDeduction: null,
+        finalStatusReason: 'Late override applied',
+      });
       mockAttendanceRecord.update.mockResolvedValueOnce({
         ...record,
         isLate: false,
@@ -605,8 +669,13 @@ describe('Attendance Flow', () => {
 
       mockAttendanceOverride.findUnique.mockResolvedValueOnce(override);
       mockAttendanceOverride.update.mockResolvedValueOnce({ ...override, status: 'APPROVED' });
-      mockAttendanceRule.findUnique.mockResolvedValueOnce(makeRules());
       mockCompanyShift.findUnique.mockResolvedValueOnce(makeShift());
+      mockResolveAttendanceStatus.mockReturnValueOnce({
+        status: 'PRESENT', workedHours: 8, isLate: false, lateMinutes: 0,
+        isEarlyExit: false, earlyMinutes: 0, overtimeHours: 0,
+        appliedLateDeduction: null, appliedEarlyExitDeduction: null,
+        finalStatusReason: 'Absent override applied',
+      });
       mockAttendanceRecord.update.mockResolvedValueOnce({
         ...record,
         status: 'PRESENT',

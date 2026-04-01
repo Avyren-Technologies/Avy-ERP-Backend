@@ -55,6 +55,7 @@ model PayrollEntry {
   overtimeAmount        Decimal?   @db.Decimal(15, 2)
   pfEmployee            Decimal?   @db.Decimal(15, 2)
   pfEmployer            Decimal?   @db.Decimal(15, 2)
+  vpfAmount             Decimal?   @db.Decimal(15, 2)
   esiEmployee           Decimal?   @db.Decimal(15, 2)
   esiEmployer           Decimal?   @db.Decimal(15, 2)
   ptAmount              Decimal?   @db.Decimal(15, 2)
@@ -94,6 +95,7 @@ model Payslip {
   employerContributions Json?  // { PF_EMPLOYER: x, ESI_EMPLOYER: y }
   pfEmployee          Decimal? @db.Decimal(15, 2)
   pfEmployer          Decimal? @db.Decimal(15, 2)
+  vpfAmount           Decimal? @db.Decimal(15, 2)
   esiEmployee         Decimal? @db.Decimal(15, 2)
   esiEmployer         Decimal? @db.Decimal(15, 2)
   ptAmount            Decimal? @db.Decimal(15, 2)

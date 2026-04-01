@@ -377,7 +377,9 @@ export class PayrollRunService {
     const monthStart = new Date(run.year, run.month - 1, 1);
     const monthEnd = new Date(run.year, run.month, 1);
 
-    // Get all active employees with current salary
+    const daysInMonth = new Date(run.year, run.month, 0).getDate();
+
+    // Get all active employees with salary records (current + any that were current during this month)
     const employees = await platformPrisma.employee.findMany({
       where: {
         companyId,
@@ -385,8 +387,20 @@ export class PayrollRunService {
       },
       include: {
         salaryRecords: {
-          where: { isCurrent: true },
-          take: 1,
+          where: {
+            OR: [
+              { isCurrent: true },
+              // Also fetch records that were effective during this month (for mid-month revision split)
+              {
+                effectiveFrom: { lte: monthEnd },
+                OR: [
+                  { effectiveTo: { gte: monthStart } },
+                  { effectiveTo: null },
+                ],
+              },
+            ],
+          },
+          orderBy: { effectiveFrom: 'asc' },
         },
         employeeType: {
           select: { pfApplicable: true, esiApplicable: true, ptApplicable: true },
@@ -518,11 +532,71 @@ export class PayrollRunService {
     const loanUpdates: { id: string; emiAmount: number }[] = [];
 
     for (const emp of employees) {
-      const salary = emp.salaryRecords[0];
-      if (!salary) continue; // Skip employees without salary
+      if (emp.salaryRecords.length === 0) continue; // Skip employees without salary
 
-      const monthlyGross = Number(salary.monthlyGross ?? 0) || Number(salary.annualCtc) / 12;
-      const components = salary.components as Record<string, number>;
+      // C6: Handle mid-month salary revisions by splitting old/new rates
+      // Determine effective salary periods within this month
+      const salaryPeriods: Array<{
+        salary: typeof emp.salaryRecords[0];
+        fromDay: number; // 1-based day of month
+        toDay: number;   // 1-based day of month (inclusive)
+      }> = [];
+
+      const sortedRecords = emp.salaryRecords
+        .filter((s, i, arr) => {
+          // Deduplicate by id (the OR query may return duplicates)
+          return arr.findIndex((r) => r.id === s.id) === i;
+        })
+        .sort((a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime());
+
+      for (const rec of sortedRecords) {
+        const effFrom = rec.effectiveFrom;
+        const effTo = rec.effectiveTo;
+
+        // Determine the start day within this month
+        let fromDay: number;
+        if (effFrom < monthStart) {
+          fromDay = 1;
+        } else {
+          fromDay = effFrom.getDate();
+        }
+
+        // Determine the end day within this month
+        let toDay: number;
+        if (effTo && effTo < monthEnd) {
+          toDay = effTo.getDate();
+        } else {
+          toDay = daysInMonth;
+        }
+
+        // Only include if period overlaps with this month
+        if (fromDay <= daysInMonth && toDay >= 1) {
+          salaryPeriods.push({ salary: rec, fromDay: Math.max(fromDay, 1), toDay: Math.min(toDay, daysInMonth) });
+        }
+      }
+
+      // If no valid periods (shouldn't happen), fall back to current salary
+      if (salaryPeriods.length === 0) {
+        const currentSalary = sortedRecords.find((s) => s.isCurrent) ?? sortedRecords[sortedRecords.length - 1]!;
+        salaryPeriods.push({ salary: currentSalary, fromDay: 1, toDay: daysInMonth });
+      }
+
+      // C6: Compute weighted components across salary periods
+      const weightedComponents: Record<string, number> = {};
+      let weightedMonthlyGross = 0;
+      for (const period of salaryPeriods) {
+        const periodDays = period.toDay - period.fromDay + 1;
+        const fraction = periodDays / daysInMonth;
+        const periodComponents = period.salary.components as Record<string, number>;
+        for (const [code, amount] of Object.entries(periodComponents)) {
+          weightedComponents[code] = (weightedComponents[code] ?? 0) + round(amount * fraction);
+        }
+        const periodGross = Number(period.salary.monthlyGross ?? 0) || Number(period.salary.annualCtc) / 12;
+        weightedMonthlyGross += round(periodGross * fraction);
+      }
+
+      const monthlyGross = weightedMonthlyGross;
+      const components = weightedComponents;
 
       // M5: Use batch-fetched attendance records
       const attendanceRecords = attendanceByEmployee.get(emp.id) ?? [];
@@ -583,30 +657,74 @@ export class PayrollRunService {
         }
       }
 
-      // If no attendance records AND no leave records, assume full working days (first run scenario)
+      // C9: If no attendance records AND no leave records, flag as exception instead of
+      // silently assuming perfect attendance. Use full working days but mark for review.
+      let noAttendanceException = false;
       if (attendanceRecords.length === 0 && leaveDateMap.size === 0) {
         presentDays = totalWorkingDays;
         lopDays = 0;
+        noAttendanceException = true; // Will be flagged below
       }
 
-      // Pro-rate for new hires
-      if (emp.joiningDate >= monthStart && emp.joiningDate < monthEnd) {
-        const joiningDay = emp.joiningDate.getDate();
-        const daysInMonth = new Date(run.year, run.month, 0).getDate();
-        const effectiveDays = daysInMonth - joiningDay + 1;
+      // C7: Pro-rate for mid-month exits (employees with lastWorkingDate in this month)
+      const isMidMonthExit = emp.lastWorkingDate && emp.lastWorkingDate >= monthStart && emp.lastWorkingDate < monthEnd;
+      let exitEffectiveDays = daysInMonth;
+      if (isMidMonthExit) {
+        const lastDay = emp.lastWorkingDate!.getDate();
+        exitEffectiveDays = lastDay; // worked from day 1 to lastDay
         // If no attendance logged yet, use pro-rated working days
         if (attendanceRecords.length === 0 && leaveDateMap.size === 0) {
-          presentDays = Math.round((totalWorkingDays * effectiveDays / daysInMonth) * 10) / 10;
+          presentDays = Math.round((totalWorkingDays * exitEffectiveDays / daysInMonth) * 10) / 10;
+          noAttendanceException = true;
         }
       }
 
-      // ORA-2: Compute LOP divisor based on company config
-      const divisor = lopDivisor === 'FIXED_26' ? 26 : lopDivisor === 'FIXED_30' ? 30 : totalWorkingDays;
+      // Pro-rate for new hires
+      const isMidMonthJoin = emp.joiningDate >= monthStart && emp.joiningDate < monthEnd;
+      let joinEffectiveDays = daysInMonth;
+      if (isMidMonthJoin) {
+        const joiningDay = emp.joiningDate.getDate();
+        joinEffectiveDays = daysInMonth - joiningDay + 1;
+        // If no attendance logged yet, use pro-rated working days
+        if (attendanceRecords.length === 0 && leaveDateMap.size === 0) {
+          presentDays = Math.round((totalWorkingDays * joinEffectiveDays / daysInMonth) * 10) / 10;
+        }
+      }
+
+      // H18: Compute effective working days for LOP divisor — adjust for mid-month joiners/exits
+      let effectiveWorkingDays = totalWorkingDays;
+      if (isMidMonthJoin || isMidMonthExit) {
+        // For mid-month joiners or exits, pro-rate the working days divisor
+        const effectiveCalendarDays = isMidMonthJoin && isMidMonthExit
+          ? Math.min(exitEffectiveDays, joinEffectiveDays)  // joined AND exited in same month
+          : isMidMonthJoin
+            ? joinEffectiveDays
+            : exitEffectiveDays;
+        effectiveWorkingDays = Math.max(
+          Math.round((totalWorkingDays * effectiveCalendarDays / daysInMonth) * 10) / 10,
+          1
+        );
+      }
+
+      // ORA-2: Compute LOP divisor based on company config, adjusted for mid-month join/exit
+      const divisor = lopDivisor === 'FIXED_26' ? 26 : lopDivisor === 'FIXED_30' ? 30 : effectiveWorkingDays;
+
+      // C7: Pro-rate component amounts for mid-month exits
+      // (C6 already weighted for mid-month salary changes across full month fraction,
+      //  but if the employee exited mid-month, we must further scale to their worked portion)
+      const proRatedComponents: Record<string, number> = {};
+      if (isMidMonthExit) {
+        const exitFraction = exitEffectiveDays / daysInMonth;
+        for (const [code, amount] of Object.entries(components)) {
+          proRatedComponents[code] = round(amount * exitFraction);
+        }
+      }
+      const effectiveComponents = isMidMonthExit ? proRatedComponents : components;
 
       // Compute earnings with LOP deduction
       const earnings: Record<string, number> = {};
       let grossEarnings = 0;
-      for (const [code, amount] of Object.entries(components)) {
+      for (const [code, amount] of Object.entries(effectiveComponents)) {
         const effectiveAmount = lopDays > 0
           ? round(amount - (amount * lopDays / divisor))
           : amount;
@@ -749,6 +867,13 @@ export class PayrollRunService {
         exceptionNote = exceptionNote
           ? `${exceptionNote}; Variance ${variancePercent}% vs previous month`
           : `Variance ${variancePercent}% vs previous month`;
+      }
+
+      // C9: Flag employees with no attendance records as exception for review
+      if (noAttendanceException) {
+        isException = true;
+        exceptionNote = (exceptionNote ? exceptionNote + '; ' : '') +
+          'NO ATTENDANCE DATA: No attendance records or leave requests found for this month. Full working days assumed — please verify.';
       }
 
       // ORA-4: Negative salary detection
@@ -988,13 +1113,14 @@ export class PayrollRunService {
       : (12 - startMonth) + run.month;
     const remainingMonths = 12 - currentMonthIndex - 1; // months AFTER current
 
-    // Fetch all entries with employee details
+    // Fetch all entries with employee details (H20: include vpfPercentage)
     const entries = await platformPrisma.payrollEntry.findMany({
       where: { payrollRunId: runId },
       include: {
         employee: {
           select: {
             id: true,
+            vpfPercentage: true,
             employeeType: { select: { pfApplicable: true, esiApplicable: true, ptApplicable: true } },
             location: { select: { state: true } },
           },
@@ -1016,6 +1142,7 @@ export class PayrollRunService {
 
       let pfEmployee = 0;
       let pfEmployer = 0;
+      let vpfAmount = 0;
       let esiEmployee = 0;
       let esiEmployer = 0;
       let ptAmount = 0;
@@ -1042,6 +1169,14 @@ export class PayrollRunService {
         const pfWage = Math.min(pfWageBase, wageCeiling);
 
         pfEmployee = round(pfWage * Number(pfConfig.employeeRate) / 100);
+
+        // H20: VPF — Voluntary Provident Fund (employee additional contribution)
+        // VPF is applied on full PF wage base (no ceiling cap) when company has vpfEnabled
+        // and employee has a vpfPercentage set.
+        if (pfConfig.vpfEnabled && entry.employee.vpfPercentage) {
+          const vpfRate = Number(entry.employee.vpfPercentage);
+          vpfAmount = round(pfWageBase * vpfRate / 100);
+        }
 
         const epf = round(pfWage * Number(pfConfig.employerEpfRate) / 100);
         const eps = round(pfWage * Number(pfConfig.employerEpsRate) / 100);
@@ -1186,8 +1321,8 @@ export class PayrollRunService {
         lwfEmployer = lwf.employerAmount;
       }
 
-      // Update entry with statutory amounts
-      const statutoryDeductions = pfEmployee + esiEmployee + ptAmount + tdsAmount + lwfEmployee;
+      // Update entry with statutory amounts (H20: include VPF in employee deductions)
+      const statutoryDeductions = pfEmployee + vpfAmount + esiEmployee + ptAmount + tdsAmount + lwfEmployee;
       const totalDeductions = Number(entry.loanDeduction ?? 0) + statutoryDeductions;
       const netPay = round(grossEarnings - totalDeductions);
 
@@ -1223,6 +1358,7 @@ export class PayrollRunService {
         data: {
           pfEmployee,
           pfEmployer,
+          vpfAmount,
           esiEmployee,
           esiEmployer,
           ptAmount,
@@ -1578,6 +1714,7 @@ export class PayrollRunService {
       employerContributions: e.employerContributions ?? Prisma.JsonNull,
       pfEmployee: e.pfEmployee !== null ? Number(e.pfEmployee) : null,
       pfEmployer: e.pfEmployer !== null ? Number(e.pfEmployer) : null,
+      vpfAmount: e.vpfAmount !== null ? Number(e.vpfAmount) : null,
       esiEmployee: e.esiEmployee !== null ? Number(e.esiEmployee) : null,
       esiEmployer: e.esiEmployer !== null ? Number(e.esiEmployer) : null,
       ptAmount: e.ptAmount !== null ? Number(e.ptAmount) : null,
