@@ -125,7 +125,7 @@ cmd_seed() {
     npx -y -p ts-node@10.9.2 -p typescript@5.3.3 \
     ts-node --transpile-only --skip-project \
     --compiler-options '{"module":"commonjs","moduleResolution":"node","esModuleInterop":true}' \
-    prisma/seed-rbac-fix.ts
+    prisma/seed.ts
   log "Seed complete."
 }
 
