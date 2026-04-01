@@ -2094,11 +2094,15 @@ export class ESSService {
 
   // ── Dashboard helper: Attendance Status ──
 
-  private async getDashboardAttendanceStatus(_companyId: string, employeeId: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  private async getDashboardAttendanceStatus(companyId: string, employeeId: string) {
+    // Use company timezone for correct attendance date
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const nowCT = nowInCompanyTimezone(companyTimezone);
+    const todayStr = nowCT.toFormat('yyyy-MM-dd');
+    const today = new Date(todayStr + 'T00:00:00.000Z');
 
-    const record = await platformPrisma.attendanceRecord.findUnique({
+    let record = await platformPrisma.attendanceRecord.findUnique({
       where: { employeeId_date: { employeeId, date: today } },
       include: {
         shift: { select: { id: true, name: true, startTime: true, endTime: true } },
@@ -2106,7 +2110,23 @@ export class ESSService {
       },
     });
 
-    if (!record) {
+    // For cross-day (night) shifts: check yesterday's record if still checked in
+    if (!record || !record.punchIn) {
+      const yesterdayDT = nowCT.minus({ days: 1 });
+      const yesterday = new Date(yesterdayDT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
+      const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
+        where: { employeeId_date: { employeeId, date: yesterday } },
+        include: {
+          shift: { select: { id: true, name: true, startTime: true, endTime: true } },
+          location: { select: { id: true, name: true } },
+        },
+      });
+      if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
+        record = yesterdayRecord;
+      }
+    }
+
+    if (!record || !record.punchIn) {
       return { status: 'NOT_CHECKED_IN' as const, record: null, elapsedSeconds: 0 };
     }
 

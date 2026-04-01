@@ -936,9 +936,16 @@ export class ESSController {
     const nowCT = nowInCompanyTimezone(companyTimezone);
     const today = new Date(nowCT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
 
+    const shiftInclude = {
+      shift: {
+        include: { breaks: { select: { id: true, name: true, startTime: true, duration: true, type: true, isPaid: true } } },
+      },
+      location: true,
+    } as const;
+
     let record = await platformPrisma.attendanceRecord.findUnique({
       where: { employeeId_date: { employeeId, date: today } },
-      include: { shift: true, location: true },
+      include: shiftInclude,
     });
 
     // For cross-day (night) shifts: if no record today, check yesterday's record
@@ -948,7 +955,7 @@ export class ESSController {
       const yesterday = new Date(yesterdayDT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
       const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
         where: { employeeId_date: { employeeId, date: yesterday } },
-        include: { shift: true, location: true },
+        include: shiftInclude,
       });
       if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
         record = yesterdayRecord;
@@ -956,7 +963,19 @@ export class ESSController {
     }
 
     if (!record || !record.punchIn) {
-      res.json(createSuccessResponse({ status: 'NOT_CHECKED_IN', record: null }, 'Not checked in today'));
+      // Also return the employee's current shift info even when not checked in
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: employeeId },
+        select: { shiftId: true },
+      });
+      let currentShift = null;
+      if (employee?.shiftId) {
+        currentShift = await platformPrisma.companyShift.findUnique({
+          where: { id: employee.shiftId },
+          include: { breaks: { select: { id: true, name: true, startTime: true, duration: true, type: true, isPaid: true } } },
+        });
+      }
+      res.json(createSuccessResponse({ status: 'NOT_CHECKED_IN', record: null, currentShift }, 'Not checked in today'));
       return;
     }
 
@@ -1047,14 +1066,22 @@ export class ESSController {
 
         // Parse shift start/end in company timezone
         const [shiftHour = 0, shiftMin = 0] = (shift.startTime || '00:00').split(':').map(Number);
+        const [endHour = 0, endMin = 0] = (shift.endTime || '23:59').split(':').map(Number);
         // Current time in company timezone (minutes since midnight)
         const nowMinutes = nowCT.hour * 60 + nowCT.minute;
         const shiftStartMinutes = (shiftHour ?? 0) * 60 + (shiftMin ?? 0);
+        const shiftEndMinutes = (endHour ?? 0) * 60 + (endMin ?? 0);
 
         // Early window: 60 minutes before shift start
         const earlyWindowMinutes = 60;
-        // Late window: maxLateCheckIn minutes after shift start
-        const lateWindowMinutes = maxLateCheckIn;
+        // Late window: maxLateCheckIn minutes after shift start, but never past shift end
+        let lateWindowMinutes = maxLateCheckIn;
+
+        if (!shift.isCrossDay && shiftEndMinutes > shiftStartMinutes) {
+          // For non-cross-day shifts, cap the late window at shift end time
+          const shiftDuration = shiftEndMinutes - shiftStartMinutes;
+          lateWindowMinutes = Math.min(lateWindowMinutes, shiftDuration);
+        }
 
         const earliestMinutes = shiftStartMinutes - earlyWindowMinutes;
         const latestMinutes = shiftStartMinutes + lateWindowMinutes;
@@ -1064,16 +1091,15 @@ export class ESSController {
         if (shift.isCrossDay) {
           // Cross-day (night) shift: e.g., 19:00 - 07:00
           // The check-in window wraps around midnight.
-          // Earliest: shiftStart - earlyWindow (e.g., 18:00)
-          // Latest: shiftStart + maxLateCheckIn (e.g., 19:00 + 240 = 23:00, or past midnight)
+          // Also cap at shift end time (next day) to prevent check-in after shift ends
+          const crossDayEndMinutes = shiftEndMinutes + 1440; // end time next day
+          const shiftDuration = crossDayEndMinutes - shiftStartMinutes;
+          const effectiveLatest = shiftStartMinutes + Math.min(lateWindowMinutes, shiftDuration);
 
-          if (latestMinutes >= 1440) {
-            // Late window extends past midnight
-            // Valid if: nowMinutes >= earliestMinutes OR nowMinutes <= (latestMinutes - 1440)
-            isWithinWindow = nowMinutes >= earliestMinutes || nowMinutes <= (latestMinutes - 1440);
+          if (effectiveLatest >= 1440) {
+            isWithinWindow = nowMinutes >= earliestMinutes || nowMinutes <= (effectiveLatest - 1440);
           } else {
-            // Late window doesn't cross midnight (e.g., 18:00 - 23:00)
-            isWithinWindow = nowMinutes >= earliestMinutes && nowMinutes <= latestMinutes;
+            isWithinWindow = nowMinutes >= earliestMinutes && nowMinutes <= effectiveLatest;
           }
         } else {
           // Day shift: simple range check
@@ -1082,10 +1108,9 @@ export class ESSController {
 
         if (!isWithinWindow) {
           const earlyTime = `${String(Math.floor(Math.max(0, earliestMinutes) / 60)).padStart(2, '0')}:${String(Math.max(0, earliestMinutes) % 60).padStart(2, '0')}`;
-          const lateHours = Math.floor(lateWindowMinutes / 60);
           throw ApiError.badRequest(
-            `Check-in not allowed at this time. Your shift "${shift.name}" starts at ${shift.startTime}. ` +
-            `You can check in from ${earlyTime} (1 hour before shift) up to ${lateHours} hours after shift start.`
+            `Check-in not allowed at this time. Your shift "${shift.name}" is ${shift.startTime} – ${shift.endTime}. ` +
+            `You can check in from ${earlyTime} (1 hour before shift start) until the shift ends.`
           );
         }
       }
