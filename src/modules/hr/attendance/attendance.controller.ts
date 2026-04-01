@@ -431,6 +431,16 @@ export class AttendanceController {
     res.status(201).json(createSuccessResponse(result, `Synced ${result.synced}/${result.total} records`));
   });
 
+  // ── Auto Clock-Out ─────────────────────────────────────────────────
+
+  processAutoClockOut = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await attendanceService.processAutoClockOut(companyId);
+    res.json(createSuccessResponse(result, `Auto clock-out processed: ${result.processed} records updated`));
+  });
+
   // ── Shift Rotation ───────────────────────────────────────────────────
 
   listRotationSchedules = asyncHandler(async (req: Request, res: Response) => {

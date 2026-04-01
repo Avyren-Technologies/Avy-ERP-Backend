@@ -2427,6 +2427,154 @@ export class AttendanceService {
 
     return { isLate, lateMinutes, isEarlyExit, earlyMinutes };
   }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Auto Clock-Out Processing
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Finds all INCOMPLETE attendance records (punchIn exists, punchOut null) and
+   * auto-sets punchOut = punchIn + autoClockOutMinutes if the shift has it configured
+   * and enough time has elapsed.
+   */
+  async processAutoClockOut(companyId: string) {
+    // Find all incomplete records for this company
+    const incompleteRecords = await platformPrisma.attendanceRecord.findMany({
+      where: {
+        companyId,
+        punchIn: { not: null },
+        punchOut: null,
+        status: 'INCOMPLETE',
+      },
+      include: {
+        shift: {
+          select: {
+            id: true,
+            autoClockOutMinutes: true,
+            startTime: true,
+            endTime: true,
+            isCrossDay: true,
+          },
+        },
+        employee: {
+          select: {
+            id: true,
+            shiftId: true,
+            locationId: true,
+            employeeTypeId: true,
+          },
+        },
+      },
+    });
+
+    const now = new Date();
+    let processed = 0;
+    let skipped = 0;
+
+    for (const record of incompleteRecords) {
+      const autoClockOutMinutes = record.shift?.autoClockOutMinutes;
+      if (!autoClockOutMinutes || !record.punchIn) {
+        skipped++;
+        continue;
+      }
+
+      const punchInTime = new Date(record.punchIn).getTime();
+      const autoClockOutTime = punchInTime + autoClockOutMinutes * 60 * 1000;
+
+      if (now.getTime() < autoClockOutTime) {
+        skipped++;
+        continue;
+      }
+
+      // Set punchOut = punchIn + autoClockOutMinutes
+      const autoPunchOut = new Date(autoClockOutTime);
+
+      // Recalculate status using the full status resolver
+      const effectiveShiftId = record.shiftId;
+      let shiftInfo: ShiftInfo | null = null;
+      if (record.shift) {
+        shiftInfo = {
+          startTime: record.shift.startTime,
+          endTime: record.shift.endTime,
+          isCrossDay: record.shift.isCrossDay,
+        };
+      }
+
+      // Build evaluation context
+      const recordDate = new Date(record.date);
+      const holiday = await platformPrisma.holidayCalendar.findFirst({
+        where: { companyId, date: recordDate },
+        select: { name: true },
+      });
+      const roster = await platformPrisma.roster.findFirst({
+        where: { companyId, isDefault: true },
+        select: { weekOff1: true, weekOff2: true },
+      });
+      const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dow = dayOfWeek[recordDate.getDay()];
+      const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
+
+      const evaluationContext: EvaluationContext = {
+        employeeId: record.employeeId,
+        shiftId: effectiveShiftId,
+        locationId: record.locationId,
+        date: recordDate,
+        isHoliday: !!holiday,
+        isWeekOff,
+        ...(holiday?.name && { holidayName: holiday.name }),
+        ...(roster && { rosterPattern: `${roster.weekOff1 ?? ''}${roster.weekOff2 ? '/' + roster.weekOff2 : ''}` }),
+      };
+
+      const { policy } = await resolvePolicy(companyId, evaluationContext);
+      const companySettings = await getCachedCompanySettings(companyId);
+      const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+      const rules = await getCachedAttendanceRules(companyId);
+      const rulesInput: AttendanceRulesInput = {
+        lopAutoDeduct: rules.lopAutoDeduct,
+        autoMarkAbsentIfNoPunch: rules.autoMarkAbsentIfNoPunch,
+        autoHalfDayEnabled: rules.autoHalfDayEnabled,
+        lateDeductionType: rules.lateDeductionType,
+        lateDeductionValue: rules.lateDeductionValue ? Number(rules.lateDeductionValue) : null,
+        earlyExitDeductionType: rules.earlyExitDeductionType,
+        earlyExitDeductionValue: rules.earlyExitDeductionValue ? Number(rules.earlyExitDeductionValue) : null,
+        ignoreLateOnLeaveDay: rules.ignoreLateOnLeaveDay,
+        ignoreLateOnHoliday: rules.ignoreLateOnHoliday,
+        ignoreLateOnWeekOff: rules.ignoreLateOnWeekOff,
+      };
+
+      const statusResult = resolveAttendanceStatus(
+        record.punchIn,
+        autoPunchOut,
+        shiftInfo,
+        policy,
+        evaluationContext,
+        rulesInput,
+        companyTimezone,
+      );
+
+      await platformPrisma.attendanceRecord.update({
+        where: { id: record.id },
+        data: {
+          punchOut: autoPunchOut,
+          workedHours: statusResult.workedHours,
+          status: statusResult.status as AttendanceStatus,
+          isLate: statusResult.isLate,
+          lateMinutes: statusResult.lateMinutes || null,
+          isEarlyExit: statusResult.isEarlyExit,
+          earlyMinutes: statusResult.earlyMinutes || null,
+          overtimeHours: statusResult.overtimeHours > 0 ? statusResult.overtimeHours : null,
+          appliedLateDeduction: statusResult.appliedLateDeduction,
+          appliedEarlyExitDeduction: statusResult.appliedEarlyExitDeduction,
+          remarks: `${record.remarks ? record.remarks + ' | ' : ''}Auto clock-out after ${autoClockOutMinutes} minutes`,
+        },
+      });
+
+      logger.info(`Auto clock-out applied for record ${record.id} (employee ${record.employeeId})`);
+      processed++;
+    }
+
+    return { processed, skipped, total: incompleteRecords.length };
+  }
 }
 
 export const attendanceService = new AttendanceService();

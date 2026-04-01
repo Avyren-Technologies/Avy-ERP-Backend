@@ -1,13 +1,30 @@
 #!/bin/bash
 # ============================================
 # Avy ERP Backend — Production Deployment Script
-# Usage: ./deploy.sh [up|down|restart|logs|migrate|seed|status]
+# Usage: ./deploy.sh [up|down|restart|logs|migrate|seed|db-push-reset|seed-company|status]
+#
+# Prisma uses a modular schema (prisma/base.prisma + prisma/modules/**/*.prisma).
+# npm scripts run `node scripts/merge-prisma.js` first; Docker commands here do the same
+# inside the app container before migrate deploy / db push.
 # ============================================
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="docker-compose.yml"
 ENV_FILE=".env.production"
+
+# Docker Compose helper (app service)
+compose_app_exec() {
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec app "$@"
+}
+
+# Modular Prisma: base.prisma + prisma/modules → schema.prisma (scripts/merge-prisma.js), then run a shell snippet.
+# Matches package.json "prisma:merge" + prisma CLI; requires merge script in the app image (see Dockerfile).
+run_in_app_after_prisma_merge() {
+  local inner="${1:?command required}"
+  compose_app_exec sh -c "node scripts/merge-prisma.js && ${inner}"
+}
 
 # Colors
 RED='\033[0;31m'
@@ -94,11 +111,10 @@ cmd_logs() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs -f "${2:-}"
 }
 
-# Run Prisma migrations inside the app container
+# Run Prisma migrations inside the app container (merge modular schema first)
 cmd_migrate() {
-  log "Running Prisma migrations..."
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec app \
-    npx prisma migrate deploy
+  log "Merging Prisma modules → schema.prisma, then migrate deploy..."
+  run_in_app_after_prisma_merge "npx prisma migrate deploy"
   log "Migrations complete."
 }
 
@@ -113,6 +129,30 @@ cmd_seed() {
   log "Seed complete."
 }
 
+# DESTRUCTIVE: drop DB data and apply current schema (dev/staging only).
+# Requires explicit --yes. Merges prisma/modules → schema.prisma before push (same as npm run db:push + --force-reset).
+cmd_db_push_reset() {
+  check_prereqs
+  log "Merging Prisma modules → schema.prisma, then db push --force-reset (this DROPS ALL DATA)..."
+  run_in_app_after_prisma_merge "npx prisma db push --force-reset --accept-data-loss"
+  log "db push --force-reset complete."
+}
+
+# Run scripts/seed-company.ts (in this repo) against the API (host-side; not inside Docker).
+# Forwards all arguments to the script, e.g.:
+#   ./deploy.sh seed-company --count 1 --multi-location --employees 10 --api-url http://localhost:3000/api/v1
+cmd_seed_company() {
+  command -v npx >/dev/null 2>&1 || error "npx is required to run seed-company"
+  local seed_script
+  seed_script="$SCRIPT_DIR/scripts/seed-company.ts"
+  if [ ! -f "$seed_script" ]; then
+    error "seed-company script not found at $seed_script"
+  fi
+  log "Running seed-company (tsx) with args: $*"
+  (cd "$SCRIPT_DIR" && npx --yes tsx "$seed_script" "$@")
+  log "seed-company finished."
+}
+
 # Show service status
 cmd_status() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
@@ -123,14 +163,16 @@ cmd_help() {
   echo "Usage: ./deploy.sh [command]"
   echo ""
   echo "Commands:"
-  echo "  up        Build and start all services (postgres, redis, app)"
-  echo "  down      Stop all services"
-  echo "  restart   Rebuild and restart app only (keeps DB & Redis)"
-  echo "  logs      View logs (optionally: ./deploy.sh logs app)"
-  echo "  migrate   Run Prisma database migrations"
-  echo "  seed      Run database seed script"
-  echo "  status    Show service status"
-  echo "  help      Show this help"
+  echo "  up              Build and start all services (postgres, redis, app)"
+  echo "  down            Stop all services"
+  echo "  restart         Rebuild and restart app only (keeps DB & Redis)"
+  echo "  logs            View logs (optionally: ./deploy.sh logs app)"
+  echo "  migrate         Merge modular Prisma schema, then prisma migrate deploy"
+  echo "  seed            Run prisma/seed-rbac-fix.ts inside the app container"
+  echo "  db-push-reset   DANGER: merge schema, then prisma db push --force-reset (./deploy.sh db-push-reset --yes)"
+  echo "  seed-company    Run scripts/seed-company.ts on host (pass script flags after command)"
+  echo "  status          Show service status"
+  echo "  help            Show this help"
 }
 
 # Main
@@ -141,6 +183,16 @@ case "${1:-help}" in
   logs)     cmd_logs "$@" ;;
   migrate)  cmd_migrate ;;
   seed)     cmd_seed ;;
+  db-push-reset)
+    if [ "${2:-}" != "--yes" ]; then
+      error "Refusing to reset DB without confirmation. Usage: ./deploy.sh db-push-reset --yes"
+    fi
+    cmd_db_push_reset
+    ;;
+  seed-company)
+    shift
+    cmd_seed_company "$@"
+    ;;
   status)   cmd_status ;;
   help|*)   cmd_help ;;
 esac

@@ -14,12 +14,13 @@ RUN apk add --no-cache openssl
 # Copy dependency files first (leverages Docker layer cache)
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
+COPY scripts/merge-prisma.js ./scripts/merge-prisma.js
 
 # Install ALL dependencies (including devDependencies for build)
 RUN npm ci
 
-# Generate Prisma client
-RUN npx prisma generate
+# Merge prisma/modules → schema.prisma, then generate client (matches package.json db:* flow)
+RUN node scripts/merge-prisma.js && npx prisma generate
 
 # Copy source code
 COPY tsconfig.json ./
@@ -43,12 +44,13 @@ RUN addgroup -g 1001 -S appgroup && \
 # Copy dependency files
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
+COPY scripts/merge-prisma.js ./scripts/merge-prisma.js
 
 # Install production dependencies only
 RUN npm ci --omit=dev
 
-# Generate Prisma client (needed in production image)
-RUN npx prisma generate
+# Merge modular schema → schema.prisma, then generate client (runtime deploy.sh also merges before prisma CLI)
+RUN node scripts/merge-prisma.js && npx prisma generate
 
 # Copy compiled JavaScript from builder
 COPY --from=builder /app/dist ./dist

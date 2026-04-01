@@ -21,6 +21,9 @@ router.post('/attendance/populate-month', requirePermissions(['hr:create']), con
 // ── Comp-Off Accrual (must be before :id) ────────────────────────────
 router.post('/attendance/process-comp-off', requirePermissions(['hr:create']), controller.processCompOff);
 
+// ── Auto Clock-Out ───────────────────────────────────────────────────
+router.post('/attendance/process-auto-clockout', requirePermissions(['hr:update']), controller.processAutoClockOut);
+
 // ── Overrides / Regularization (must be before :id) ──────────────────
 router.get('/attendance/overrides', requirePermissions(['hr:read']), controller.listOverrides);
 router.post('/attendance/overrides', requirePermissions(['hr:create']), controller.createOverride);

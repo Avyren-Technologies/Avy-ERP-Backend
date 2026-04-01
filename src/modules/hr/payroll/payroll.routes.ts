@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
+import { requireModuleEnabled } from '../../../shared/middleware/config-enforcement.middleware';
 import { payrollController as controller } from './payroll.controller';
 
 const router = Router();
+
+// ── Module Enforcement ──────────────────────────────────────────────
+router.use(requireModuleEnabled('payroll'));
 
 // ── Salary Components ─────────────────────────────────────────────────
 router.get('/salary-components', requirePermissions(['hr:read']), controller.listSalaryComponents);
