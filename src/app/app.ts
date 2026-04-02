@@ -42,44 +42,50 @@ app.use(helmet({
   },
 }));
 
-// CORS configuration
+// CORS configuration — dynamic origin validation for wildcard subdomains
 if (env.ENABLE_CORS) {
-  const configuredOrigins = env.CORS_ALLOWED_ORIGINS
+  const mainDomain = env.MAIN_DOMAIN;
+  const mainOrigin = `https://${mainDomain}`;
+  const subdomainPattern = new RegExp(
+    `^https:\\/\\/[\\w-]+\\.${mainDomain.replace(/\./g, '\\.')}$`
+  );
+
+  // Additional origins from env (for development)
+  const extraOrigins = env.CORS_ALLOWED_ORIGINS
     .split(',')
-    .map((origin) => origin.trim())
+    .map((o) => o.trim())
     .filter(Boolean);
-
-  const defaultProductionOrigins = [
-    'https://avyerp.com',
-    'https://www.avyerp.com',
-    'https://app.avyerp.com',
-  ];
-
-  const allowedOrigins = configuredOrigins.length > 0
-    ? configuredOrigins
-    : (env.NODE_ENV === 'production' ? defaultProductionOrigins : []);
-  const allowAllOrigins = allowedOrigins.includes('*');
+  const allowAll = extraOrigins.includes('*');
 
   app.use(cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, etc.)
+      // Allow requests with no origin (mobile apps, Postman, etc.)
       if (!origin) return callback(null, true);
 
-      // Temporary wildcard support via env: CORS_ALLOWED_ORIGINS="*"
-      if (allowAllOrigins) {
+      // Development wildcard
+      if (allowAll) return callback(null, true);
+
+      // Main domain
+      if (origin === mainOrigin) return callback(null, true);
+
+      // Also allow http variant in development
+      if (env.NODE_ENV === 'development' && origin === `http://${mainDomain}`) {
         return callback(null, true);
       }
 
-      // Use configured allow-list when available. In production, fallback to defaults.
-      if (allowedOrigins.length > 0) {
-        if (allowedOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-        return callback(new Error('Not allowed by CORS'), false);
+      // Wildcard subdomains (e.g., https://company1.avyerp.avyren.in)
+      if (subdomainPattern.test(origin)) return callback(null, true);
+
+      // Extra configured origins (dev/staging)
+      if (extraOrigins.includes(origin)) return callback(null, true);
+
+      // Development mode: allow all when no origins configured
+      if (env.NODE_ENV === 'development' && extraOrigins.length === 0) {
+        return callback(null, true);
       }
 
-      // In development without configured allow-list, allow all origins.
-      return callback(null, true);
+      logger.warn(`CORS rejected origin: ${origin}`);
+      return callback(new Error('Not allowed by CORS'), false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
