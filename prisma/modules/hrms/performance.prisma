@@ -6,6 +6,7 @@
 
 model AppraisalCycle {
   id                  String               @id @default(cuid())
+  referenceNumber     String?              // Auto-generated via Number Series (e.g. PFM-00001)
   name                String
   frequency           String               @default("ANNUAL") // ANNUAL, SEMI_ANNUAL, QUARTERLY
   startDate           DateTime             @db.Date

@@ -153,9 +153,14 @@ export class AdvancedHRService {
   }
 
   async createRequisition(companyId: string, data: any, userId?: string) {
+    const requisitionNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Recruitment', 'Job Requisition'], 'Job Requisition',
+    );
+
     const requisition = await platformPrisma.jobRequisition.create({
       data: {
         companyId,
+        requisitionNumber,
         title: data.title,
         designationId: n(data.designationId),
         departmentId: n(data.departmentId),
@@ -609,9 +614,14 @@ export class AdvancedHRService {
   }
 
   async createTrainingCatalogue(companyId: string, data: any) {
+    const catalogueNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Training', 'Training Catalogue'], 'Training Programme',
+    );
+
     return platformPrisma.trainingCatalogue.create({
       data: {
         companyId,
+        catalogueNumber,
         name: data.name,
         type: data.type ?? 'TECHNICAL',
         mode: data.mode ?? 'CLASSROOM',
@@ -1037,9 +1047,14 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Asset category not found in this company');
     }
 
+    const assetNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Asset', 'Asset Management'], 'Asset',
+    );
+
     return platformPrisma.asset.create({
       data: {
         companyId,
+        assetNumber,
         name: data.name,
         categoryId: data.categoryId,
         serialNumber: n(data.serialNumber),
@@ -1461,12 +1476,12 @@ export class AdvancedHRService {
     // Generate claim number from Number Series
     const claimNumber = await generateNextNumber(
       platformPrisma, companyId, ['Expense', 'Expense Claims'], 'Expense Claim',
-    ).catch(() => undefined);
+    );
 
     const createData: any = {
       companyId,
       employeeId: data.employeeId,
-      ...(claimNumber ? { claimNumber } : {}),
+      claimNumber,
       title: data.title,
       amount: totalAmount,
       category: data.category,
@@ -1970,9 +1985,14 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Employee not found in this company');
     }
 
+    const letterNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Letter', 'HR Letters'], 'HR Letter',
+    );
+
     const letter = await platformPrisma.hRLetter.create({
       data: {
         companyId,
+        letterNumber,
         templateId: data.templateId,
         employeeId: data.employeeId,
         effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : null,

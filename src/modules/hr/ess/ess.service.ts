@@ -520,7 +520,9 @@ export class ESSService {
     return updatedRequest;
   }
 
-  private async onApprovalComplete(companyId: string, entityType: string, entityId: string, decision: 'APPROVED' | 'REJECTED') {
+  /** Called when an approval request completes (final step approved or rejected).
+   *  Also invoked by the SLA worker for auto-approve/auto-reject. */
+  async onApprovalComplete(companyId: string, entityType: string, entityId: string, decision: 'APPROVED' | 'REJECTED') {
     try {
       switch (entityType) {
         case 'PayrollRun':
@@ -718,6 +720,26 @@ export class ESSService {
           }
           break;
         }
+
+        case 'WfhRequest':
+          await platformPrisma.wfhRequest.update({
+            where: { id: entityId },
+            data: {
+              status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+              ...(decision === 'APPROVED' && { approvedAt: new Date() }),
+            },
+          });
+          break;
+
+        case 'LoanRecord':
+          await platformPrisma.loanRecord.update({
+            where: { id: entityId },
+            data: {
+              status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+              ...(decision === 'APPROVED' && { approvedAt: new Date() }),
+            },
+          });
+          break;
 
         default:
           // Unknown entity type — log but don't fail
@@ -1577,7 +1599,7 @@ export class ESSService {
     });
 
     // Create approval request if workflow exists
-    await this.createRequest(companyId, {
+    const leaveApproval = await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'LeaveRequest',
       entityId: leaveRequest.id,
@@ -1591,6 +1613,11 @@ export class ESSService {
         reason: data.reason,
       },
     });
+
+    // If no active workflow, auto-approve
+    if (!leaveApproval) {
+      await this.onApprovalComplete(companyId, 'LeaveRequest', leaveRequest.id, 'APPROVED');
+    }
 
     // Trigger notification
     await this.triggerNotification(companyId, 'LEAVE_APPLICATION', {
@@ -1657,7 +1684,7 @@ export class ESSService {
     });
 
     // 6. Wire into approval workflow via createRequest (Employee -> Manager)
-    await this.createRequest(companyId, {
+    const attendanceApproval = await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'AttendanceOverride',
       entityId: override.id,
@@ -1668,6 +1695,11 @@ export class ESSService {
         reason: data.reason,
       },
     });
+
+    // If no active workflow, auto-approve
+    if (!attendanceApproval) {
+      await this.onApprovalComplete(companyId, 'AttendanceOverride', override.id, 'APPROVED');
+    }
 
     // 7. Return the override
     return override;
@@ -3218,7 +3250,7 @@ export class ESSService {
       requesterId: userId,
       entityType: 'ShiftSwapRequest',
       entityId: swapRequest.id,
-      triggerEvent: 'shift_swap_requested',
+      triggerEvent: 'SHIFT_CHANGE',
       data: { currentShiftId: data.currentShiftId, requestedShiftId: data.requestedShiftId, swapDate: data.swapDate },
     });
 
@@ -3324,7 +3356,7 @@ export class ESSService {
     const employeeId = await this.resolveEmployeeIdFromUser(userId);
     if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
 
-    return platformPrisma.wfhRequest.create({
+    const wfhRequest = await platformPrisma.wfhRequest.create({
       data: {
         employeeId,
         fromDate: new Date(data.fromDate),
@@ -3335,6 +3367,22 @@ export class ESSService {
         companyId,
       },
     });
+
+    // Wire into approval workflow
+    const wfhApproval = await this.createRequest(companyId, {
+      requesterId: employeeId,
+      entityType: 'WfhRequest',
+      entityId: wfhRequest.id,
+      triggerEvent: 'WFH_REQUEST',
+      data: { fromDate: data.fromDate, toDate: data.toDate, days: data.days, reason: data.reason },
+    });
+
+    // If no active workflow, auto-approve
+    if (!wfhApproval) {
+      await this.onApprovalComplete(companyId, 'WfhRequest', wfhRequest.id, 'APPROVED');
+    }
+
+    return wfhRequest;
   }
 
   async cancelWfhRequest(companyId: string, userId: string, id: string) {
@@ -3649,11 +3697,11 @@ export class ESSService {
     // Generate claim number from Number Series
     const claimNumber = await generateNextNumber(
       platformPrisma, companyId, ['Expense', 'Expense Claims'], 'Expense Claim',
-    ).catch(() => undefined);
+    );
 
     const createData: any = {
       employeeId,
-      ...(claimNumber ? { claimNumber } : {}),
+      claimNumber,
       title: data.title,
       amount: totalAmount,
       category: data.category,
@@ -4054,7 +4102,7 @@ export class ESSService {
     // Round to 2 decimal places
     emiAmount = Math.round(emiAmount * 100) / 100;
 
-    return platformPrisma.loanRecord.create({
+    const loanRecord = await platformPrisma.loanRecord.create({
       data: {
         employeeId,
         policyId: data.policyId,
@@ -4071,6 +4119,22 @@ export class ESSService {
         policy: { select: { name: true, code: true, loanType: true } },
       },
     });
+
+    // Wire into approval workflow
+    const loanApproval = await this.createRequest(companyId, {
+      requesterId: employeeId,
+      entityType: 'LoanRecord',
+      entityId: loanRecord.id,
+      triggerEvent: 'LOAN_APPLICATION',
+      data: { amount: data.amount, tenure: data.tenure, reason: data.reason, policyName: policy.name },
+    });
+
+    // If no active workflow, auto-approve
+    if (!loanApproval) {
+      await this.onApprovalComplete(companyId, 'LoanRecord', loanRecord.id, 'APPROVED');
+    }
+
+    return loanRecord;
   }
 }
 

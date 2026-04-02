@@ -161,6 +161,7 @@ export const updateSystemControlsSchema = z.object({
   passwordComplexity: z.boolean().optional(),
   accountLockThreshold: z.number().int().min(1).max(20).optional(),
   accountLockDurationMinutes: z.number().int().min(1).max(1440).optional(),
+  biometricLoginEnabled: z.boolean().optional(),
 
   // Audit
   auditLogRetentionDays: z.number().int().min(30).max(730).optional(),

@@ -18,17 +18,43 @@ model User {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
+  // Account lock (enforced via SystemControls.accountLockThreshold / accountLockDurationMinutes)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+
+  // MFA (TOTP-based, enforced via SystemControls.mfaRequired)
+  mfaEnabled Boolean  @default(false)
+  mfaSecret  String?  // Encrypted TOTP secret (base32)
+
   // Relations
   companyId   String?
   company     Company?             @relation(fields: [companyId], references: [id])
   resetTokens PasswordResetToken[]
   tenantUsers TenantUser[]
+  sessions    ActiveSession[]
 
   // User ↔ Employee link (ERP industry standard)
   employeeId String?   @unique
   employee   Employee? @relation("UserEmployee", fields: [employeeId], references: [id])
 
   @@map("users")
+}
+
+// Active sessions — tracks each login for concurrent session enforcement
+model ActiveSession {
+  id           String   @id @default(cuid())
+  userId       String
+  deviceInfo   String?  // "web", "mobile-ios", "mobile-android"
+  ipAddress    String?
+  refreshToken String   @unique // SHA-256 hash of the refresh token
+  expiresAt    DateTime // mirrors the refresh token expiry
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("active_sessions")
 }
 
 // Password Reset Tokens

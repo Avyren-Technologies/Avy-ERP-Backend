@@ -175,10 +175,10 @@ export class PayrollRunService {
       throw ApiError.conflict(`Payroll run for ${month}/${year} already exists (status: ${existing.status})`);
     }
 
-    // Generate payroll reference number (graceful: if no series configured, proceed without)
+    // Generate payroll reference number
     const referenceNumber = await generateNextNumber(
       platformPrisma, companyId, ['Payroll', 'Payroll Run'], 'Payroll Run',
-    ).catch(() => undefined);
+    );
 
     return platformPrisma.payrollRun.create({
       data: {
@@ -186,7 +186,7 @@ export class PayrollRunService {
         month,
         year,
         status: 'DRAFT',
-        ...(referenceNumber ? { referenceNumber } : {}),
+        referenceNumber,
       },
     });
   }

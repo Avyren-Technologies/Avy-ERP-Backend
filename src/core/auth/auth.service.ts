@@ -1,8 +1,11 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { generateSecret, generateURI, verifySync } from 'otplib';
+import QRCode from 'qrcode';
 import { env } from '../../config/env';
 import { platformPrisma } from '../../config/database';
 import { cacheRedis } from '../../config/redis';
-import { AuthError } from '../../shared/errors';
+import { AuthError, ApiError } from '../../shared/errors';
 import {
   hashPassword,
   comparePassword,
@@ -25,6 +28,7 @@ import {
   JWTPayload,
   TokenPair
 } from './auth.types';
+import type { MfaChallengeResponse, MfaSetupResponse, MfaVerifyRequest, LoginResult } from './auth.types';
 import { sendPasswordResetCode } from '../../infrastructure/email/email.service';
 import { rbacService } from '../rbac/rbac.service';
 
@@ -32,7 +36,7 @@ const JWT_ALGORITHM: jwt.Algorithm = 'HS256';
 
 export class AuthService {
   // Login user
-  async login(loginData: LoginRequest): Promise<AuthResponse> {
+  async login(loginData: LoginRequest): Promise<LoginResult> {
     const { email, password } = loginData;
 
     // Find user
@@ -56,17 +60,88 @@ export class AuthService {
       throw AuthError.accountInactive();
     }
 
+    // ── Account Lock enforcement (via SystemControls) ──
+    // Load security settings for the user's company (if any)
+    let controls: { accountLockThreshold: number; accountLockDurationMinutes: number; mfaRequired: boolean } | null = null;
+    if (user.companyId) {
+      try {
+        const { getCachedSystemControls } = await import('../../shared/utils/config-cache');
+        controls = await getCachedSystemControls(user.companyId);
+      } catch {
+        // Non-fatal: if config is unavailable, skip lock enforcement
+      }
+    }
+
+    // Check if account is currently locked
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      const remainingMin = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
+      throw new AuthError(
+        `Account is locked due to too many failed attempts. Try again in ${remainingMin} minute(s).`,
+        'ACCOUNT_LOCKED',
+      );
+    }
+
+    // If lock expired, reset the lock fields
+    if (user.lockedUntil && user.lockedUntil <= new Date()) {
+      await platformPrisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
+    }
+
     // Verify password
     const isPasswordValid = await comparePassword(password, user.password);
     if (!isPasswordValid) {
+      // Increment failed attempts and lock if threshold exceeded
+      const newAttempts = (user.failedLoginAttempts ?? 0) + 1;
+      const threshold = controls?.accountLockThreshold ?? 5;
+      const lockDuration = controls?.accountLockDurationMinutes ?? 30;
+
+      const updateData: any = { failedLoginAttempts: newAttempts };
+      if (newAttempts >= threshold) {
+        updateData.lockedUntil = new Date(Date.now() + lockDuration * 60 * 1000);
+        logger.warn(`Account locked for ${email} after ${newAttempts} failed attempts (lock duration: ${lockDuration}m)`);
+      }
+
+      await platformPrisma.user.update({ where: { id: user.id }, data: updateData });
       throw AuthError.invalidCredentials();
     }
 
-    // Update last login
+    // Login successful — reset failed attempts
     await platformPrisma.user.update({
       where: { id: user.id },
-      data: { lastLogin: new Date() },
+      data: { lastLogin: new Date(), failedLoginAttempts: 0, lockedUntil: null },
     });
+
+    // ── MFA enforcement ──
+    // MFA is required if:
+    //   (a) The user individually has MFA enabled (mfaEnabled + mfaSecret), OR
+    //   (b) The company's SystemControls.mfaRequired is ON
+    const companyMfaRequired = controls?.mfaRequired ?? false;
+    const userMfaActive = user.mfaEnabled && !!user.mfaSecret;
+
+    if (userMfaActive) {
+      // User has MFA set up — challenge them with TOTP verification
+      const mfaToken = jwt.sign(
+        { userId: user.id, email: user.email, purpose: 'mfa-challenge' },
+        env.JWT_SECRET,
+        { expiresIn: '5m', algorithm: JWT_ALGORITHM } as any,
+      );
+      return { mfaRequired: true, mfaToken } as MfaChallengeResponse;
+    }
+
+    if (companyMfaRequired && !user.mfaEnabled) {
+      // Company enforces MFA but user hasn't set it up yet.
+      // Return a setup token — the frontend must redirect to MFA setup.
+      // The user gets a temporary token that ONLY allows /auth/mfa/setup and /auth/mfa/confirm.
+      const mfaSetupToken = jwt.sign(
+        { userId: user.id, email: user.email, purpose: 'mfa-setup' },
+        env.JWT_SECRET,
+        { expiresIn: '10m', algorithm: JWT_ALGORITHM } as any,
+      );
+      logger.info(`User ${user.email} needs MFA setup (company policy enforced)`);
+      return { mfaRequired: true, mfaSetupRequired: true, mfaToken: mfaSetupToken } as any;
+    }
 
     // Resolve employeeId: use the User.employeeId FK if present,
     // otherwise try to find an Employee whose officialEmail matches this user's email.
@@ -117,6 +192,12 @@ export class AuthService {
     });
 
     logger.info(`User logged in: ${user.email}`);
+
+    // Track session + enforce max concurrent sessions
+    const deviceInfo = (loginData as any).deviceInfo ?? 'web';
+    const ipAddress = (loginData as any).ipAddress;
+    await this.cleanExpiredSessions(user.id);
+    await this.trackSession(user.id, tokens.refreshToken, user.companyId, deviceInfo, ipAddress);
 
     return {
       user: {
@@ -306,6 +387,15 @@ export class AuthService {
         throw AuthError.invalidToken();
       }
 
+      // Validate session still exists (not revoked by concurrent session enforcement)
+      const tokenHash = this.hashToken(refreshToken);
+      const session = await platformPrisma.activeSession.findUnique({
+        where: { refreshToken: tokenHash },
+      });
+      if (!session) {
+        throw AuthError.invalidToken();
+      }
+
       // Generate new tokens
       const tokens = await this.generateTokens({
         userId: decoded.userId,
@@ -319,6 +409,17 @@ export class AuthService {
 
       // Blacklist old refresh token for its full 7-day lifespan
       await cacheRedis.setex(createRefreshTokenBlacklistKey(refreshToken), 604800, 'true'); // 7 days
+
+      // Rotate session to new refresh token
+      const newTokenHash = this.hashToken(tokens.refreshToken);
+      await platformPrisma.activeSession.update({
+        where: { id: session.id },
+        data: {
+          refreshToken: newTokenHash,
+          expiresAt: new Date(Date.now() + this.parseExpiresInToSeconds(env.JWT_REFRESH_EXPIRES_IN) * 1000),
+          lastActiveAt: new Date(),
+        },
+      }).catch(() => {});
 
       return tokens;
     } catch (error) {
@@ -346,6 +447,34 @@ export class AuthService {
     const isCurrentPasswordValid = await comparePassword(currentPassword, user.password);
     if (!isCurrentPasswordValid) {
       throw AuthError.invalidCredentials();
+    }
+
+    // ── Enforce password policy from SystemControls ──
+    if (user.companyId) {
+      try {
+        const { getCachedSystemControls } = await import('../../shared/utils/config-cache');
+        const controls = await getCachedSystemControls(user.companyId);
+
+        if (newPassword.length < controls.passwordMinLength) {
+          throw ApiError.badRequest(`Password must be at least ${controls.passwordMinLength} characters`);
+        }
+
+        if (controls.passwordComplexity) {
+          const hasUpper = /[A-Z]/.test(newPassword);
+          const hasLower = /[a-z]/.test(newPassword);
+          const hasDigit = /\d/.test(newPassword);
+          const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword);
+
+          if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
+            throw ApiError.badRequest(
+              'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+            );
+          }
+        }
+      } catch (err) {
+        // Re-throw ApiError (password validation), swallow config fetch errors
+        if (err instanceof ApiError) throw err;
+      }
     }
 
     // Hash new password
@@ -456,11 +585,38 @@ export class AuthService {
       throw AuthError.invalidResetCode();
     }
 
+    // ── Enforce password policy from SystemControls ──
+    if (user.companyId) {
+      try {
+        const { getCachedSystemControls } = await import('../../shared/utils/config-cache');
+        const controls = await getCachedSystemControls(user.companyId);
+
+        if (newPassword.length < controls.passwordMinLength) {
+          throw ApiError.badRequest(`Password must be at least ${controls.passwordMinLength} characters`);
+        }
+
+        if (controls.passwordComplexity) {
+          const hasUpper = /[A-Z]/.test(newPassword);
+          const hasLower = /[a-z]/.test(newPassword);
+          const hasDigit = /\d/.test(newPassword);
+          const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword);
+
+          if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
+            throw ApiError.badRequest(
+              'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+            );
+          }
+        }
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+      }
+    }
+
     // Hash new password and update user
     const hashedPassword = await hashPassword(newPassword);
     await platformPrisma.user.update({
       where: { id: user.id },
-      data: { password: hashedPassword },
+      data: { password: hashedPassword, failedLoginAttempts: 0, lockedUntil: null },
     });
 
     // Mark token as used
@@ -476,17 +632,25 @@ export class AuthService {
   }
 
   // Logout user
-  async logout(userId: string, accessToken: string): Promise<void> {
+  async logout(userId: string, accessToken: string, refreshToken?: string): Promise<void> {
     // Blacklist access token for its full 15-minute lifespan
     await cacheRedis.setex(createAccessTokenBlacklistKey(accessToken), 900, 'true'); // 15 minutes
+
+    // Blacklist and remove session for the refresh token (if provided)
+    if (refreshToken) {
+      await cacheRedis.setex(createRefreshTokenBlacklistKey(refreshToken), 604800, 'true');
+      await this.removeSessionByToken(refreshToken);
+    }
 
     // Clear user auth cache
     await cacheRedis.del(createUserCacheKey(userId, 'auth'));
 
     // Clear all tenant-scoped permissions caches for this user using a pattern scan
-    // Pattern: avy:erp-backend:rbac:user:{userId}:tenant:*:permissions
     const permissionsPattern = createRedisPattern('rbac', `user:${userId}:tenant:*:permissions`);
     await this.deleteByPattern(permissionsPattern);
+
+    // Clean expired sessions
+    await this.cleanExpiredSessions(userId);
 
     logger.info(`User logged out: ${userId}`);
   }
@@ -501,6 +665,69 @@ export class AuthService {
         await cacheRedis.del(...keys);
       }
     } while (cursor !== '0');
+  }
+
+  /** SHA-256 hash of a token for safe DB storage. */
+  private hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Create a session record and enforce maxConcurrentSessions.
+   * When limit exceeded, oldest session is revoked.
+   */
+  private async trackSession(
+    userId: string,
+    refreshToken: string,
+    companyId: string | null | undefined,
+    deviceInfo?: string,
+    ipAddress?: string,
+  ): Promise<void> {
+    const tokenHash = this.hashToken(refreshToken);
+    const expiresAt = new Date(Date.now() + this.parseExpiresInToSeconds(env.JWT_REFRESH_EXPIRES_IN) * 1000);
+
+    await platformPrisma.activeSession.create({
+      data: {
+        userId,
+        refreshToken: tokenHash,
+        expiresAt,
+        ...(deviceInfo != null ? { deviceInfo } : {}),
+        ...(ipAddress != null ? { ipAddress } : {}),
+      },
+    });
+
+    if (!companyId) return; // super-admin has no company-level limits
+
+    let maxSessions = 3;
+    try {
+      const { getCachedSystemControls } = await import('../../shared/utils/config-cache');
+      const controls = await getCachedSystemControls(companyId);
+      maxSessions = controls.maxConcurrentSessions;
+    } catch {}
+
+    const sessions = await platformPrisma.activeSession.findMany({
+      where: { userId, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (sessions.length > maxSessions) {
+      const toRevoke = sessions.slice(0, sessions.length - maxSessions);
+      for (const s of toRevoke) {
+        await platformPrisma.activeSession.delete({ where: { id: s.id } });
+      }
+      logger.info(`Revoked ${toRevoke.length} oldest session(s) for user ${userId} (limit: ${maxSessions})`);
+    }
+  }
+
+  private async removeSessionByToken(refreshToken: string): Promise<void> {
+    const tokenHash = this.hashToken(refreshToken);
+    await platformPrisma.activeSession.deleteMany({ where: { refreshToken: tokenHash } }).catch(() => {});
+  }
+
+  private async cleanExpiredSessions(userId: string): Promise<void> {
+    await platformPrisma.activeSession.deleteMany({
+      where: { userId, expiresAt: { lte: new Date() } },
+    }).catch(() => {});
   }
 
   // Generate JWT tokens
@@ -607,6 +834,196 @@ export class AuthService {
     }
 
     return value * multiplier;
+  }
+  /** Verify TOTP code during MFA-challenged login. Returns full auth tokens. */
+  async verifyMfa(data: MfaVerifyRequest, deviceInfo?: string, ipAddress?: string): Promise<AuthResponse> {
+    let decoded: { userId: string; email: string; purpose: string };
+    try {
+      decoded = jwt.verify(data.mfaToken, env.JWT_SECRET, {
+        algorithms: [JWT_ALGORITHM],
+      }) as any;
+    } catch {
+      throw AuthError.invalidMfaCode();
+    }
+
+    if (decoded.purpose !== 'mfa-challenge') {
+      throw AuthError.invalidMfaCode();
+    }
+
+    const user = await platformPrisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: { company: { include: { tenant: true } } },
+    });
+
+    if (!user || !user.mfaEnabled || !user.mfaSecret) {
+      throw AuthError.invalidMfaCode();
+    }
+
+    const verifyResult = verifySync({ token: data.code, secret: user.mfaSecret });
+    if (!verifyResult.valid) {
+      throw AuthError.invalidMfaCode();
+    }
+
+    // MFA passed — generate tokens (same as normal login completion)
+    const tenantId = user.company?.tenant?.id;
+    let employeeId = user.employeeId ?? undefined;
+    if (!employeeId && user.companyId) {
+      const linked = await platformPrisma.employee.findFirst({
+        where: { companyId: user.companyId, officialEmail: user.email },
+        select: { id: true },
+      });
+      if (linked) {
+        await platformPrisma.user.update({ where: { id: user.id }, data: { employeeId: linked.id } });
+        employeeId = linked.id;
+      }
+    }
+
+    const permissions = await this.getExpandedPermissions(user.id, tenantId, user.companyId);
+    const tokens = await this.generateTokens({
+      userId: user.id, email: user.email,
+      tenantId: tenantId ?? undefined, companyId: user.companyId ?? undefined,
+      employeeId, roleId: user.role, permissions,
+    });
+
+    await this.cacheUserData(user.id, {
+      id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName,
+      tenantId, companyId: user.companyId, employeeId, roleId: user.role, permissions, isActive: user.isActive,
+    });
+
+    await this.cleanExpiredSessions(user.id);
+    await this.trackSession(user.id, tokens.refreshToken, user.companyId, deviceInfo, ipAddress);
+
+    logger.info(`MFA verified for user: ${user.email}`);
+
+    return {
+      user: {
+        id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName,
+        role: user.role, permissions,
+        ...(user.companyId ? { companyId: user.companyId } : {}),
+        ...(tenantId ? { tenantId } : {}),
+        ...(employeeId ? { employeeId } : {}),
+      },
+      tokens,
+    };
+  }
+
+  async setupMfa(userId: string): Promise<MfaSetupResponse> {
+    const user = await platformPrisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw AuthError.invalidCredentials();
+    if (user.mfaEnabled) throw AuthError.mfaAlreadyEnabled();
+
+    const secret = generateSecret();
+    const otpauthUrl = generateURI({ issuer: 'Avy ERP', label: user.email, secret });
+    const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
+
+    // Store secret temporarily (not confirmed yet — mfaEnabled stays false)
+    await platformPrisma.user.update({
+      where: { id: userId },
+      data: { mfaSecret: secret },
+    });
+
+    return { secret, otpauthUrl, qrCodeDataUrl };
+  }
+
+  async confirmMfa(userId: string, code: string): Promise<void> {
+    const user = await platformPrisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.mfaSecret) throw AuthError.invalidMfaCode();
+    if (user.mfaEnabled) throw AuthError.mfaAlreadyEnabled();
+
+    const confirmResult = verifySync({ token: code, secret: user.mfaSecret });
+    if (!confirmResult.valid) throw AuthError.invalidMfaCode();
+
+    await platformPrisma.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: true },
+    });
+
+    await cacheRedis.del(createUserCacheKey(userId, 'auth'));
+    logger.info(`MFA enabled for user: ${user.email}`);
+  }
+
+  /**
+   * Confirm MFA setup AND complete login — used during forced MFA setup flow.
+   * The mfaToken is the setup token issued during login when company enforces MFA.
+   */
+  async confirmMfaAndLogin(mfaToken: string, code: string, deviceInfo?: string, ipAddress?: string): Promise<AuthResponse> {
+    // Decode the setup token
+    let decoded: { userId: string; email: string; purpose: string };
+    try {
+      decoded = jwt.verify(mfaToken, env.JWT_SECRET, {
+        algorithms: [JWT_ALGORITHM],
+      }) as any;
+    } catch {
+      throw AuthError.invalidMfaCode();
+    }
+    if (decoded.purpose !== 'mfa-setup') throw AuthError.invalidMfaCode();
+
+    // Confirm MFA (enables it)
+    await this.confirmMfa(decoded.userId, code);
+
+    // Now complete login — same as verifyMfa flow
+    const user = await platformPrisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: { company: { include: { tenant: true } } },
+    });
+    if (!user) throw AuthError.invalidCredentials();
+
+    const tenantId = user.company?.tenant?.id;
+    let employeeId = user.employeeId ?? undefined;
+    if (!employeeId && user.companyId) {
+      const linked = await platformPrisma.employee.findFirst({
+        where: { companyId: user.companyId, officialEmail: user.email },
+        select: { id: true },
+      });
+      if (linked) {
+        await platformPrisma.user.update({ where: { id: user.id }, data: { employeeId: linked.id } });
+        employeeId = linked.id;
+      }
+    }
+
+    const permissions = await this.getExpandedPermissions(user.id, tenantId, user.companyId);
+    const tokens = await this.generateTokens({
+      userId: user.id, email: user.email,
+      tenantId: tenantId ?? undefined, companyId: user.companyId ?? undefined,
+      employeeId, roleId: user.role, permissions,
+    });
+
+    await this.cacheUserData(user.id, {
+      id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName,
+      tenantId, companyId: user.companyId, employeeId, roleId: user.role, permissions, isActive: user.isActive,
+    });
+
+    await this.cleanExpiredSessions(user.id);
+    await this.trackSession(user.id, tokens.refreshToken, user.companyId, deviceInfo, ipAddress);
+
+    logger.info(`MFA setup confirmed and login completed for: ${user.email}`);
+
+    return {
+      user: {
+        id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName,
+        role: user.role, permissions,
+        ...(user.companyId ? { companyId: user.companyId } : {}),
+        ...(tenantId ? { tenantId } : {}),
+        ...(employeeId ? { employeeId } : {}),
+      },
+      tokens,
+    };
+  }
+
+  async disableMfa(userId: string, password: string): Promise<void> {
+    const user = await platformPrisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw AuthError.invalidCredentials();
+
+    const isValid = await comparePassword(password, user.password);
+    if (!isValid) throw AuthError.invalidCredentials();
+
+    await platformPrisma.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: false, mfaSecret: null },
+    });
+
+    await cacheRedis.del(createUserCacheKey(userId, 'auth'));
+    logger.info(`MFA disabled for user: ${user.email}`);
   }
 }
 

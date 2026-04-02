@@ -99,11 +99,14 @@ export class RbacController {
       }
     }
 
-    const manifest = await rbacService.getNavigationManifest({
+    const manifestParams: Parameters<typeof rbacService.getNavigationManifest>[0] = {
       userPermissions,
       userRole,
       activeModuleIds,
-    });
+    };
+    if (companyId) manifestParams.companyId = companyId;
+
+    const manifest = await rbacService.getNavigationManifest(manifestParams);
 
     res.json(createSuccessResponse(manifest, 'Navigation manifest retrieved'));
   });

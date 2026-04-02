@@ -3,6 +3,7 @@ import { platformPrisma } from '../../config/database';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../config/logger';
 import { emitTicketMessage, emitTicketStatusChange, emitNewTicket, emitTicketResolved } from '../../lib/socket';
+import { generateNextNumber } from '../../shared/utils/number-series';
 
 // ── Status Transition Map ──────────────────────────────────────────
 
@@ -59,10 +60,16 @@ export class SupportService {
       }
     }
 
+    // Generate ticket number from Number Series
+    const ticketNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Support Ticket', 'Support'], 'Support Ticket',
+    );
+
     // Create ticket + initial message in transaction
     const ticket = await platformPrisma.$transaction(async (tx) => {
       const newTicket = await tx.supportTicket.create({
         data: {
+          ticketNumber,
           tenantId,
           companyId,
           companyName,

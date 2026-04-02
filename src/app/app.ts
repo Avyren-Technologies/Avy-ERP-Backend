@@ -88,6 +88,7 @@ if (env.ENABLE_CORS) {
       'Authorization',
       'X-Tenant-ID',
       'X-Requested-With',
+      'X-Device-Info',
     ],
   }));
 }
@@ -150,10 +151,10 @@ if (enableRateLimiting) {
     legacyHeaders: false,
   });
 
-  // Forgot password rate limiter (5 per hour per IP)
+  // Forgot password rate limiter (env-driven)
   const authForgotPasswordLimiter = rateLimit({
-    windowMs: 3600000,
-    max: 5,
+    windowMs: env.AUTH_FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS,
+    max: env.AUTH_FORGOT_PASSWORD_RATE_LIMIT_MAX_REQUESTS,
     message: {
       success: false,
       error: 'Too many password reset attempts. Please try again later.',

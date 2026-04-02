@@ -4,6 +4,9 @@ import { logger } from '../config/logger';
 export async function processApprovalSLAs() {
   logger.info('Running approval SLA enforcement...');
 
+  // Dynamic import to avoid circular dependencies
+  const { essService } = await import('../modules/hr/ess/ess.service');
+
   // Find all PENDING/IN_PROGRESS requests
   const requests = await platformPrisma.approvalRequest.findMany({
     where: { status: { in: ['PENDING', 'IN_PROGRESS'] } },
@@ -37,30 +40,39 @@ export async function processApprovalSLAs() {
     };
     const updatedHistory = [...((request.stepHistory as any[]) ?? []), historyEntry];
 
-    if (currentStepConfig.autoApprove) {
-      // Auto-approve this step
-      const isLastStep = request.currentStep >= steps.length;
-      await platformPrisma.approvalRequest.update({
-        where: { id: request.id },
-        data: {
-          status: isLastStep ? 'AUTO_APPROVED' : 'IN_PROGRESS',
-          currentStep: isLastStep ? request.currentStep : request.currentStep + 1,
-          stepHistory: updatedHistory,
-        },
-      });
-      autoApproved++;
-    } else if (currentStepConfig.autoReject) {
-      await platformPrisma.approvalRequest.update({
-        where: { id: request.id },
-        data: { status: 'AUTO_REJECTED', stepHistory: updatedHistory },
-      });
-      autoRejected++;
-    } else if (currentStepConfig.autoEscalate) {
-      await platformPrisma.approvalRequest.update({
-        where: { id: request.id },
-        data: { status: 'ESCALATED', stepHistory: updatedHistory },
-      });
-      escalated++;
+    try {
+      if (currentStepConfig.autoApprove) {
+        const isLastStep = request.currentStep >= steps.length;
+        await platformPrisma.approvalRequest.update({
+          where: { id: request.id },
+          data: {
+            status: isLastStep ? 'AUTO_APPROVED' : 'IN_PROGRESS',
+            currentStep: isLastStep ? request.currentStep : request.currentStep + 1,
+            stepHistory: updatedHistory,
+          },
+        });
+        // If last step auto-approved, trigger entity update callback
+        if (isLastStep) {
+          await essService.onApprovalComplete(request.companyId, request.entityType, request.entityId, 'APPROVED');
+        }
+        autoApproved++;
+      } else if (currentStepConfig.autoReject) {
+        await platformPrisma.approvalRequest.update({
+          where: { id: request.id },
+          data: { status: 'AUTO_REJECTED', stepHistory: updatedHistory },
+        });
+        // Trigger entity rejection callback
+        await essService.onApprovalComplete(request.companyId, request.entityType, request.entityId, 'REJECTED');
+        autoRejected++;
+      } else if (currentStepConfig.autoEscalate) {
+        await platformPrisma.approvalRequest.update({
+          where: { id: request.id },
+          data: { status: 'ESCALATED', stepHistory: updatedHistory },
+        });
+        escalated++;
+      }
+    } catch (error) {
+      logger.error(`SLA action failed for request ${request.id}:`, error);
     }
   }
 

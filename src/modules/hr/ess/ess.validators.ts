@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { LocationAccuracy } from '@prisma/client';
+import { isValidTriggerEvent } from '../../../shared/constants/trigger-events';
+import { isValidApproverRole } from '../../../shared/constants/approver-roles';
 
 // ── ESS Config (36 fields — spec Screen 6) ──────────────────────────
 
@@ -63,7 +65,10 @@ export const essConfigSchema = z.object({
 
 const workflowStepSchema = z.object({
   stepOrder: z.number().int().min(1),
-  approverRole: z.string().min(1, 'Approver role is required'),
+  approverRole: z.string().min(1, 'Approver role is required').refine(
+    (v) => isValidApproverRole(v),
+    { message: 'Invalid approver role' },
+  ),
   approverId: z.string().optional(),
   slaHours: z.number().min(1),
   autoEscalate: z.boolean().optional().default(false),
@@ -73,7 +78,10 @@ const workflowStepSchema = z.object({
 
 export const createWorkflowSchema = z.object({
   name: z.string().min(1, 'Workflow name is required'),
-  triggerEvent: z.string().min(1, 'Trigger event is required'),
+  triggerEvent: z.string().min(1, 'Trigger event is required').refine(
+    (v) => isValidTriggerEvent(v),
+    { message: 'Invalid trigger event' },
+  ),
   steps: z.array(workflowStepSchema).min(1, 'At least one step is required'),
   isActive: z.boolean().optional().default(true),
 });
@@ -102,7 +110,10 @@ export const updateNotificationTemplateSchema = createNotificationTemplateSchema
 // ── Notification Rules ──────────────────────────────────────────────
 
 export const createNotificationRuleSchema = z.object({
-  triggerEvent: z.string().min(1, 'Trigger event is required'),
+  triggerEvent: z.string().min(1, 'Trigger event is required').refine(
+    (v) => isValidTriggerEvent(v),
+    { message: 'Invalid trigger event' },
+  ),
   templateId: z.string().min(1, 'Template ID is required'),
   recipientRole: z.string().min(1, 'Recipient role is required'),
   channel: z.enum(['EMAIL', 'SMS', 'PUSH', 'IN_APP', 'WHATSAPP']),

@@ -7,7 +7,43 @@ import { logger } from '../../config/logger';
 import { getAllPermissions, REFERENCE_ROLE_PERMISSIONS, hasPermission } from '../../shared/constants/permissions';
 import { NAVIGATION_MANIFEST, getGroupedNavigation, type NavigationItem } from '../../shared/constants/navigation-manifest';
 import { createUserCacheKey, createUserPermissionsCacheKey } from '../../shared/utils';
+import { getCachedSystemControls, getCachedESSConfig } from '../../shared/utils/config-cache';
 import { CreateRoleRequest, UpdateRoleRequest, RoleResponse } from './rbac.types';
+
+// ── Nav Item → ESSConfig field mapping ──────────────────────────────
+// When the ESS config field is false, the nav item is hidden from sidebar.
+const NAV_TO_ESS_CONFIG: Record<string, string> = {
+  'ess-payslips': 'viewPayslips',
+  'ess-leave': 'leaveApplication',
+  'ess-attendance': 'attendanceView',
+  'ess-checkin': 'attendanceView',
+  'ess-holidays': 'holidayCalendar',
+  'ess-goals': 'performanceGoals',
+  'ess-it-dec': 'itDeclaration',
+  'ess-form16': 'downloadForm16',
+  'ess-grievance': 'grievanceSubmission',
+  'ess-training': 'trainingEnrollment',
+  'ess-assets': 'assetView',
+  'ess-shift-swap': 'shiftSwapRequest',
+  'ess-wfh': 'wfhRequest',
+  'ess-documents': 'documentUpload',
+  'ess-policies': 'policyDocuments',
+  'ess-expense-claims': 'reimbursementClaims',
+  'ess-loans': 'loanApplication',
+  'ess-org-chart': 'viewOrgChart',
+  'ess-appraisal': 'appraisalAccess',
+  'ess-chatbot': 'aiChatbotEnabled', // special: checked against SystemControls
+  'ess-helpdesk': 'helpDesk',
+  // Manager self-service
+  'mss-team': 'mssViewTeam',
+  'mss-approvals': 'mssApproveLeave',
+};
+
+// ── Nav Item → SystemControls module field ──────────────────────────
+// When the module is disabled in SystemControls, hide ALL related nav items.
+const NAV_TO_SYSTEM_MODULE: Record<string, string> = {
+  'ess-chatbot': 'aiChatbotEnabled',
+};
 
 export class RbacService {
   // List all roles for a tenant
@@ -224,9 +260,26 @@ export class RbacService {
     userPermissions: string[];
     userRole: string;
     activeModuleIds: string[];
+    companyId?: string;
   }) {
-    const { userPermissions, userRole, activeModuleIds } = params;
+    const { userPermissions, userRole, activeModuleIds, companyId } = params;
     const isSuperAdmin = userRole === 'SUPER_ADMIN';
+
+    // Fetch config for ESS/SystemControls feature gating (company users only)
+    let essConfig: Record<string, unknown> = {};
+    let systemControls: Record<string, unknown> = {};
+    if (companyId && !isSuperAdmin) {
+      try {
+        const [ess, sys] = await Promise.all([
+          getCachedESSConfig(companyId),
+          getCachedSystemControls(companyId),
+        ]);
+        essConfig = (ess ?? {}) as Record<string, unknown>;
+        systemControls = (sys ?? {}) as Record<string, unknown>;
+      } catch {
+        // Non-fatal: if config fetch fails, show all items (permissive fallback)
+      }
+    }
 
     const filtered = NAVIGATION_MANIFEST.filter((item) => {
       // Role scope filter
@@ -238,6 +291,21 @@ export class RbacService {
 
       // Permission filter
       if (item.requiredPerm && !hasPermission(userPermissions, item.requiredPerm)) return false;
+
+      // SystemControls module enablement filter
+      const sysField = NAV_TO_SYSTEM_MODULE[item.id];
+      if (sysField && systemControls[sysField] === false) return false;
+
+      // ESS config feature filter (only for ess-* and mss-* items)
+      const essField = NAV_TO_ESS_CONFIG[item.id];
+      if (essField) {
+        // For aiChatbotEnabled, check SystemControls instead of ESSConfig
+        if (essField === 'aiChatbotEnabled') {
+          if (systemControls[essField] === false) return false;
+        } else if (essConfig[essField] === false) {
+          return false;
+        }
+      }
 
       return true;
     });

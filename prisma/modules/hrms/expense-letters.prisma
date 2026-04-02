@@ -141,6 +141,7 @@ model HRLetterTemplate {
 
 model HRLetter {
   id            String           @id @default(cuid())
+  letterNumber  String?          // Auto-generated via Number Series (e.g. LTR-00001)
   templateId    String
   template      HRLetterTemplate @relation(fields: [templateId], references: [id])
   employeeId    String

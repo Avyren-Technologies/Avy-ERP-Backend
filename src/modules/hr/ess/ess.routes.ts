@@ -15,6 +15,9 @@ router.use(requireModuleEnabled('ess'));
 router.get('/ess-config', requirePermissions(['hr:read']), controller.getESSConfig);
 router.patch('/ess-config', requirePermissions(['hr:update']), controller.updateESSConfig);
 
+// ── Approval Workflow Config ─────────────────────────────────────────
+router.get('/approval-workflow-config', requirePermissions(['hr:read']), controller.getWorkflowConfig);
+
 // ── Approval Workflows ──────────────────────────────────────────────
 router.get('/approval-workflows', requirePermissions(['hr:read']), controller.listWorkflows);
 router.post('/approval-workflows', requirePermissions(['hr:create']), controller.createWorkflow);

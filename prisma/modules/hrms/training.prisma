@@ -6,6 +6,7 @@
 
 model TrainingCatalogue {
   id                    String               @id @default(cuid())
+  catalogueNumber       String?              // Auto-generated via Number Series (e.g. TRN-00001)
   name                  String
   type                  String               @default("TECHNICAL") // TECHNICAL, COMPLIANCE, SOFT_SKILLS, ON_THE_JOB, E_LEARNING
   mode                  TrainingMode         @default(CLASSROOM)

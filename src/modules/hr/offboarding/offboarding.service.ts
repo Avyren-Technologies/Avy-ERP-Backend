@@ -1,6 +1,7 @@
 import { Prisma, SeparationType, ExitStatus, ClearanceStatus, FnFStatus } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { generateNextNumber } from '../../../shared/utils/number-series';
 import { essService } from '../ess/ess.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
@@ -155,11 +156,17 @@ export class OffboardingService {
       lastWorkingDate.setDate(lastWorkingDate.getDate() + noticePeriodDays);
     }
 
+    // Generate exit number from Number Series
+    const exitNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Offboarding', 'Exit Request'], 'Exit Request',
+    );
+
     // Create exit request + clearance records in a transaction
     const exitRequest = await platformPrisma.$transaction(async (tx) => {
       // 1. Create exit request
       const request = await tx.exitRequest.create({
         data: {
+          exitNumber,
           employeeId: data.employeeId,
           separationType: data.separationType,
           resignationDate: resignationDate,

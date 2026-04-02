@@ -15,6 +15,8 @@ import {
   type AttendanceRulesInput,
   type ShiftInfo,
 } from '../../../shared/services/attendance-status-resolver.service';
+import { TRIGGER_EVENTS } from '../../../shared/constants/trigger-events';
+import { APPROVER_ROLES } from '../../../shared/constants/approver-roles';
 import {
   essConfigSchema,
   createWorkflowSchema,
@@ -78,6 +80,15 @@ export class ESSController {
 
     const config = await essService.updateESSConfig(companyId, parsed.data, req.user?.id);
     res.json(createSuccessResponse(config, 'ESS config updated'));
+  });
+
+  // ── Approval Workflow Config (trigger events + approver roles) ────
+
+  getWorkflowConfig = asyncHandler(async (req: Request, res: Response) => {
+    res.json(createSuccessResponse(
+      { triggerEvents: TRIGGER_EVENTS, approverRoles: APPROVER_ROLES },
+      'Workflow configuration retrieved',
+    ));
   });
 
   // ── Approval Workflows ────────────────────────────────────────────

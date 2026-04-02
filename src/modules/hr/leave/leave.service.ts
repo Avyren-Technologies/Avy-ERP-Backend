@@ -730,7 +730,7 @@ export class LeaveService {
       // Generate leave reference number (safe to do before batch — atomic per-row)
       const referenceNumber = await generateNextNumber(
         platformPrisma, companyId, ['Leave Management', 'Leave'], 'Leave Request',
-      ).catch(() => undefined); // Graceful: if no series configured, proceed without
+      );
 
       // Create request and deduct from both years
       const [request] = await platformPrisma.$transaction([
@@ -746,7 +746,7 @@ export class LeaveService {
             halfDayType: n(halfDayType),
             reason,
             status: 'PENDING',
-            ...(referenceNumber ? { referenceNumber } : {}),
+            referenceNumber,
           },
           include: {
             employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
@@ -815,7 +815,7 @@ export class LeaveService {
     // Generate leave reference number (safe to do before batch — atomic per-row)
     const refNumber = await generateNextNumber(
       platformPrisma, companyId, ['Leave Management', 'Leave'], 'Leave Request',
-    ).catch(() => undefined); // Graceful: if no series configured, proceed without
+    );
 
     // Create request and deduct balance (optimistic)
     const [request] = await platformPrisma.$transaction([
@@ -831,7 +831,7 @@ export class LeaveService {
           halfDayType: n(halfDayType),
           reason,
           status: 'PENDING',
-          ...(refNumber ? { referenceNumber: refNumber } : {}),
+          referenceNumber: refNumber,
         },
         include: {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },

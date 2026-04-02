@@ -21,6 +21,7 @@ model AssetCategory {
 
 model Asset {
   id            String            @id @default(cuid())
+  assetNumber   String?           // Auto-generated via Number Series (e.g. AST-00001)
   name          String
   categoryId    String
   category      AssetCategory     @relation(fields: [categoryId], references: [id])

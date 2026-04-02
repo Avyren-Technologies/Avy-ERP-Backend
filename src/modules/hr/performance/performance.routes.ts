@@ -19,7 +19,7 @@ router.patch('/appraisal-cycles/:id/publish-ratings', requirePermissions(['hr:up
 router.patch('/appraisal-cycles/:id/close', requirePermissions(['hr:update']), controller.closeCycle);
 
 // ── Appraisal Entries ──────────────────────────────────────────────
-router.get('/appraisal-entries', requirePermissions(['hr:read']), controller.listAllEntries);
+router.get('/appraisal-entries', requirePermissions(['hr:read', 'ess:submit-appraisal']), controller.listAllEntries);
 router.get('/appraisal-cycles/:cycleId/entries', requirePermissions(['hr:read']), controller.listEntries);
 router.get('/appraisal-cycles/:cycleId/calibration', requirePermissions(['hr:read']), controller.getCalibrationView);
 router.post('/appraisal-entries', requirePermissions(['hr:create']), controller.createEntry);

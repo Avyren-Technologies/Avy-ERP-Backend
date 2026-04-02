@@ -6,6 +6,7 @@
 
 model ExitRequest {
   id                    String          @id @default(cuid())
+  exitNumber            String?         // Auto-generated via Number Series (e.g. OFF-00001)
   employeeId            String
   employee              Employee        @relation(fields: [employeeId], references: [id])
   separationType        SeparationType

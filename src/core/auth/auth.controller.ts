@@ -1,20 +1,36 @@
 import { Request, Response } from 'express';
 import { env } from '../../config/env';
 import { authService } from './auth.service';
-import { AuthError } from '../../shared/errors';
+import { AuthError, ApiError } from '../../shared/errors';
 import { validateLogin, validateRegister, validateRefreshToken, validateChangePassword, validateForgotPassword, validateVerifyResetCode, validateResetPassword } from '../../shared/validators';
 import { createSuccessResponse } from '../../shared/utils';
 import type { LoginRequest, RegisterRequest, RefreshTokenRequest, ChangePasswordRequest, ForgotPasswordRequest, VerifyResetCodeRequest, ResetPasswordRequest } from './auth.types';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { platformPrisma } from '../../config/database';
+import jwt from 'jsonwebtoken';
 
 export class AuthController {
+  /** Extract userId from an MFA token (setup or challenge), returns null if invalid. */
+  private async resolveUserIdFromMfaToken(mfaToken: string | undefined, expectedPurpose: string): Promise<string | null> {
+    if (!mfaToken) return null;
+    try {
+      const decoded = jwt.verify(mfaToken, env.JWT_SECRET) as { userId: string; purpose: string };
+      if (decoded.purpose !== expectedPurpose) return null;
+      return decoded.userId;
+    } catch {
+      return null;
+    }
+  }
+
   // Login
   login = asyncHandler(async (req: Request, res: Response) => {
     const loginData = validateLogin(req.body) as LoginRequest;
+    (loginData as any).deviceInfo = req.headers['x-device-info'] || 'web';
+    (loginData as any).ipAddress = req.ip || req.socket.remoteAddress;
     const result = await authService.login(loginData);
 
-    res.json(createSuccessResponse(result, 'Login successful'));
+    const message = result && 'mfaRequired' in result ? 'MFA verification required' : 'Login successful';
+    res.json(createSuccessResponse(result, message));
   });
 
   // Register
@@ -53,7 +69,9 @@ export class AuthController {
       throw AuthError.missingToken();
     }
 
-    await authService.logout(req.user!.id, token);
+    // Accept optional refreshToken in body for proper session cleanup
+    const refreshToken = req.body?.refreshToken as string | undefined;
+    await authService.logout(req.user!.id, token, refreshToken);
 
     res.json(createSuccessResponse(null, 'Logout successful'));
   });
@@ -118,6 +136,80 @@ export class AuthController {
         companyId: user.companyId,
       },
     }));
+  });
+
+  // Security settings — returns session timeout and biometric settings for ANY authenticated user
+  // No permission check needed (used by session timeout hook and biometric login)
+  getSecuritySettings = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      // Super admin — return defaults
+      res.json(createSuccessResponse({
+        sessionTimeoutMinutes: 30,
+        biometricLoginEnabled: false,
+        mfaRequired: false,
+      }));
+      return;
+    }
+
+    const { getCachedSystemControls } = await import('../../shared/utils/config-cache');
+    const controls = await getCachedSystemControls(companyId);
+    res.json(createSuccessResponse({
+      sessionTimeoutMinutes: controls.sessionTimeoutMinutes,
+      biometricLoginEnabled: controls.biometricLoginEnabled,
+      mfaRequired: controls.mfaRequired,
+    }));
+  });
+
+  // Verify MFA
+  verifyMfa = asyncHandler(async (req: Request, res: Response) => {
+    const { mfaToken, code } = req.body;
+    if (!mfaToken || !code) throw ApiError.badRequest('MFA token and code are required');
+
+    const deviceInfo = req.headers['x-device-info'] as string | undefined;
+    const ipAddress = req.ip || req.socket.remoteAddress;
+    const result = await authService.verifyMfa({ mfaToken, code }, deviceInfo, ipAddress);
+    res.json(createSuccessResponse(result, 'MFA verified'));
+  });
+
+  // Setup MFA — accepts either auth token OR mfaToken (for forced setup flow)
+  setupMfa = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.id ?? await this.resolveUserIdFromMfaToken(req.body?.mfaToken, 'mfa-setup');
+    if (!userId) throw ApiError.badRequest('Authentication or MFA setup token required');
+    const result = await authService.setupMfa(userId);
+    res.json(createSuccessResponse(result, 'MFA setup initiated'));
+  });
+
+  // Confirm MFA — accepts either auth token OR mfaToken (for forced setup flow)
+  // When using mfaToken: also returns full auth tokens (completes login)
+  confirmMfa = asyncHandler(async (req: Request, res: Response) => {
+    const { code, mfaToken } = req.body;
+    if (!code) throw ApiError.badRequest('TOTP code is required');
+
+    // If mfaToken is provided, this is the forced-setup flow — confirm + complete login
+    if (mfaToken) {
+      const deviceInfo = req.headers['x-device-info'] as string | undefined;
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const result = await authService.confirmMfaAndLogin(mfaToken, code, deviceInfo, ipAddress);
+      res.json(createSuccessResponse(result, 'MFA enabled and login complete'));
+      return;
+    }
+
+    // Normal flow — authenticated user enabling MFA from settings
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('Authentication required');
+    await authService.confirmMfa(userId, code);
+    res.json(createSuccessResponse(null, 'MFA enabled successfully'));
+  });
+
+  // Disable MFA
+  disableMfa = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('Authentication required');
+    const { password } = req.body;
+    if (!password) throw ApiError.badRequest('Password is required to disable MFA');
+    await authService.disableMfa(userId, password);
+    res.json(createSuccessResponse(null, 'MFA disabled successfully'));
   });
 }
 

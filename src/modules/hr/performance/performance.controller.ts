@@ -4,6 +4,7 @@ import { performanceService } from './performance.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../../shared/utils';
 import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError } from '../../../shared/errors';
+import { hasPermission } from '../../../shared/constants/permissions';
 import {
   createAppraisalCycleSchema,
   updateAppraisalCycleSchema,
@@ -198,6 +199,13 @@ export class PerformanceController {
     if (req.query.cycleId) where.cycleId = req.query.cycleId as string;
     if (req.query.status) where.status = (req.query.status as string).toUpperCase();
     if (req.query.employeeId) where.employeeId = req.query.employeeId as string;
+
+    // ESS users (no hr:read): auto-scope to their own employee record
+    const userPermissions = req.user?.permissions ?? [];
+    const hasHrRead = hasPermission(userPermissions, 'hr:read');
+    if (!hasHrRead && req.user?.employeeId) {
+      where.employeeId = req.user.employeeId;
+    }
 
     const skip = (page - 1) * limit;
     const [entries, total] = await Promise.all([

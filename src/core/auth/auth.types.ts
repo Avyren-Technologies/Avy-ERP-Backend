@@ -72,3 +72,21 @@ export interface ResetPasswordRequest {
   code: string;
   newPassword: string;
 }
+
+export interface MfaChallengeResponse {
+  mfaRequired: true;
+  mfaToken: string;
+}
+
+export interface MfaVerifyRequest {
+  mfaToken: string;
+  code: string;
+}
+
+export interface MfaSetupResponse {
+  secret: string;
+  otpauthUrl: string;
+  qrCodeDataUrl: string;
+}
+
+export type LoginResult = AuthResponse | MfaChallengeResponse;

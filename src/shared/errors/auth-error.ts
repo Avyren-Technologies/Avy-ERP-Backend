@@ -49,4 +49,16 @@ export class AuthError extends ApiError {
   static resetCodeExpired(): AuthError {
     return new AuthError('Reset code has expired', 'RESET_CODE_EXPIRED');
   }
+
+  static mfaRequired(): AuthError {
+    return new AuthError('MFA verification required', 'MFA_REQUIRED');
+  }
+
+  static invalidMfaCode(): AuthError {
+    return new AuthError('Invalid or expired MFA code', 'INVALID_MFA_CODE');
+  }
+
+  static mfaAlreadyEnabled(): AuthError {
+    return new AuthError('MFA is already enabled for this account', 'MFA_ALREADY_ENABLED');
+  }
 }

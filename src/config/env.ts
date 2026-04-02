@@ -81,6 +81,8 @@ const envSchema = z.object({
   AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(5),
   AUTH_REFRESH_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(900000),
   AUTH_REFRESH_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(20),
+  AUTH_FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(3600000),
+  AUTH_FORGOT_PASSWORD_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(5),
 
   // File Upload
   MAX_FILE_SIZE: z.coerce.number().default(10485760), // 10MB

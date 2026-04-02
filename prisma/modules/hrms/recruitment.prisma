@@ -5,8 +5,9 @@
 // Enums: RequisitionStatus, CandidateStage, InterviewStatus
 
 model JobRequisition {
-  id             String            @id @default(cuid())
-  title          String
+  id                 String            @id @default(cuid())
+  requisitionNumber  String?           // Auto-generated via Number Series (e.g. REC-00001)
+  title              String
   designationId  String?
   designation    Designation?      @relation("RequisitionDesignation", fields: [designationId], references: [id])
   departmentId   String?

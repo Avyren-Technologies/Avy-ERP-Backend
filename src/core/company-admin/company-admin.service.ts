@@ -815,6 +815,7 @@ export class CompanyAdminService {
         ...(data.passwordComplexity !== undefined && { passwordComplexity: data.passwordComplexity }),
         ...(data.accountLockThreshold !== undefined && { accountLockThreshold: data.accountLockThreshold }),
         ...(data.accountLockDurationMinutes !== undefined && { accountLockDurationMinutes: data.accountLockDurationMinutes }),
+        ...(data.biometricLoginEnabled !== undefined && { biometricLoginEnabled: data.biometricLoginEnabled }),
         ...(data.auditLogRetentionDays !== undefined && { auditLogRetentionDays: data.auditLogRetentionDays }),
         updatedBy: userId ?? null,
       },

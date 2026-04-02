@@ -6,6 +6,7 @@
 
 model SupportTicket {
   id               String         @id @default(cuid())
+  ticketNumber     String?        // Auto-generated via Number Series (e.g. TKT-00001)
   tenantId         String
   companyId        String
   companyName      String
