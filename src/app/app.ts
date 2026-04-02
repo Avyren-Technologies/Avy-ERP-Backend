@@ -177,6 +177,24 @@ if (enableRateLimiting) {
   app.use(`${env.API_PREFIX}/auth/forgot-password`, authForgotPasswordLimiter);
   app.use(`${env.API_PREFIX}/auth/verify-reset-code`, authForgotPasswordLimiter);
   app.use(`${env.API_PREFIX}/auth/reset-password`, authForgotPasswordLimiter);
+
+  // Rate limit: company registration — 3 per IP per hour
+  app.use(`${env.API_PREFIX}/auth/register-company`, rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    message: { success: false, message: 'Too many registration attempts. Please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  }));
+
+  // Rate limit: tenant branding — 30 per IP per minute
+  app.use(`${env.API_PREFIX}/auth/tenant-branding`, rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    message: { success: false, message: 'Too many requests. Please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  }));
 }
 
 // Logging middleware
