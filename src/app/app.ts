@@ -187,10 +187,10 @@ if (enableRateLimiting) {
     legacyHeaders: false,
   }));
 
-  // Rate limit: tenant branding — 30 per IP per minute
+  // Rate limit: tenant branding — 10 per IP per minute
   app.use(`${env.API_PREFIX}/auth/tenant-branding`, rateLimit({
     windowMs: 60 * 1000,
-    max: 30,
+    max: 10,
     message: { success: false, message: 'Too many requests. Please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,

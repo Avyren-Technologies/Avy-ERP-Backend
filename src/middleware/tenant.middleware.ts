@@ -17,11 +17,13 @@ const RESERVED_SLUGS = new Set([
 export function tenantMiddleware() {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     try {
-      const tenantId = extractTenantFromRequest(req);
+      const extraction = extractTenantFromRequest(req);
 
-      if (!tenantId) {
+      if (!extraction) {
         return next();
       }
+
+      const { tenantId, method: resolutionMethod } = extraction;
 
       // Try cache first
       const tenantKey = createTenantCacheKey(tenantId);
@@ -65,8 +67,8 @@ export function tenantMiddleware() {
           dbStrategy: dbTenant.dbStrategy,
         });
 
-        // Cache for 24 hours
-        await cacheRedis.setex(tenantKey, 86400, tenantDataStr);
+        // Cache for 1 hour (faster propagation of status changes)
+        await cacheRedis.setex(tenantKey, 3600, tenantDataStr);
       }
 
       const tenant = JSON.parse(tenantDataStr);
@@ -94,7 +96,7 @@ export function tenantMiddleware() {
         hostname: req.hostname,
         tenantId: tenant.id,
         slug: tenant.slug,
-        method: req.headers['x-tenant-id'] ? 'header' : 'auto',
+        method: resolutionMethod,
       });
 
       next();
@@ -104,10 +106,10 @@ export function tenantMiddleware() {
   };
 }
 
-function extractTenantFromRequest(req: Request): string | null {
+function extractTenantFromRequest(req: Request): { tenantId: string; method: string } | null {
   // Priority 1: Custom header (X-Tenant-ID)
   const tenantHeader = req.headers['x-tenant-id'] as string;
-  if (tenantHeader) return tenantHeader;
+  if (tenantHeader) return { tenantId: tenantHeader, method: 'header' };
 
   // Priority 2: Subdomain
   const host = req.headers.host?.split(':')[0]; // strip port
@@ -119,7 +121,7 @@ function extractTenantFromRequest(req: Request): string | null {
       if (host !== mainDomain && host.endsWith(`.${mainDomain}`)) {
         const slug = host.replace(`.${mainDomain}`, '');
         if (slug && !RESERVED_SLUGS.has(slug)) {
-          return slug;
+          return { tenantId: slug, method: 'subdomain' };
         }
       }
     }
@@ -127,14 +129,14 @@ function extractTenantFromRequest(req: Request): string | null {
 
   // Priority 3: Query parameter
   const tenantQuery = req.query.tenantId as string;
-  if (tenantQuery) return tenantQuery;
+  if (tenantQuery) return { tenantId: tenantQuery, method: 'query' };
 
   // Priority 4: Path parameter
   const tenantPath = req.params.tenantId;
-  if (tenantPath) return tenantPath;
+  if (tenantPath) return { tenantId: tenantPath, method: 'path' };
 
   // Priority 5: User context from JWT
-  if (req.user?.tenantId) return req.user.tenantId;
+  if (req.user?.tenantId) return { tenantId: req.user.tenantId, method: 'jwt' };
 
   return null;
 }
