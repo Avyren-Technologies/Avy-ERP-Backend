@@ -23,8 +23,9 @@ model SupportTicket {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  messages SupportMessage[]
+  company             Company                      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  messages            SupportMessage[]
+  registrationRequest CompanyRegistrationRequest?
 
   @@index([tenantId])
   @@index([companyId])
