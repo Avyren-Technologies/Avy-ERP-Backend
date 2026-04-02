@@ -202,6 +202,40 @@ export class AuthController {
     res.json(createSuccessResponse(null, 'MFA enabled successfully'));
   });
 
+  /** GET /auth/tenant-branding?slug=<slug> — Public endpoint for subdomain login branding */
+  tenantBranding = asyncHandler(async (req: Request, res: Response) => {
+    const slug = req.query.slug as string;
+    if (!slug) {
+      return res.json(createSuccessResponse({ exists: false }));
+    }
+
+    const tenant = await platformPrisma.tenant.findUnique({
+      where: { slug },
+      select: {
+        id: true,
+        status: true,
+        company: {
+          select: {
+            displayName: true,
+            name: true,
+            logoUrl: true,
+          },
+        },
+      },
+    });
+
+    // Generic response for invalid slugs (prevents enumeration)
+    if (!tenant || tenant.status === 'CANCELLED') {
+      return res.json(createSuccessResponse({ exists: false }));
+    }
+
+    return res.json(createSuccessResponse({
+      exists: true,
+      companyName: tenant.company.displayName || tenant.company.name,
+      logoUrl: tenant.company.logoUrl,
+    }));
+  });
+
   // Disable MFA
   disableMfa = asyncHandler(async (req: Request, res: Response) => {
     const userId = req.user?.id;
