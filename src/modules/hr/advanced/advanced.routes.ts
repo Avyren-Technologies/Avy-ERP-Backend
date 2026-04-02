@@ -136,7 +136,7 @@ router.delete('/hr-letters/:id', requirePermissions(['hr:delete']), controller.d
 // ═══════════════════════════════════════════════════════════════════
 // GRIEVANCE — Categories
 // ═══════════════════════════════════════════════════════════════════
-router.get('/grievance-categories', requirePermissions(['hr:read']), controller.listGrievanceCategories);
+router.get('/grievance-categories', requirePermissions(['hr:read', 'ess:raise-grievance']), controller.listGrievanceCategories);
 router.post('/grievance-categories', requirePermissions(['hr:create']), controller.createGrievanceCategory);
 router.get('/grievance-categories/:id', requirePermissions(['hr:read']), controller.getGrievanceCategory);
 router.patch('/grievance-categories/:id', requirePermissions(['hr:update']), controller.updateGrievanceCategory);

@@ -1,7 +1,9 @@
 import { Prisma, AttendanceStatus } from '@prisma/client';
+import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
+import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -588,23 +590,25 @@ export class LeaveService {
       });
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-      const current = new Date(from);
-      current.setHours(0, 0, 0, 0);
-      const endDate = new Date(to);
-      endDate.setHours(0, 0, 0, 0);
+      // Use company timezone for correct day-of-week calculation
+      const companySettings = await getCachedCompanySettings(companyId);
+      const tz = companySettings.timezone ?? 'Asia/Kolkata';
+
+      let currentDt = DateTime.fromJSDate(from, { zone: tz }).startOf('day');
+      const endDt = DateTime.fromJSDate(to, { zone: tz }).startOf('day');
       let hasWorkingDay = false;
 
-      while (current <= endDate) {
-        const dateStr = current.toISOString().split('T')[0];
-        const dow = dayNames[current.getDay()];
-        const isHoliday = leaveHolidayDates.has(dateStr!);
+      while (currentDt <= endDt) {
+        const dateStr = currentDt.toFormat('yyyy-MM-dd');
+        const dow = dayNames[currentDt.weekday % 7];
+        const isHoliday = leaveHolidayDates.has(dateStr);
         const isWeekOff = roster ? (dow === roster.weekOff1 || dow === roster.weekOff2) : false;
 
         if (!isHoliday && !isWeekOff) {
           hasWorkingDay = true;
           break;
         }
-        current.setDate(current.getDate() + 1);
+        currentDt = currentDt.plus({ days: 1 });
       }
 
       if (!hasWorkingDay) {
@@ -1443,7 +1447,9 @@ export class LeaveService {
   // ────────────────────────────────────────────────────────────────────
 
   async getLeaveSummary(companyId: string) {
-    const currentYear = new Date().getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+    const currentYear = DateTime.now().setZone(companyTimezone).year;
 
     const [pendingCount, leaveTypeDistribution, topAbsentees] = await Promise.all([
       // Pending approvals count
@@ -1519,10 +1525,13 @@ export class LeaveService {
     leaveType: { weekendSandwich: boolean; holidaySandwich: boolean }
   ): Promise<number> {
     let days = 0;
-    const current = new Date(from);
-    current.setHours(0, 0, 0, 0);
-    const end = new Date(to);
-    end.setHours(0, 0, 0, 0);
+
+    // Use company timezone for correct day-of-week calculation
+    const companySettings = await getCachedCompanySettings(companyId);
+    const tz = companySettings.timezone ?? 'Asia/Kolkata';
+
+    let currentDt = DateTime.fromJSDate(from, { zone: tz }).startOf('day');
+    const endDt = DateTime.fromJSDate(to, { zone: tz }).startOf('day');
 
     // Always fetch holidays in the date range — needed both for sandwich inclusion
     // and for exclusion when holidaySandwich=false
@@ -1534,13 +1543,13 @@ export class LeaveService {
       select: { date: true },
     });
     const holidayDates: Set<string> = new Set(
-      holidays.map((h) => h.date.toISOString().split('T')[0] as string)
+      holidays.map((h) => DateTime.fromJSDate(h.date, { zone: tz }).toFormat('yyyy-MM-dd'))
     );
 
-    while (current <= end) {
-      const dayOfWeek = current.getDay(); // 0=Sunday, 6=Saturday
+    while (currentDt <= endDt) {
+      const dayOfWeek = currentDt.weekday % 7; // 0=Sunday, 6=Saturday (matching JS convention)
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      const dateStr = current.toISOString().split('T')[0];
+      const dateStr = currentDt.toFormat('yyyy-MM-dd');
       const isHoliday = holidayDates.has(dateStr!);
 
       if (isWeekend) {
@@ -1558,7 +1567,7 @@ export class LeaveService {
         days++;
       }
 
-      current.setDate(current.getDate() + 1);
+      currentDt = currentDt.plus({ days: 1 });
     }
 
     return days;

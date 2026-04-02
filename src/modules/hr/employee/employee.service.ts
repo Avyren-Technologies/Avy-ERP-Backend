@@ -1,8 +1,10 @@
 import { Prisma } from '@prisma/client';
+import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
 import { hashPassword, generateNextNumber } from '../../../shared/utils';
+import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { LeaveService } from '../leave/leave.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
@@ -379,11 +381,13 @@ export class EmployeeService {
         });
 
     // ── Post-creation seeding (non-blocking — failures are logged, not thrown) ──
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
 
     // 1. Initialize leave balances for the current year
     try {
       const leaveService = new LeaveService();
-      const currentYear = new Date().getFullYear();
+      const currentYear = DateTime.now().setZone(companyTimezone).year;
       await leaveService.initializeBalances(companyId, {
         employeeId: employee.id,
         year: currentYear,
@@ -417,9 +421,9 @@ export class EmployeeService {
 
     // 3. Create IT declaration placeholder for the current financial year
     try {
-      const now = new Date();
-      // Indian financial year: April to March. If month < April (0-indexed: 3), FY started previous year.
-      const fyStartYear = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+      const nowDt = DateTime.now().setZone(companyTimezone);
+      // Indian financial year: April to March. If month < April (Luxon 1-indexed: 4), FY started previous year.
+      const fyStartYear = nowDt.month < 4 ? nowDt.year - 1 : nowDt.year;
       const financialYear = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`;
 
       await platformPrisma.iTDeclaration.create({

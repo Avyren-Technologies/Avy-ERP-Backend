@@ -75,10 +75,13 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         const tenantId = dbUser.company?.tenant?.id;
 
         // Resolve permissions dynamically from RBAC system
-        // SUPER_ADMIN always gets wildcard; others get permissions from their TenantUser→Role
+        // SUPER_ADMIN and COMPANY_ADMIN get wildcard; others get permissions from their TenantUser→Role
         // Then apply: (1) inheritance expansion, (2) module-aware suppression
         let permissions: string[] = [];
         if (dbUser.role === 'SUPER_ADMIN') {
+          permissions = ['*'];
+        } else if (dbUser.role === 'COMPANY_ADMIN') {
+          // Company admins always get full access to their company's resources
           permissions = ['*'];
         } else if (tenantId) {
           const rawPermissions = await rbacService.getUserPermissions(dbUser.id, tenantId);

@@ -172,7 +172,35 @@ export class LeaveController {
 
     const { page, limit } = getPaginationParams(req.query);
     const opts: { page: number; limit: number; employeeId?: string; status?: string; fromDate?: string; toDate?: string } = { page, limit };
-    if (req.query.employeeId) opts.employeeId = req.query.employeeId as string;
+    if (req.query.employeeId) {
+      if (req.query.employeeId === 'me') {
+        // Resolve "me" to the current user's linked employee ID
+        let empId = req.user?.employeeId;
+        if (!empId) {
+          // Fallback: look up from DB in case JWT/cache is stale
+          const { platformPrisma } = await import('../../../config/database');
+          const user = await platformPrisma.user.findUnique({
+            where: { id: req.user!.id },
+            select: { employeeId: true, email: true },
+          });
+          empId = user?.employeeId ?? undefined;
+          // Try email-based auto-link if no direct link
+          if (!empId && user?.email) {
+            const emp = await platformPrisma.employee.findFirst({
+              where: { companyId, status: { not: 'EXITED' }, OR: [{ officialEmail: user.email }, { personalEmail: user.email }] },
+              select: { id: true },
+            });
+            if (emp) {
+              await platformPrisma.user.update({ where: { id: req.user!.id }, data: { employeeId: emp.id } });
+              empId = emp.id;
+            }
+          }
+        }
+        if (empId) opts.employeeId = empId;
+      } else {
+        opts.employeeId = req.query.employeeId as string;
+      }
+    }
     if (req.query.status) opts.status = req.query.status as string;
     if (req.query.fromDate) opts.fromDate = req.query.fromDate as string;
     if (req.query.toDate) opts.toDate = req.query.toDate as string;

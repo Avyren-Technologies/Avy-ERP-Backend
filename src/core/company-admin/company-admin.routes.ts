@@ -18,8 +18,9 @@ router.delete('/locations/:id', requirePermissions(['company:delete']), controll
 
 
 // ── Shifts ──────────────────────────────────────────────────────────
-router.get('/shifts', requirePermissions(['company:read']), controller.listShifts);
-router.get('/shifts/:id', requirePermissions(['company:read']), controller.getShift);
+// ESS employees need shift list for shift swap requests
+router.get('/shifts', requirePermissions(['company:read', 'ess:swap-shift']), controller.listShifts);
+router.get('/shifts/:id', requirePermissions(['company:read', 'ess:swap-shift']), controller.getShift);
 router.post('/shifts', requirePermissions(['company:create']), controller.createShift);
 router.patch('/shifts/:id', requirePermissions(['company:update']), controller.updateShift);
 router.delete('/shifts/:id', requirePermissions(['company:delete']), controller.deleteShift);
@@ -71,7 +72,8 @@ router.get('/controls', requirePermissions(['company:read']), controller.getCont
 router.patch('/controls', requirePermissions(['company:update']), controller.updateControls);
 
 // ── Settings ────────────────────────────────────────────────────────
-router.get('/settings', requirePermissions(['company:read']), controller.getSettings);
+// All authenticated users need settings for locale/timezone/date-format (useCompanyFormatter)
+router.get('/settings', requirePermissions(['company:read', 'ess:view-profile']), controller.getSettings);
 router.patch('/settings', requirePermissions(['company:update']), controller.updateSettings);
 
 // ── Users ───────────────────────────────────────────────────────────

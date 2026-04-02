@@ -752,6 +752,25 @@ export class ESSService {
     }
   }
 
+  /**
+   * Validate that an active approval workflow exists for a trigger event.
+   * Call this BEFORE creating the entity to avoid orphaned records.
+   * Throws a user-friendly error if no workflow is configured.
+   */
+  async requireWorkflow(companyId: string, triggerEvent: string): Promise<void> {
+    const workflow = await platformPrisma.approvalWorkflow.findUnique({
+      where: { companyId_triggerEvent: { companyId, triggerEvent } },
+    });
+
+    if (!workflow || !workflow.isActive) {
+      const { TRIGGER_EVENTS } = await import('../../../shared/constants/trigger-events');
+      const eventLabel = TRIGGER_EVENTS.find(e => e.value === triggerEvent)?.label ?? triggerEvent;
+      throw ApiError.badRequest(
+        `No approval workflow is configured for "${eventLabel}". Please ask your Company Admin or HR to set up an approval workflow for this request type before proceeding.`,
+      );
+    }
+  }
+
   async createRequest(companyId: string, data: {
     requesterId: string;
     entityType: string;
@@ -759,14 +778,17 @@ export class ESSService {
     triggerEvent: string;
     data?: any;
   }) {
-    // Find matching workflow
+    // Find matching workflow — requireWorkflow() should have been called before entity creation
     const workflow = await platformPrisma.approvalWorkflow.findUnique({
       where: { companyId_triggerEvent: { companyId, triggerEvent: data.triggerEvent } },
     });
 
     if (!workflow || !workflow.isActive) {
-      // No active workflow — auto-approve
-      return null;
+      const { TRIGGER_EVENTS } = await import('../../../shared/constants/trigger-events');
+      const eventLabel = TRIGGER_EVENTS.find(e => e.value === data.triggerEvent)?.label ?? data.triggerEvent;
+      throw ApiError.badRequest(
+        `No approval workflow is configured for "${eventLabel}". Please ask your Company Admin or HR to set up an approval workflow for this request type before proceeding.`,
+      );
     }
 
     return platformPrisma.approvalRequest.create({
@@ -1528,7 +1550,9 @@ export class ESSService {
   }
 
   async getMyLeaveBalance(companyId: string, employeeId: string) {
-    const currentYear = new Date().getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+    const currentYear = DateTime.now().setZone(companyTimezone).year;
     const balances = await platformPrisma.leaveBalance.findMany({
       where: { companyId, employeeId, year: currentYear },
       include: {
@@ -1582,6 +1606,9 @@ export class ESSService {
       throw ApiError.notFound('Employee not found');
     }
 
+    // Validate approval workflow exists BEFORE creating the leave request
+    await this.requireWorkflow(companyId, 'LEAVE_APPLICATION');
+
     // Create leave request
     const leaveRequest = await platformPrisma.leaveRequest.create({
       data: {
@@ -1598,8 +1625,11 @@ export class ESSService {
       },
     });
 
-    // Create approval request if workflow exists
-    const leaveApproval = await this.createRequest(companyId, {
+    // Deduct leave balance immediately on application
+    await this.deductLeaveBalance(companyId, employeeId, data.leaveTypeId, Number(data.days), new Date(data.fromDate), new Date(data.toDate));
+
+    // Create approval request — workflow is guaranteed to exist
+    await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'LeaveRequest',
       entityId: leaveRequest.id,
@@ -1614,11 +1644,6 @@ export class ESSService {
       },
     });
 
-    // If no active workflow, auto-approve
-    if (!leaveApproval) {
-      await this.onApprovalComplete(companyId, 'LeaveRequest', leaveRequest.id, 'APPROVED');
-    }
-
     // Trigger notification
     await this.triggerNotification(companyId, 'LEAVE_APPLICATION', {
       employee_name: employee.employeeId,
@@ -1628,6 +1653,80 @@ export class ESSService {
     });
 
     return leaveRequest;
+  }
+
+  /**
+   * Deduct leave balance when a leave application is submitted.
+   * Handles cross-year leave requests by splitting days between years.
+   * Balance is refunded if the request is later rejected via `leaveService.rejectRequest`.
+   */
+  private async deductLeaveBalance(
+    companyId: string,
+    employeeId: string,
+    leaveTypeId: string,
+    days: number,
+    fromDate: Date,
+    toDate: Date,
+  ): Promise<void> {
+    const fromYear = fromDate.getFullYear();
+    const toYear = toDate.getFullYear();
+
+    if (fromYear !== toYear) {
+      // Cross-year: split deduction between both years
+      const yearEnd = new Date(fromYear, 11, 31);
+      yearEnd.setHours(0, 0, 0, 0);
+      const from = new Date(fromDate);
+      from.setHours(0, 0, 0, 0);
+      const daysInFromYear = Math.round(
+        (yearEnd.getTime() - from.getTime()) / (1000 * 3600 * 24) + 1,
+      );
+      const daysInToYear = days - daysInFromYear;
+
+      const operations: any[] = [];
+
+      if (daysInFromYear > 0) {
+        const bal = await platformPrisma.leaveBalance.findUnique({
+          where: { employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year: fromYear } },
+        });
+        if (bal) {
+          operations.push(
+            platformPrisma.leaveBalance.update({
+              where: { id: bal.id },
+              data: { taken: { increment: daysInFromYear }, balance: { decrement: daysInFromYear } },
+            }),
+          );
+        }
+      }
+
+      if (daysInToYear > 0) {
+        const bal = await platformPrisma.leaveBalance.findUnique({
+          where: { employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year: toYear } },
+        });
+        if (bal) {
+          operations.push(
+            platformPrisma.leaveBalance.update({
+              where: { id: bal.id },
+              data: { taken: { increment: daysInToYear }, balance: { decrement: daysInToYear } },
+            }),
+          );
+        }
+      }
+
+      if (operations.length > 0) {
+        await platformPrisma.$transaction(operations);
+      }
+    } else {
+      // Same-year deduction
+      const balance = await platformPrisma.leaveBalance.findUnique({
+        where: { employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year: fromYear } },
+      });
+      if (balance) {
+        await platformPrisma.leaveBalance.update({
+          where: { id: balance.id },
+          data: { taken: { increment: days }, balance: { decrement: days } },
+        });
+      }
+    }
   }
 
   async regularizeAttendance(companyId: string, employeeId: string, data: any) {
@@ -1655,9 +1754,11 @@ export class ESSService {
     }
 
     // 4. Check payroll lock (payrollRun for that month must be DRAFT or not exist)
-    const recordDate = new Date(record.date);
-    const recordMonth = recordDate.getMonth() + 1;
-    const recordYear = recordDate.getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+    const dtRecord = DateTime.fromJSDate(new Date(record.date)).setZone(companyTimezone);
+    const recordMonth = dtRecord.month;
+    const recordYear = dtRecord.year;
 
     const payrollRun = await platformPrisma.payrollRun.findUnique({
       where: { companyId_month_year: { companyId, month: recordMonth, year: recordYear } },
@@ -1669,7 +1770,10 @@ export class ESSService {
       );
     }
 
-    // 5. Create AttendanceOverride with requestedBy = employeeId, status = PENDING
+    // 5. Validate approval workflow exists BEFORE creating the override
+    await this.requireWorkflow(companyId, 'ATTENDANCE_REGULARIZATION');
+
+    // 6. Create AttendanceOverride with requestedBy = employeeId, status = PENDING
     const override = await platformPrisma.attendanceOverride.create({
       data: {
         companyId,
@@ -1683,8 +1787,8 @@ export class ESSService {
       },
     });
 
-    // 6. Wire into approval workflow via createRequest (Employee -> Manager)
-    const attendanceApproval = await this.createRequest(companyId, {
+    // 7. Wire into approval workflow — workflow is guaranteed to exist
+    await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'AttendanceOverride',
       entityId: override.id,
@@ -1696,12 +1800,7 @@ export class ESSService {
       },
     });
 
-    // If no active workflow, auto-approve
-    if (!attendanceApproval) {
-      await this.onApprovalComplete(companyId, 'AttendanceOverride', override.id, 'APPROVED');
-    }
-
-    // 7. Return the override
+    // 8. Return the override
     return override;
   }
 
@@ -2175,7 +2274,9 @@ export class ESSService {
   // ── Dashboard helper: Leave Balance Summary ──
 
   private async getDashboardLeaveBalance(companyId: string, employeeId: string) {
-    const currentYear = new Date().getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+    const currentYear = DateTime.now().setZone(companyTimezone).year;
 
     const balances = await platformPrisma.leaveBalance.findMany({
       where: { companyId, employeeId, year: currentYear },
@@ -2512,8 +2613,7 @@ export class ESSService {
     for (let i = 0; i < days; i++) {
       const dt = startDate.plus({ days: i });
       const dateStr = dt.toFormat('yyyy-MM-dd');
-      const jsDate = dt.toJSDate();
-      const dayOfWeek = jsDate.getDay();
+      const dayOfWeek = dt.weekday % 7; // 0=Sun..6=Sat (JS convention)
       const dayName = DAY_NAMES[dayOfWeek]!;
       const fullDayName = FULL_DAY_NAMES[dayOfWeek]!;
 
@@ -2657,8 +2757,7 @@ export class ESSService {
     for (let i = 0; i < totalDays; i++) {
       const dt = startDate.plus({ days: i });
       const dateStr = dt.toFormat('yyyy-MM-dd');
-      const jsDate = dt.toJSDate();
-      const dayOfWeek = jsDate.getDay();
+      const dayOfWeek = dt.weekday % 7; // 0=Sun..6=Sat (JS convention)
       const dayName = DAY_NAMES[dayOfWeek]!;
       const fullDayName = FULL_DAY_NAMES[dayOfWeek]!;
 
@@ -2689,7 +2788,9 @@ export class ESSService {
       STATUTORY: '#10B981',    // emerald-500
     };
 
-    const currentYear = new Date().getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+    const currentYear = DateTime.now().setZone(companyTimezone).year;
 
     const balances = await platformPrisma.leaveBalance.findMany({
       where: { companyId, employeeId, year: currentYear },
@@ -2805,7 +2906,7 @@ export class ESSService {
       const totalCalendarDays = monthEnd.day;
       for (let d = 0; d < totalCalendarDays; d++) {
         const dayDt = monthDt.plus({ days: d });
-        const dayOfWeek = dayDt.toJSDate().getDay();
+        const dayOfWeek = dayDt.weekday % 7; // 0=Sun..6=Sat (JS convention)
         const fullDayName = FULL_DAY_NAMES[dayOfWeek]!;
         if (fullDayName === roster?.weekOff1 || fullDayName === roster?.weekOff2) {
           weekOffCount++;
@@ -3233,6 +3334,9 @@ export class ESSService {
       throw ApiError.badRequest('You already have a pending shift swap request for this date');
     }
 
+    // Validate approval workflow exists BEFORE creating the swap request
+    await this.requireWorkflow(companyId, 'SHIFT_CHANGE');
+
     const swapRequest = await platformPrisma.shiftSwapRequest.create({
       data: {
         employeeId,
@@ -3245,19 +3349,14 @@ export class ESSService {
       },
     });
 
-    // Create an approval request if a workflow is configured
-    const approvalResult = await this.createRequest(companyId, {
+    // Create approval request — workflow is guaranteed to exist
+    await this.createRequest(companyId, {
       requesterId: userId,
       entityType: 'ShiftSwapRequest',
       entityId: swapRequest.id,
       triggerEvent: 'SHIFT_CHANGE',
       data: { currentShiftId: data.currentShiftId, requestedShiftId: data.requestedShiftId, swapDate: data.swapDate },
     });
-
-    // If no active workflow, auto-approve
-    if (!approvalResult) {
-      await this.onApprovalComplete(companyId, 'ShiftSwapRequest', swapRequest.id, 'APPROVED');
-    }
 
     return swapRequest;
   }
@@ -3356,6 +3455,9 @@ export class ESSService {
     const employeeId = await this.resolveEmployeeIdFromUser(userId);
     if (!employeeId) throw ApiError.badRequest('No employee record linked to your account');
 
+    // Validate approval workflow exists BEFORE creating the WFH request
+    await this.requireWorkflow(companyId, 'WFH_REQUEST');
+
     const wfhRequest = await platformPrisma.wfhRequest.create({
       data: {
         employeeId,
@@ -3368,19 +3470,14 @@ export class ESSService {
       },
     });
 
-    // Wire into approval workflow
-    const wfhApproval = await this.createRequest(companyId, {
+    // Create approval request — workflow is guaranteed to exist
+    await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'WfhRequest',
       entityId: wfhRequest.id,
       triggerEvent: 'WFH_REQUEST',
       data: { fromDate: data.fromDate, toDate: data.toDate, days: data.days, reason: data.reason },
     });
-
-    // If no active workflow, auto-approve
-    if (!wfhApproval) {
-      await this.onApprovalComplete(companyId, 'WfhRequest', wfhRequest.id, 'APPROVED');
-    }
 
     return wfhRequest;
   }
@@ -3516,7 +3613,9 @@ export class ESSService {
   // ────────────────────────────────────────────────────────────────────
 
   async getMyHolidays(companyId: string, year?: number) {
-    const targetYear = year ?? new Date().getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+    const targetYear = year ?? DateTime.now().setZone(companyTimezone).year;
     return platformPrisma.holidayCalendar.findMany({
       where: { companyId, year: targetYear },
       orderBy: { date: 'asc' },
@@ -3586,7 +3685,8 @@ export class ESSService {
     if (!employeeId) return null;
 
     // Determine date range for financial year (April to March)
-    const now = new Date();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
     let startDate: Date;
     let endDate: Date;
     if (financialYear) {
@@ -3594,10 +3694,11 @@ export class ESSService {
       startDate = new Date(startYear!, 3, 1); // April 1
       endDate = new Date(startYear! + 1, 2, 31); // March 31
     } else {
-      const currentMonth = now.getMonth(); // 0-indexed
-      const startYear = currentMonth >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-      startDate = new Date(startYear, 3, 1);
-      endDate = new Date(startYear + 1, 2, 31);
+      const now = DateTime.now().setZone(companyTimezone);
+      // Luxon month is 1-indexed: April = 4
+      const fiscalStartYear = now.month >= 4 ? now.year : now.year - 1;
+      startDate = new Date(fiscalStartYear, 3, 1);
+      endDate = new Date(fiscalStartYear + 1, 2, 31);
     }
 
     // Get all non-cancelled claims for this period
@@ -3928,6 +4029,8 @@ export class ESSService {
     designationId: string | null,
     items: Array<{ categoryCode: string; amount: number; expenseDate: string }>,
   ) {
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
     // Get categories with limits
     const categoryCodes = [...new Set(items.map((i) => i.categoryCode))];
     const categories = await platformPrisma.expenseCategory.findMany({
@@ -3976,9 +4079,9 @@ export class ESSService {
       // Monthly limit check
       if (maxPerMonth !== null) {
         // Get current month's approved/pending claims for this category
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const nowDt = DateTime.now().setZone(companyTimezone);
+        const monthStart = nowDt.startOf('month').toJSDate();
+        const monthEnd = nowDt.endOf('month').toJSDate();
 
         const existingItems = await platformPrisma.expenseClaimItem.findMany({
           where: {
@@ -4089,6 +4192,9 @@ export class ESSService {
       throw ApiError.badRequest(`Tenure exceeds maximum allowed (${policy.maxTenureMonths} months)`);
     }
 
+    // Validate approval workflow exists BEFORE creating the loan record
+    await this.requireWorkflow(companyId, 'LOAN_APPLICATION');
+
     // Calculate EMI using standard formula
     const interestRate = Number(policy.interestRate);
     const monthlyRate = interestRate / 12 / 100;
@@ -4120,19 +4226,14 @@ export class ESSService {
       },
     });
 
-    // Wire into approval workflow
-    const loanApproval = await this.createRequest(companyId, {
+    // Create approval request — workflow is guaranteed to exist
+    await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'LoanRecord',
       entityId: loanRecord.id,
       triggerEvent: 'LOAN_APPLICATION',
       data: { amount: data.amount, tenure: data.tenure, reason: data.reason, policyName: policy.name },
     });
-
-    // If no active workflow, auto-approve
-    if (!loanApproval) {
-      await this.onApprovalComplete(companyId, 'LoanRecord', loanRecord.id, 'APPROVED');
-    }
 
     return loanRecord;
   }

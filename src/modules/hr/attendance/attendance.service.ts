@@ -191,8 +191,13 @@ export class AttendanceService {
       where: { companyId, isDefault: true },
       select: { weekOff1: true, weekOff2: true },
     });
+    // ── Step 2b: Get company timezone (needed for day-of-week resolution) ──
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+
     const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dow = dayOfWeek[attendanceDate.getDay()];
+    const dtAtt = DateTime.fromJSDate(attendanceDate).setZone(companyTimezone);
+    const dow = dayOfWeek[dtAtt.weekday % 7];
     const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
 
     const evaluationContext: EvaluationContext = {
@@ -218,10 +223,6 @@ export class AttendanceService {
     if (policy.gpsRequired && (data.checkInLatitude == null || data.checkInLongitude == null)) {
       throw ApiError.badRequest('GPS coordinates are required for check-in (per resolved attendance policy)');
     }
-
-    // ── Step 4: Get company timezone ──
-    const companySettings = await getCachedCompanySettings(companyId);
-    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
 
     // ── Step 5: Fetch shift info for status resolver ──
     let shiftInfo: ShiftInfo | null = null;
@@ -395,8 +396,11 @@ export class AttendanceService {
     allowedPerMonth: number,
   ) {
     const recordDate = new Date(record.date);
-    const monthStart = new Date(recordDate.getFullYear(), recordDate.getMonth(), 1);
-    const monthEnd = new Date(recordDate.getFullYear(), recordDate.getMonth() + 1, 0, 23, 59, 59, 999);
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const dtRecord = DateTime.fromJSDate(recordDate).setZone(companyTimezone);
+    const monthStart = dtRecord.startOf('month').toJSDate();
+    const monthEnd = dtRecord.endOf('month').toJSDate();
 
     const lateCountThisMonth = await platformPrisma.attendanceRecord.count({
       where: {
@@ -421,7 +425,7 @@ export class AttendanceService {
       });
 
       logger.warn(
-        `Late limit exceeded [employee=${record.employeeId}, month=${recordDate.getMonth() + 1}/${recordDate.getFullYear()}, count=${lateCountThisMonth}, limit=${allowedPerMonth}]`,
+        `Late limit exceeded [employee=${record.employeeId}, month=${dtRecord.month}/${dtRecord.year}, count=${lateCountThisMonth}, limit=${allowedPerMonth}]`,
       );
     }
   }
@@ -529,14 +533,11 @@ export class AttendanceService {
       if (otRule.weeklyCapHours) {
         const weeklyCap = Number(otRule.weeklyCapHours);
         const recordDate = new Date(record.date);
-        const dayOfWeek = recordDate.getDay(); // 0=Sun, 1=Mon, ...
-        const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-        const weekStart = new Date(recordDate);
-        weekStart.setDate(recordDate.getDate() + mondayOffset);
-        weekStart.setHours(0, 0, 0, 0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 6);
-        weekEnd.setHours(23, 59, 59, 999);
+        const companySettings = await getCachedCompanySettings(companyId);
+        const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+        const dtRecord = DateTime.fromJSDate(recordDate).setZone(companyTimezone);
+        const weekStart = dtRecord.startOf('week').toJSDate(); // Luxon week starts Monday
+        const weekEnd = dtRecord.endOf('week').toJSDate();
 
         const weeklyOtAgg = await platformPrisma.overtimeRequest.aggregate({
           where: {
@@ -559,8 +560,11 @@ export class AttendanceService {
       if (otRule.monthlyCapHours) {
         const monthlyCap = Number(otRule.monthlyCapHours);
         const recordDate = new Date(record.date);
-        const monthStart = new Date(recordDate.getFullYear(), recordDate.getMonth(), 1);
-        const monthEnd = new Date(recordDate.getFullYear(), recordDate.getMonth() + 1, 0, 23, 59, 59, 999);
+        const companySettingsMonthly = await getCachedCompanySettings(companyId);
+        const companyTimezoneMonthly = companySettingsMonthly.timezone ?? 'Asia/Kolkata';
+        const dtRecordMonthly = DateTime.fromJSDate(recordDate).setZone(companyTimezoneMonthly);
+        const monthStart = dtRecordMonthly.startOf('month').toJSDate();
+        const monthEnd = dtRecordMonthly.endOf('month').toJSDate();
 
         const monthlyOtAgg = await platformPrisma.overtimeRequest.aggregate({
           where: {
@@ -740,8 +744,11 @@ export class AttendanceService {
 
     // Check if payroll is locked for this record's month
     const recordDate = new Date(record.date);
-    const recordMonth = recordDate.getMonth() + 1;
-    const recordYear = recordDate.getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const dtRecord = DateTime.fromJSDate(recordDate).setZone(companyTimezone);
+    const recordMonth = dtRecord.month;
+    const recordYear = dtRecord.year;
 
     const payrollRun = await platformPrisma.payrollRun.findUnique({
       where: { companyId_month_year: { companyId, month: recordMonth, year: recordYear } },
@@ -906,6 +913,10 @@ export class AttendanceService {
   async populateMonthAttendance(companyId: string, month: number, year: number) {
     const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+    // Get company timezone for accurate day-of-week resolution
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+
     // 1. Get all active employees for the company
     const employees = await platformPrisma.employee.findMany({
       where: { companyId, status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED'] } },
@@ -924,8 +935,9 @@ export class AttendanceService {
     const weekOff2 = roster?.weekOff2 ?? null;
 
     // 3. Get all holidays for this month
-    const monthStart = new Date(year, month - 1, 1);
-    const monthEnd = new Date(year, month, 0); // last day of month
+    const dtMonth = DateTime.fromObject({ year, month }, { zone: companyTimezone });
+    const monthStart = dtMonth.startOf('month').toJSDate();
+    const monthEnd = dtMonth.endOf('month').toJSDate();
     const holidays = await platformPrisma.holidayCalendar.findMany({
       where: {
         companyId,
@@ -943,7 +955,7 @@ export class AttendanceService {
     const existingRecords = await platformPrisma.attendanceRecord.findMany({
       where: {
         companyId,
-        date: { gte: monthStart, lte: new Date(year, month - 1, monthEnd.getDate(), 23, 59, 59, 999) },
+        date: { gte: monthStart, lte: monthEnd },
       },
       select: { employeeId: true, date: true },
     });
@@ -953,7 +965,7 @@ export class AttendanceService {
     );
 
     // 5. Build the batch of records to create
-    const daysInMonth = monthEnd.getDate();
+    const daysInMonth = dtMonth.daysInMonth!;
     const recordsToCreate: Array<{
       companyId: string;
       employeeId: string;
@@ -963,9 +975,10 @@ export class AttendanceService {
     }> = [];
 
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month - 1, day);
-      const dateStr = date.toISOString().split('T')[0];
-      const dow = dayOfWeek[date.getDay()];
+      const dtDay = DateTime.fromObject({ year, month, day }, { zone: companyTimezone });
+      const date = dtDay.toJSDate();
+      const dateStr = dtDay.toISODate()!;
+      const dow = dayOfWeek[dtDay.weekday % 7];
       const isHoliday = holidayDates.has(dateStr);
       const isWeekOff = dow === weekOff1 || dow === weekOff2;
 
@@ -1148,8 +1161,11 @@ export class AttendanceService {
 
     // Check if payroll is locked for this record's month
     const recordDate = new Date(record.date);
-    const recordMonth = recordDate.getMonth() + 1;
-    const recordYear = recordDate.getFullYear();
+    const companySettingsOverride = await getCachedCompanySettings(companyId);
+    const companyTimezoneOverride = companySettingsOverride.timezone ?? 'Asia/Kolkata';
+    const dtRecordOverride = DateTime.fromJSDate(recordDate).setZone(companyTimezoneOverride);
+    const recordMonth = dtRecordOverride.month;
+    const recordYear = dtRecordOverride.year;
 
     const payrollRun = await platformPrisma.payrollRun.findUnique({
       where: { companyId_month_year: { companyId, month: recordMonth, year: recordYear } },
@@ -1244,8 +1260,13 @@ export class AttendanceService {
           where: { companyId, isDefault: true },
           select: { weekOff1: true, weekOff2: true },
         });
+        // Get company timezone
+        const companySettings = await getCachedCompanySettings(companyId);
+        const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+
         const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const dow = dayOfWeek[attendanceDate.getDay()];
+        const dtAttOverride = DateTime.fromJSDate(attendanceDate).setZone(companyTimezone);
+        const dow = dayOfWeek[dtAttOverride.weekday % 7];
         const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
 
         const evaluationContext: EvaluationContext = {
@@ -1261,10 +1282,6 @@ export class AttendanceService {
 
         // Resolve policy
         const { policy } = await resolvePolicy(companyId, evaluationContext);
-
-        // Get company timezone
-        const companySettings = await getCachedCompanySettings(companyId);
-        const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
 
         // Fetch shift info
         let shiftInfo: ShiftInfo | null = null;
@@ -1800,7 +1817,9 @@ export class AttendanceService {
         });
 
         if (compOffType) {
-          const otYear = new Date(request.date).getFullYear();
+          const companySettingsOt = await getCachedCompanySettings(companyId);
+          const companyTimezoneOt = companySettingsOt.timezone ?? 'Asia/Kolkata';
+          const otYear = DateTime.fromJSDate(new Date(request.date)).setZone(companyTimezoneOt).year;
           const attendanceRulesForCompOff = await getCachedAttendanceRules(companyId);
           const fullDayHours = attendanceRulesForCompOff.fullDayThresholdHours
             ? Number(attendanceRulesForCompOff.fullDayThresholdHours)
@@ -1917,8 +1936,11 @@ export class AttendanceService {
     }
 
     // 2. Get all holiday dates for the month
-    const monthStart = new Date(year, month - 1, 1);
-    const monthEnd = new Date(year, month, 0); // last day of month
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const dtMonth = DateTime.fromObject({ year, month }, { zone: companyTimezone });
+    const monthStart = dtMonth.startOf('month').toJSDate();
+    const monthEnd = dtMonth.endOf('month').toJSDate();
 
     const holidays = await platformPrisma.holidayCalendar.findMany({
       where: {
@@ -1943,11 +1965,12 @@ export class AttendanceService {
     const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const offDayDates = new Set<string>();
 
-    const daysInMonth = monthEnd.getDate();
+    const daysInMonth = dtMonth.daysInMonth!;
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month - 1, day);
-      const dateStr = date.toISOString().split('T')[0]!;
-      const dow = dayOfWeek[date.getDay()];
+      const dtDay = DateTime.fromObject({ year, month, day }, { zone: companyTimezone });
+      const date = dtDay.toJSDate();
+      const dateStr = dtDay.toISODate()!;
+      const dow = dayOfWeek[dtDay.weekday % 7];
 
       if (holidayDates.has(dateStr) || dow === weekOff1 || dow === weekOff2) {
         offDayDates.add(dateStr);
@@ -2317,8 +2340,10 @@ export class AttendanceService {
   }
 
   async executeShiftRotation(companyId: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const companySettingsRotation = await getCachedCompanySettings(companyId);
+    const companyTimezoneRotation = companySettingsRotation.timezone ?? 'Asia/Kolkata';
+    const dtToday = DateTime.now().setZone(companyTimezoneRotation).startOf('day');
+    const today = dtToday.toJSDate();
 
     // Fetch all active schedules where effectiveFrom <= today
     const schedules = await platformPrisma.shiftRotationSchedule.findMany({
@@ -2343,8 +2368,8 @@ export class AttendanceService {
       const shifts = schedule.shifts as Array<{ shiftId: string; weekNumber: number }>;
       if (!shifts || shifts.length < 2) continue;
 
-      const effectiveFrom = new Date(schedule.effectiveFrom);
-      effectiveFrom.setHours(0, 0, 0, 0);
+      const dtEffectiveFrom = DateTime.fromJSDate(new Date(schedule.effectiveFrom)).setZone(companyTimezoneRotation).startOf('day');
+      const effectiveFrom = dtEffectiveFrom.toJSDate();
 
       const msSinceStart = today.getTime() - effectiveFrom.getTime();
       const weeksSinceStart = Math.floor(msSinceStart / (7 * 24 * 60 * 60 * 1000));
@@ -2359,8 +2384,8 @@ export class AttendanceService {
           break;
         case 'MONTHLY': {
           const monthsSinceStart =
-            (today.getFullYear() - effectiveFrom.getFullYear()) * 12 +
-            (today.getMonth() - effectiveFrom.getMonth());
+            (dtToday.year - dtEffectiveFrom.year) * 12 +
+            (dtToday.month - dtEffectiveFrom.month);
           shiftIndex = monthsSinceStart % shifts.length;
           break;
         }
@@ -2591,8 +2616,12 @@ export class AttendanceService {
         where: { companyId, isDefault: true },
         select: { weekOff1: true, weekOff2: true },
       });
+      const companySettings = await getCachedCompanySettings(companyId);
+      const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+
       const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const dow = dayOfWeek[recordDate.getDay()];
+      const dtRecordAutoPunch = DateTime.fromJSDate(recordDate).setZone(companyTimezone);
+      const dow = dayOfWeek[dtRecordAutoPunch.weekday % 7];
       const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
 
       const evaluationContext: EvaluationContext = {
@@ -2607,8 +2636,6 @@ export class AttendanceService {
       };
 
       const { policy } = await resolvePolicy(companyId, evaluationContext);
-      const companySettings = await getCachedCompanySettings(companyId);
-      const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
       const rules = await getCachedAttendanceRules(companyId);
       const rulesInput: AttendanceRulesInput = {
         lopAutoDeduct: rules.lopAutoDeduct,

@@ -1,5 +1,7 @@
+import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 
 type IntentType =
   | 'LEAVE_BALANCE'
@@ -310,7 +312,9 @@ class ChatbotService {
 
   private async handleLeaveBalance(companyId: string, employeeId: string): Promise<IntentResult> {
     try {
-      const currentYear = new Date().getFullYear();
+      const companySettings = await getCachedCompanySettings(companyId);
+      const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+      const currentYear = DateTime.now().setZone(companyTimezone).year;
       const balances = await platformPrisma.leaveBalance.findMany({
         where: {
           employeeId,
@@ -393,9 +397,11 @@ class ChatbotService {
 
   private async handleAttendance(companyId: string, employeeId: string): Promise<IntentResult> {
     try {
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+      const companySettings = await getCachedCompanySettings(companyId);
+      const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+      const now = DateTime.now().setZone(companyTimezone);
+      const startOfMonth = now.startOf('month').toJSDate();
+      const endOfMonth = now.endOf('month').toJSDate();
 
       const records = await platformPrisma.attendanceRecord.findMany({
         where: {
@@ -414,7 +420,7 @@ class ChatbotService {
         statusCounts[status] = (statusCounts[status] || 0) + 1;
       }
 
-      const monthName = now.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+      const monthName = now.toFormat('MMMM yyyy');
       const lines = Object.entries(statusCounts).map(
         ([status, count]) => `- ${status}: ${count} day(s)`
       );

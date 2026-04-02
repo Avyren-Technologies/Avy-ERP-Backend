@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../../config/database';
 import { logger } from '../../../../config/logger';
 import type { DashboardFilters, DataScope, TrendSeries, Distribution } from '../analytics.types';
@@ -63,8 +64,7 @@ class AnalyticsService {
     });
 
     // Previous month comparison
-    const prevDate = new Date(filters.dateTo);
-    prevDate.setMonth(prevDate.getMonth() - 1);
+    const prevDate = DateTime.fromISO(filters.dateTo).minus({ months: 1 }).toJSDate();
 
     const previous = await this.getLatest<any>(platformPrisma.employeeAnalyticsDaily, {
       ...where,
@@ -348,22 +348,21 @@ class AnalyticsService {
     exceptions: number;
   }> {
     const where = this.buildScopeWhere(filters, scope);
-    const dateTo = new Date(filters.dateTo);
+    const dateToDt = DateTime.fromISO(filters.dateTo);
 
     const latest = await this.getLatest<any>(platformPrisma.payrollAnalyticsMonthly, {
       ...where,
-      month: dateTo.getMonth() + 1,
-      year: dateTo.getFullYear(),
+      month: dateToDt.month,
+      year: dateToDt.year,
     });
 
     // Previous month
-    const prevDate = new Date(dateTo);
-    prevDate.setMonth(prevDate.getMonth() - 1);
+    const prevDt = dateToDt.minus({ months: 1 });
 
     const previous = await this.getLatest<any>(platformPrisma.payrollAnalyticsMonthly, {
       ...where,
-      month: prevDate.getMonth() + 1,
-      year: prevDate.getFullYear(),
+      month: prevDt.month,
+      year: prevDt.year,
     });
 
     const totalGross = this.safeNumber(latest?.totalGrossEarnings);
@@ -390,8 +389,8 @@ class AnalyticsService {
       where: {
         ...where,
         year: {
-          gte: new Date(filters.dateFrom).getFullYear(),
-          lte: new Date(filters.dateTo).getFullYear(),
+          gte: DateTime.fromISO(filters.dateFrom).year,
+          lte: DateTime.fromISO(filters.dateTo).year,
         },
       },
       orderBy: [{ year: 'asc' }, { month: 'asc' }],
@@ -410,12 +409,12 @@ class AnalyticsService {
 
   async getCTCDistribution(filters: DashboardFilters, scope: DataScope): Promise<Distribution> {
     const where = this.buildScopeWhere(filters, scope);
-    const dateTo = new Date(filters.dateTo);
+    const dateToDt = DateTime.fromISO(filters.dateTo);
 
     const latest = await this.getLatest<any>(platformPrisma.payrollAnalyticsMonthly, {
       ...where,
-      month: dateTo.getMonth() + 1,
-      year: dateTo.getFullYear(),
+      month: dateToDt.month,
+      year: dateToDt.year,
     });
 
     const breakdown = this.safeJson<{ label: string; count: number }[]>(latest?.byCTCBand, []);
@@ -439,12 +438,12 @@ class AnalyticsService {
     complianceScore: number;
   }> {
     const where = this.buildScopeWhere(filters, scope);
-    const dateTo = new Date(filters.dateTo);
+    const dateToDt = DateTime.fromISO(filters.dateTo);
 
     const latest = await this.getLatest<any>(platformPrisma.payrollAnalyticsMonthly, {
       ...where,
-      month: dateTo.getMonth() + 1,
-      year: dateTo.getFullYear(),
+      month: dateToDt.month,
+      year: dateToDt.year,
     });
 
     return {
@@ -471,12 +470,12 @@ class AnalyticsService {
     pendingFnF: number;
   }> {
     const where = this.buildScopeWhere(filters, scope);
-    const dateTo = new Date(filters.dateTo);
+    const dateToDt = DateTime.fromISO(filters.dateTo);
 
     const latest = await this.getLatest<any>(platformPrisma.attritionMetricsMonthly, {
       ...where,
-      month: dateTo.getMonth() + 1,
-      year: dateTo.getFullYear(),
+      month: dateToDt.month,
+      year: dateToDt.year,
     });
 
     const attritionRate = this.safeNumber(latest?.attritionRate);
@@ -499,8 +498,8 @@ class AnalyticsService {
       where: {
         ...where,
         year: {
-          gte: new Date(filters.dateFrom).getFullYear(),
-          lte: new Date(filters.dateTo).getFullYear(),
+          gte: DateTime.fromISO(filters.dateFrom).year,
+          lte: DateTime.fromISO(filters.dateTo).year,
         },
       },
       orderBy: [{ year: 'asc' }, { month: 'asc' }],
@@ -522,12 +521,12 @@ class AnalyticsService {
     scope: DataScope,
   ): Promise<Record<string, unknown>[]> {
     const where = this.buildScopeWhere(filters, scope);
-    const dateTo = new Date(filters.dateTo);
+    const dateToDt = DateTime.fromISO(filters.dateTo);
 
     const latest = await this.getLatest<any>(platformPrisma.attritionMetricsMonthly, {
       ...where,
-      month: dateTo.getMonth() + 1,
-      year: dateTo.getFullYear(),
+      month: dateToDt.month,
+      year: dateToDt.year,
     });
 
     return this.safeJson<Record<string, unknown>[]>(latest?.flightRiskEmployees, []);

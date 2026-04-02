@@ -1,7 +1,9 @@
 import { Prisma, OvertimeRequestStatus } from '@prisma/client';
+import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
+import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { essService } from '../ess/ess.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
@@ -66,6 +68,9 @@ async function getWorkingDaysInMonth(companyId: string, month: number, year: num
     select: { fiscalConfig: true, weeklyOffs: true },
   });
 
+  const companySettings = await getCachedCompanySettings(companyId);
+  const tz = companySettings.timezone ?? 'Asia/Kolkata';
+
   const weeklyOffs: string[] = (company?.weeklyOffs as string[]) ?? ['Sunday'];
   const dayMap: Record<string, number> = {
     Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
@@ -74,10 +79,10 @@ async function getWorkingDaysInMonth(companyId: string, month: number, year: num
   const offDays = new Set(weeklyOffs.map((d) => dayMap[d] ?? -1));
 
   // Count non-weekend days
-  const daysInMonth = new Date(year, month, 0).getDate();
+  const daysInMonth = DateTime.fromObject({ year, month }, { zone: tz }).daysInMonth ?? 30;
   let workingDays = 0;
   for (let d = 1; d <= daysInMonth; d++) {
-    const dow = new Date(year, month - 1, d).getDay();
+    const dow = DateTime.fromObject({ year, month, day: d }, { zone: tz }).weekday % 7;
     if (!offDays.has(dow)) workingDays++;
   }
 
@@ -2126,15 +2131,18 @@ export class PayrollRunService {
     const diffMonthly = newMonthly - oldMonthly;
 
     // Compute arrears from effectiveDate to now
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
     const effectiveDate = new Date(revision.effectiveDate);
-    const now = new Date();
+    const dtEffective = DateTime.fromJSDate(effectiveDate).setZone(companyTimezone);
+    const nowDt = DateTime.now().setZone(companyTimezone);
     const arrearEntries: any[] = [];
     let totalArrears = 0;
 
-    let arrearMonth = effectiveDate.getMonth() + 1; // 1-12
-    let arrearYear = effectiveDate.getFullYear();
+    let arrearMonth = dtEffective.month; // 1-12
+    let arrearYear = dtEffective.year;
 
-    while (arrearYear < now.getFullYear() || (arrearYear === now.getFullYear() && arrearMonth <= now.getMonth() + 1)) {
+    while (arrearYear < nowDt.year || (arrearYear === nowDt.year && arrearMonth <= nowDt.month)) {
       // For each month, compute component-level difference
       const oldComponents = currentSalary.components as Record<string, number>;
       const newComponents = (revision.newComponents as Record<string, number>) ?? {};
@@ -2319,8 +2327,10 @@ export class PayrollRunService {
   }
 
   async getStatutoryDashboard(companyId: string) {
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
     const now = new Date();
-    const currentYear = now.getFullYear();
+    const currentYear = DateTime.now().setZone(companyTimezone).year;
 
     const [totalFilings, filedFilings, dueThisWeek, overdue] = await Promise.all([
       platformPrisma.statutoryFiling.count({ where: { companyId, year: currentYear } }),

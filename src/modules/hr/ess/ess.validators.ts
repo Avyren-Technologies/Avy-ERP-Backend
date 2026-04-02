@@ -125,7 +125,7 @@ export const updateNotificationRuleSchema = createNotificationRuleSchema.partial
 // ── IT Declarations ─────────────────────────────────────────────────
 
 export const createITDeclarationSchema = z.object({
-  employeeId: z.string().min(1, 'Employee ID is required'),
+  employeeId: z.string().optional(), // Auto-set by controller for non-HR users
   financialYear: z.string().min(1, 'Financial year is required'), // "2025-26"
   regime: z.enum(['OLD', 'NEW']).optional().default('NEW'),
   section80C: z.record(z.string(), z.unknown()).optional(),

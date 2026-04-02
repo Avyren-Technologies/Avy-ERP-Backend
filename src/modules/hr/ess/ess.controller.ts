@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { DateTime } from 'luxon';
 import { essService } from './ess.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../../shared/utils';
 import { asyncHandler } from '../../../middleware/error.middleware';
@@ -331,6 +332,19 @@ export class ESSController {
     if (req.query.financialYear) opts.financialYear = req.query.financialYear as string;
     if (req.query.status) opts.status = req.query.status as string;
 
+    // Non-HR users can only see their own declarations
+    const permissions = req.user?.permissions ?? [];
+    const isHr = permissions.includes('*') || permissions.includes('hr:*')
+      || permissions.includes('hr:configure') || permissions.includes('hr:approve');
+    if (!isHr) {
+      const employeeId = await this.resolveEmployeeId(req);
+      if (!employeeId) {
+        res.json(createPaginatedResponse([], 1, limit, 0, 'IT declarations retrieved'));
+        return;
+      }
+      opts.employeeId = employeeId;
+    }
+
     const result = await essService.listDeclarations(companyId, opts);
     res.json(createPaginatedResponse(result.declarations, result.page, result.limit, result.total, 'IT declarations retrieved'));
   });
@@ -340,6 +354,18 @@ export class ESSController {
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
     const declaration = await essService.getDeclaration(companyId, req.params.id!);
+
+    // Non-HR users can only view their own declarations
+    const permissions = req.user?.permissions ?? [];
+    const isHr = permissions.includes('*') || permissions.includes('hr:*')
+      || permissions.includes('hr:configure') || permissions.includes('hr:approve');
+    if (!isHr) {
+      const employeeId = await this.resolveEmployeeId(req);
+      if (declaration.employeeId !== employeeId) {
+        throw ApiError.forbidden('You can only view your own declarations');
+      }
+    }
+
     res.json(createSuccessResponse(declaration, 'IT declaration retrieved'));
   });
 
@@ -350,6 +376,21 @@ export class ESSController {
     const parsed = createITDeclarationSchema.safeParse(req.body);
     if (!parsed.success) {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    // Non-HR users can only create declarations for themselves
+    const permissions = req.user?.permissions ?? [];
+    const isHr = permissions.includes('*') || permissions.includes('hr:*')
+      || permissions.includes('hr:configure') || permissions.includes('hr:approve');
+    if (!isHr) {
+      const employeeId = await this.resolveEmployeeId(req);
+      if (!employeeId) throw ApiError.badRequest('Employee profile not found');
+      parsed.data.employeeId = employeeId;
+    }
+
+    // After auto-set, employeeId must be present
+    if (!parsed.data.employeeId) {
+      throw ApiError.badRequest('Employee ID is required');
     }
 
     const declaration = await essService.createDeclaration(companyId, parsed.data);
@@ -365,6 +406,18 @@ export class ESSController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
+    // Non-HR users can only update their own declarations
+    const permissions = req.user?.permissions ?? [];
+    const isHr = permissions.includes('*') || permissions.includes('hr:*')
+      || permissions.includes('hr:configure') || permissions.includes('hr:approve');
+    if (!isHr) {
+      const existing = await essService.getDeclaration(companyId, req.params.id!);
+      const employeeId = await this.resolveEmployeeId(req);
+      if (existing.employeeId !== employeeId) {
+        throw ApiError.forbidden('You can only update your own declarations');
+      }
+    }
+
     const declaration = await essService.updateDeclaration(companyId, req.params.id!, parsed.data);
     res.json(createSuccessResponse(declaration, 'IT declaration updated'));
   });
@@ -372,6 +425,18 @@ export class ESSController {
   submitDeclaration = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    // Non-HR users can only submit their own declarations
+    const permissions = req.user?.permissions ?? [];
+    const isHr = permissions.includes('*') || permissions.includes('hr:*')
+      || permissions.includes('hr:configure') || permissions.includes('hr:approve');
+    if (!isHr) {
+      const existing = await essService.getDeclaration(companyId, req.params.id!);
+      const employeeId = await this.resolveEmployeeId(req);
+      if (existing.employeeId !== employeeId) {
+        throw ApiError.forbidden('You can only submit your own declarations');
+      }
+    }
 
     const declaration = await essService.submitDeclaration(companyId, req.params.id!);
     res.json(createSuccessResponse(declaration, 'IT declaration submitted'));
@@ -531,8 +596,11 @@ export class ESSController {
       res.json(createSuccessResponse([], ESSController.NOT_LINKED_MSG));
       return;
     }
-    const month = parseInt(req.query.month as string, 10) || new Date().getMonth() + 1;
-    const year = parseInt(req.query.year as string, 10) || new Date().getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const nowTz = DateTime.now().setZone(companyTimezone);
+    const month = parseInt(req.query.month as string, 10) || nowTz.month;
+    const year = parseInt(req.query.year as string, 10) || nowTz.year;
 
     const records = await essService.getMyAttendance(companyId, employeeId, month, year);
     res.json(createSuccessResponse(records, 'Attendance records retrieved'));
@@ -922,8 +990,11 @@ export class ESSController {
       return;
     }
 
-    const month = parseInt(req.query.month as string, 10) || new Date().getMonth() + 1;
-    const year = parseInt(req.query.year as string, 10) || new Date().getFullYear();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
+    const nowTz = DateTime.now().setZone(companyTimezone);
+    const month = parseInt(req.query.month as string, 10) || nowTz.month;
+    const year = parseInt(req.query.year as string, 10) || nowTz.year;
 
     const calendar = await essService.getTeamLeaveCalendar(companyId, managerId, month, year);
     res.json(createSuccessResponse(calendar, 'Team leave calendar retrieved'));
@@ -1233,8 +1304,8 @@ export class ESSController {
       where: { companyId, isDefault: true },
       select: { weekOff1: true, weekOff2: true },
     });
-    const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dow = dayOfWeek[attendanceDate.getDay()];
+    const dayOfWeekNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dow = dayOfWeekNames[DateTime.fromJSDate(attendanceDate, { zone: companyTimezone }).weekday % 7];
     const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
 
     const evaluationContext: EvaluationContext = {

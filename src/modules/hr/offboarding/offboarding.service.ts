@@ -1,7 +1,9 @@
 import { Prisma, SeparationType, ExitStatus, ClearanceStatus, FnFStatus } from '@prisma/client';
+import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
+import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { essService } from '../ess/ess.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
@@ -459,14 +461,16 @@ export class OffboardingService {
     const tenureYears = tenureDays / 365.25;
 
     // ── 3. Salary for worked days in last month ────────────────────
-    const today = new Date();
-    const dayOfMonth = lastWorkingDate.getDate();
-    const daysInLastMonth = new Date(lastWorkingDate.getFullYear(), lastWorkingDate.getMonth() + 1, 0).getDate();
+    const companySettings = await getCachedCompanySettings(companyId);
+    const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';
+    const lwdDt = DateTime.fromJSDate(lastWorkingDate).setZone(companyTimezone);
+    const dayOfMonth = lwdDt.day;
+    const daysInLastMonth = lwdDt.daysInMonth!;
     const salaryForWorkedDays = (monthlyGross / daysInLastMonth) * dayOfMonth;
     const dailyRate = monthlyGross / daysInLastMonth;
 
     // ── 4. Leave encashment ────────────────────────────────────────
-    const currentYear = today.getFullYear();
+    const currentYear = DateTime.now().setZone(companyTimezone).year;
     const leaveBalances = await platformPrisma.leaveBalance.findMany({
       where: {
         employeeId,
@@ -525,7 +529,7 @@ export class OffboardingService {
 
         // 2. Minimum working days: employee must have worked ≥ eligibilityDays (default 30) in the year
         const eligibilityDays = Number(bonusConfig.eligibilityDays) || 30;
-        const yearStart = new Date(lastWorkingDate.getFullYear(), 0, 1);
+        const yearStart = lwdDt.startOf('year').toJSDate();
         const attendanceCount = await platformPrisma.attendanceRecord.count({
           where: {
             employeeId,
@@ -539,7 +543,7 @@ export class OffboardingService {
         // Only compute bonus if BOTH conditions are met
         if (salaryEligible && workingDaysEligible) {
           const bonusPercentage = Number(bonusConfig.minBonusPercent); // minimum bonus %
-          const monthsWorkedInYear = Math.min(12, Math.max(0, lastWorkingDate.getMonth() + 1));
+          const monthsWorkedInYear = Math.min(12, Math.max(0, lwdDt.month));
           bonusProRata = (basicMonthly * bonusPercentage / 100) * monthsWorkedInYear;
         }
       }
@@ -633,7 +637,7 @@ export class OffboardingService {
     // Gratuity exempt up to limit, reimbursement non-taxable
     const taxableAmount = Math.max(0, salaryForWorkedDays + bonusProRata + leaveEncashment + Math.max(0, noticePay));
     let tdsOnFnF = 0;
-    const annualTaxableProjection = taxableAmount * 12 / (lastWorkingDate.getMonth() + 1); // Annualize
+    const annualTaxableProjection = taxableAmount * 12 / lwdDt.month; // Annualize
     if (annualTaxableProjection > 400000) {
       // Use new regime slabs (simplified)
       let annualTax = 0;
@@ -657,7 +661,7 @@ export class OffboardingService {
       }
       annualTax *= 1.04; // 4% cess
       // Pro-rate to months worked
-      const monthsWorked = lastWorkingDate.getMonth() + 1;
+      const monthsWorked = lwdDt.month;
       tdsOnFnF = Math.round(annualTax * monthsWorked / 12 * 100) / 100;
     }
 
