@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { generateNextNumber } from '../../../shared/utils/number-series';
 import { essService } from '../ess/ess.service';
 
 /** Convert undefined to null for Prisma nullable fields. */
@@ -1457,9 +1458,15 @@ export class AdvancedHRService {
       totalAmount = data.items.reduce((sum: number, item: any) => sum + item.amount, 0);
     }
 
+    // Generate claim number from Number Series
+    const claimNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Expense', 'Expense Claims'], 'Expense Claim',
+    ).catch(() => undefined);
+
     const createData: any = {
       companyId,
       employeeId: data.employeeId,
+      ...(claimNumber ? { claimNumber } : {}),
       title: data.title,
       amount: totalAmount,
       category: data.category,

@@ -4,6 +4,7 @@ import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
 import { invalidateESSConfig, getCachedCompanySettings } from '../../../shared/utils/config-cache';
+import { generateNextNumber } from '../../../shared/utils/number-series';
 import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
 
 /** Convert undefined to null for Prisma nullable fields. */
@@ -3645,12 +3646,14 @@ export class ESSService {
       await this.validateExpenseLimits(companyId, employeeId, employee?.gradeId ?? null, employee?.designationId ?? null, data.items);
     }
 
-    // Generate claim number
-    const claimNumber = await this.generateExpenseClaimNumber(companyId);
+    // Generate claim number from Number Series
+    const claimNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Expense', 'Expense Claims'], 'Expense Claim',
+    ).catch(() => undefined);
 
     const createData: any = {
       employeeId,
-      claimNumber,
+      ...(claimNumber ? { claimNumber } : {}),
       title: data.title,
       amount: totalAmount,
       category: data.category,
@@ -3869,20 +3872,6 @@ export class ESSService {
   }
 
   // ── Expense Claim Helper Methods ──────────────────────────────────
-
-  private async generateExpenseClaimNumber(companyId: string): Promise<string> {
-    const year = new Date().getFullYear();
-    const count = await platformPrisma.expenseClaim.count({
-      where: {
-        companyId,
-        createdAt: {
-          gte: new Date(`${year}-01-01`),
-          lt: new Date(`${year + 1}-01-01`),
-        },
-      },
-    });
-    return `EXP-${year}-${String(count + 1).padStart(4, '0')}`;
-  }
 
   private async validateExpenseLimits(
     companyId: string,
