@@ -4,7 +4,7 @@ import { createSuccessResponse, createPaginatedResponse } from '../../../shared/
 import { ApiError } from '../../../shared/errors';
 import { cacheRedis } from '../../../config/redis';
 import { logger } from '../../../config/logger';
-import { platformPrisma, createTenantPrisma } from '../../../config/database';
+import { platformPrisma, tenantConnectionManager } from '../../../config/database';
 import { dashboardOrchestratorService } from './services/dashboard-orchestrator.service';
 import { drilldownService } from './services/drilldown.service';
 import { alertService } from './alerts/alert.service';
@@ -194,7 +194,7 @@ class AnalyticsController {
 
     let tenantDb;
     try {
-      tenantDb = createTenantPrisma(tenant.schemaName);
+      tenantDb = tenantConnectionManager.getClient({ schemaName: tenant.schemaName });
       const buffer = await generator(tenantDb, companyName, filters, scope);
 
       // Set response headers for xlsx download

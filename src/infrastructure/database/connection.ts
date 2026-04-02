@@ -1,6 +1,6 @@
 // Database connection utilities for infrastructure operations
 
-import { platformPrisma, createTenantPrisma } from '../../config/database';
+import { platformPrisma, tenantConnectionManager } from '../../config/database';
 import { logger } from '../../config/logger';
 
 export class DatabaseConnection {
@@ -11,7 +11,7 @@ export class DatabaseConnection {
 
   // Get tenant-specific database connection
   static getTenantConnection(schemaName: string) {
-    return createTenantPrisma(schemaName);
+    return tenantConnectionManager.getClient({ schemaName });
   }
 
   // Execute raw SQL on platform database
@@ -27,7 +27,7 @@ export class DatabaseConnection {
 
   // Execute raw SQL on tenant database
   static async executeTenantQuery(schemaName: string, query: string, params?: any[]) {
-    const tenantPrisma = createTenantPrisma(schemaName);
+    const tenantPrisma = tenantConnectionManager.getClient({ schemaName });
 
     try {
       const result = await tenantPrisma.$queryRawUnsafe(query, ...(params || []));
@@ -35,8 +35,6 @@ export class DatabaseConnection {
     } catch (error) {
       logger.error(`Tenant database query failed for schema ${schemaName}:`, error);
       throw error;
-    } finally {
-      await tenantPrisma.$disconnect();
     }
   }
 

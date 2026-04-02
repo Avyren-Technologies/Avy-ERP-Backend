@@ -1,4 +1,4 @@
-import { platformPrisma, createTenantPrisma } from '../../../../config/database';
+import { platformPrisma, tenantConnectionManager } from '../../../../config/database';
 import { logger } from '../../../../config/logger';
 import type { DashboardFilters, DataScope, PaginatedReport } from '../analytics.types';
 import { analyticsService } from './analytics.service';
@@ -674,7 +674,7 @@ class DrilldownService {
         select: { schemaName: true },
       });
       if (!tenant) return null;
-      return createTenantPrisma(tenant.schemaName);
+      return tenantConnectionManager.getClient({ schemaName: tenant.schemaName });
     } catch {
       return null;
     }

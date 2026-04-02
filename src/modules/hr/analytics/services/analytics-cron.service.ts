@@ -1,4 +1,4 @@
-import { platformPrisma, createTenantPrisma } from '../../../../config/database';
+import { platformPrisma, tenantConnectionManager } from '../../../../config/database';
 import { logger } from '../../../../config/logger';
 import cron from 'node-cron';
 import { PrismaClient, Prisma } from '@prisma/client';
@@ -1024,7 +1024,7 @@ class AnalyticsCronService {
       return null;
     }
 
-    return createTenantPrisma(tenant.schemaName);
+    return tenantConnectionManager.getClient({ schemaName: tenant.schemaName });
   }
 
   private getCompanyLocalDate(timezone: string): Date {
