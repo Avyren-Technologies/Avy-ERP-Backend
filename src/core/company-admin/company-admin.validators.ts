@@ -41,11 +41,13 @@ export const updateLocationSchema = z.object({
 
 // ── Shift ───────────────────────────────────────────────────────────
 
+const timeFormatRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
 export const createShiftSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, 'Shift name is required'),
   shiftType: z.nativeEnum(ShiftType).optional(),
-  startTime: z.string().min(1),
-  endTime: z.string().min(1),
+  startTime: z.string().min(1, 'Start time is required').regex(timeFormatRegex, 'Start time must be in HH:MM format (e.g., 09:00)'),
+  endTime: z.string().min(1, 'End time is required').regex(timeFormatRegex, 'End time must be in HH:MM format (e.g., 18:00)'),
   isCrossDay: z.boolean().optional(),
 
   // Policy overrides (null = inherit from Attendance Rules)
@@ -71,10 +73,10 @@ export const updateShiftSchema = createShiftSchema.partial();
 // ── Shift Break ─────────────────────────────────────────────────────
 
 export const createShiftBreakSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, 'Break name is required'),
   type: z.nativeEnum(BreakType),
-  startTime: z.string().nullable().optional(), // null for flexible breaks
-  duration: z.number().int().min(1).max(120, 'Break duration cannot exceed 120 minutes'),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Break start time must be in HH:MM format').nullable().optional(),
+  duration: z.number().int().min(1, 'Break duration must be at least 1 minute').max(120, 'Break duration cannot exceed 120 minutes'),
   isPaid: z.boolean().optional(),
 });
 

@@ -128,16 +128,18 @@ export class SupportService {
 
   async listTickets(filters: {
     companyId?: string | undefined;
+    createdByUserId?: string | undefined;
     status?: TicketStatus | undefined;
     category?: TicketCategory | undefined;
     search?: string | undefined;
     page: number;
     limit: number;
   }) {
-    const { companyId, status, category, search, page, limit } = filters;
+    const { companyId, createdByUserId, status, category, search, page, limit } = filters;
 
     const where: any = {};
     if (companyId) where.companyId = companyId;
+    if (createdByUserId) where.createdByUserId = createdByUserId;
     if (status) where.status = status;
     if (category) where.category = category;
     if (search) {

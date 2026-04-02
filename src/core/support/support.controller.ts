@@ -57,7 +57,13 @@ export class SupportController {
     const category = req.query.category as TicketCategory | undefined;
     const search = req.query.search as string | undefined;
 
-    const result = await supportService.listTickets({ companyId, status, category, search, page, limit });
+    // Company admins see all company tickets; other users only see their own
+    const permissions = req.user?.permissions ?? [];
+    const isAdmin = permissions.includes('*') || permissions.includes('company:configure')
+      || permissions.includes('hr:configure');
+    const createdByUserId = isAdmin ? undefined : req.user!.id;
+
+    const result = await supportService.listTickets({ companyId, createdByUserId, status, category, search, page, limit });
     res.json(createPaginatedResponse(result.tickets, result.page, result.limit, result.total, 'Tickets retrieved'));
   });
 
@@ -66,6 +72,15 @@ export class SupportController {
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
     const ticket = await supportService.getTicket(req.params.id!, companyId);
+
+    // Non-admin users can only view their own tickets
+    const permissions = req.user?.permissions ?? [];
+    const isAdmin = permissions.includes('*') || permissions.includes('company:configure')
+      || permissions.includes('hr:configure');
+    if (!isAdmin && ticket.createdByUserId !== req.user!.id) {
+      throw ApiError.forbidden('You can only view your own tickets');
+    }
+
     res.json(createSuccessResponse(ticket, 'Ticket retrieved'));
   });
 
@@ -76,6 +91,15 @@ export class SupportController {
     const parsed = sendMessageSchema.safeParse(req.body);
     if (!parsed.success) {
       throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+
+    // Non-admin users can only send messages on their own tickets
+    const ticket = await supportService.getTicket(req.params.id!, companyId);
+    const permissions = req.user?.permissions ?? [];
+    const isAdmin = permissions.includes('*') || permissions.includes('company:configure')
+      || permissions.includes('hr:configure');
+    if (!isAdmin && ticket.createdByUserId !== req.user!.id) {
+      throw ApiError.forbidden('You can only send messages on your own tickets');
     }
 
     const senderName = `${req.user?.firstName ?? ''} ${req.user?.lastName ?? ''}`.trim() || 'Unknown';
@@ -96,10 +120,17 @@ export class SupportController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    // Verify ownership first
-    await supportService.getTicket(req.params.id!, companyId);
-    const ticket = await supportService.updateStatus(req.params.id!, TicketStatus.CLOSED);
-    res.json(createSuccessResponse(ticket, 'Ticket closed'));
+    // Verify ownership — non-admin users can only close their own tickets
+    const ticket = await supportService.getTicket(req.params.id!, companyId);
+    const permissions = req.user?.permissions ?? [];
+    const isAdmin = permissions.includes('*') || permissions.includes('company:configure')
+      || permissions.includes('hr:configure');
+    if (!isAdmin && ticket.createdByUserId !== req.user!.id) {
+      throw ApiError.forbidden('You can only close your own tickets');
+    }
+
+    const result = await supportService.updateStatus(req.params.id!, TicketStatus.CLOSED);
+    res.json(createSuccessResponse(result, 'Ticket closed'));
   });
 
   // ────────────────────────────────────────────────────────────────────

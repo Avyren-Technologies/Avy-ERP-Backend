@@ -317,6 +317,19 @@ export class CompanyAdminService {
   }
 
   async createShift(companyId: string, data: any) {
+    // Validate: shift name must be unique within the company
+    const existingByName = await platformPrisma.companyShift.findFirst({
+      where: { companyId, name: { equals: data.name, mode: 'insensitive' } },
+    });
+    if (existingByName) {
+      throw ApiError.conflict(`A shift named "${data.name}" already exists. Please choose a different name.`);
+    }
+
+    // Validate: start time and end time must be different
+    if (data.startTime === data.endTime) {
+      throw ApiError.badRequest('Start time and end time cannot be the same. A shift must have a duration.');
+    }
+
     const shift = await platformPrisma.companyShift.create({
       data: {
         companyId,
@@ -351,6 +364,23 @@ export class CompanyAdminService {
 
     if (!shift || shift.companyId !== companyId) {
       throw ApiError.notFound('Shift not found');
+    }
+
+    // Validate: shift name uniqueness (if name is being changed)
+    if (data.name !== undefined && data.name.toLowerCase() !== shift.name.toLowerCase()) {
+      const existingByName = await platformPrisma.companyShift.findFirst({
+        where: { companyId, name: { equals: data.name, mode: 'insensitive' }, id: { not: shiftId } },
+      });
+      if (existingByName) {
+        throw ApiError.conflict(`A shift named "${data.name}" already exists. Please choose a different name.`);
+      }
+    }
+
+    // Validate: start/end time must differ (check final values after merge)
+    const finalStartTime = data.startTime ?? shift.startTime;
+    const finalEndTime = data.endTime ?? shift.endTime;
+    if (finalStartTime === finalEndTime) {
+      throw ApiError.badRequest('Start time and end time cannot be the same. A shift must have a duration.');
     }
 
     const updated = await platformPrisma.companyShift.update({
