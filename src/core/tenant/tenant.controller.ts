@@ -99,7 +99,7 @@ export class TenantController {
   getTenant = asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.params;
     if (!tenantId) {
-      throw new Error('Tenant ID is required');
+      throw ApiError.badRequest('Tenant ID is required');
     }
     const tenant = await tenantService.getTenantById(tenantId);
 
@@ -110,7 +110,7 @@ export class TenantController {
   getTenantByCompany = asyncHandler(async (req: Request, res: Response) => {
     const { companyId } = req.params;
     if (!companyId) {
-      throw new Error('Company ID is required');
+      throw ApiError.badRequest('Company ID is required');
     }
     const tenant = await tenantService.getTenantByCompanyId(companyId);
 
@@ -121,7 +121,7 @@ export class TenantController {
   updateTenant = asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.params;
     if (!tenantId) {
-      throw new Error('Tenant ID is required');
+      throw ApiError.badRequest('Tenant ID is required');
     }
     const updateData = req.body;
     const tenant = await tenantService.updateTenant(tenantId, updateData);
@@ -133,7 +133,7 @@ export class TenantController {
   deleteTenant = asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.params;
     if (!tenantId) {
-      throw new Error('Tenant ID is required');
+      throw ApiError.badRequest('Tenant ID is required');
     }
     const result = await tenantService.deleteTenant(tenantId);
 
@@ -175,6 +175,18 @@ export class TenantController {
 function formatZodError(error: ZodError): string {
   return error.issues
     .map((issue) => {
+      // If the message is already a custom human-friendly message (not a generic Zod message),
+      // return it directly without the field path prefix
+      const isCustomMessage = !issue.message.startsWith('String must') &&
+        !issue.message.startsWith('Required') &&
+        !issue.message.startsWith('Expected') &&
+        !issue.message.startsWith('Array must') &&
+        !issue.message.startsWith('Number must') &&
+        !issue.message.startsWith('Invalid input');
+      if (isCustomMessage) {
+        return issue.message;
+      }
+      // For generic Zod messages, include the field path for context
       const path = issue.path.length > 0 ? issue.path.join('.') + ': ' : '';
       return `${path}${issue.message}`;
     })

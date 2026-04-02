@@ -3,20 +3,20 @@ import { z } from 'zod';
 // ── Sub-schemas ──────────────────────────────────────────────────────
 
 const addressBlockSchema = z.object({
-  line1: z.string().min(1),
+  line1: z.string().min(1, 'Address line 1 is required'),
   line2: z.string().optional(),
-  city: z.string().min(1),
+  city: z.string().min(1, 'City is required'),
   district: z.string().optional(),
-  state: z.string().min(1),
-  pin: z.string().min(1),
-  country: z.string().min(1),
+  state: z.string().min(1, 'State is required'),
+  pin: z.string().min(1, 'PIN code is required').regex(/^\d{6}$/, 'PIN code must be 6 digits'),
+  country: z.string().min(1, 'Country is required'),
   stdCode: z.string().optional(),
 });
 
 const locationSchema = z.object({
-  name: z.string().min(1),
-  code: z.string().min(1),
-  facilityType: z.string().min(1),
+  name: z.string().min(1, 'Location name is required'),
+  code: z.string().min(1, 'Location code is required'),
+  facilityType: z.string().min(1, 'Facility type is required'),
   customFacilityType: z.string().optional(),
   status: z.string().default('Active'),
   isHQ: z.boolean().default(false),
@@ -61,13 +61,13 @@ const commercialSchema = z.object({
 });
 
 const contactSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, 'Contact name is required'),
   designation: z.string().optional(),
   department: z.string().optional(),
-  type: z.string().min(1),
-  email: z.string().email(),
+  type: z.string().min(1, 'Contact type is required'),
+  email: z.string().email('Invalid email address'),
   countryCode: z.string().optional(),
-  mobile: z.string().min(1),
+  mobile: z.string().min(1, 'Mobile number is required').regex(/^\d{10,15}$/, 'Invalid mobile number'),
   linkedin: z.string().optional(),
 });
 
@@ -83,10 +83,10 @@ const shiftItemSchema = z.object({
 });
 
 const noSeriesSchema = z.object({
-  code: z.string().min(1),
-  linkedScreen: z.string().min(1),
+  code: z.string().min(1, 'Series code is required'),
+  linkedScreen: z.string().min(1, 'Linked screen is required'),
   description: z.string().optional(),
-  prefix: z.string().min(1),
+  prefix: z.string().min(1, 'Prefix is required'),
   suffix: z.string().optional(),
   numberCount: z.number().int().min(1).optional(),
   startNumber: z.number().int().min(0).optional(),
@@ -102,11 +102,11 @@ const iotReasonSchema = z.object({
 });
 
 const userSchema = z.object({
-  fullName: z.string().min(2),
-  username: z.string().min(2),
-  password: z.string().min(6),
-  role: z.string().min(1),
-  email: z.string().email(),
+  fullName: z.string().min(2, 'Full name is required'),
+  username: z.string().min(2, 'Username is required').regex(/^[a-zA-Z0-9._-]+$/, 'Username must contain only letters, numbers, dots, hyphens, and underscores'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  role: z.string().min(1, 'Role is required'),
+  email: z.string().email('Invalid email address'),
   mobile: z.string().optional(),
   department: z.string().optional(),
 });
@@ -115,25 +115,25 @@ const userSchema = z.object({
 
 export const onboardTenantSchema = z.object({
   identity: z.object({
-    displayName: z.string().min(2),
-    legalName: z.string().min(2),
-    businessType: z.string().min(1),
-    industry: z.string().min(1),
-    companyCode: z.string().min(2),
+    displayName: z.string().min(2, 'Company display name is required'),
+    legalName: z.string().min(2, 'Legal name is required'),
+    businessType: z.string().min(1, 'Business type is required'),
+    industry: z.string().min(1, 'Industry is required'),
+    companyCode: z.string().min(2, 'Company code is required').regex(/^[A-Z0-9_-]+$/i, 'Company code must contain only letters, numbers, hyphens, and underscores'),
     shortName: z.string().optional(),
     incorporationDate: z.string().optional(),
     employeeCount: z.string().optional(),
     cin: z.string().optional(),
     website: z.string().optional(),
-    emailDomain: z.string().min(1),
+    emailDomain: z.string().min(1, 'Email domain is required').regex(/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$/, 'Invalid email domain format'),
     logoUrl: z.string().optional(),
     wizardStatus: z.string().optional(),
   }),
 
   statutory: z.object({
-    pan: z.string().min(1),
+    pan: z.string().min(1, 'PAN is required').regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'Invalid PAN format (expected: AAAAA9999A)'),
     tan: z.string().optional(),
-    gstin: z.string().optional(),
+    gstin: z.string().regex(/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, 'Invalid GSTIN format').optional(),
     pfRegNo: z.string().optional(),
     esiCode: z.string().optional(),
     ptReg: z.string().optional(),
@@ -148,21 +148,21 @@ export const onboardTenantSchema = z.object({
   }),
 
   fiscal: z.object({
-    fyType: z.string().min(1),
+    fyType: z.string().min(1, 'Financial year type is required'),
     fyCustomStartMonth: z.string().optional(),
     fyCustomEndMonth: z.string().optional(),
-    payrollFreq: z.string().min(1),
-    cutoffDay: z.string().min(1),
-    disbursementDay: z.string().min(1),
-    weekStart: z.string().min(1),
-    timezone: z.string().min(1),
-    workingDays: z.array(z.string()).min(1),
+    payrollFreq: z.string().min(1, 'Payroll frequency is required'),
+    cutoffDay: z.string().min(1, 'Cutoff day is required'),
+    disbursementDay: z.string().min(1, 'Disbursement day is required'),
+    weekStart: z.string().min(1, 'Week start day is required'),
+    timezone: z.string().min(1, 'Timezone is required'),
+    workingDays: z.array(z.string()).min(1, 'At least one working day is required'),
   }),
 
   preferences: z.object({
-    currency: z.string().min(1),
-    language: z.string().min(1),
-    dateFormat: z.string().min(1),
+    currency: z.string().min(1, 'Currency is required'),
+    language: z.string().min(1, 'Language is required'),
+    dateFormat: z.string().min(1, 'Date format is required'),
     numberFormat: z.string().optional(),
     timeFormat: z.string().optional(),
     indiaCompliance: z.boolean(),

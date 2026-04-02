@@ -78,6 +78,7 @@ export function errorMiddleware(
   const response: any = {
     success: false,
     error: message,
+    message: message,  // Frontends read .data.message
   };
 
   if (code) {

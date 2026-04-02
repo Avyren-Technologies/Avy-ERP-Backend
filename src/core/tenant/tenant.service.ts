@@ -589,6 +589,19 @@ export class TenantService {
       }
 
       // ── 10. Users + TenantUser bridge ─────────────────────────
+      // Check for duplicate user emails before creation
+      if (payload.users.length > 0) {
+        const emails = payload.users.map(u => u.email.toLowerCase());
+        const existingUsers = await tx.user.findMany({
+          where: { email: { in: emails } },
+          select: { email: true },
+        });
+        if (existingUsers.length > 0) {
+          const dupes = existingUsers.map(u => u.email).join(', ');
+          throw ApiError.conflict(`User email(s) already exist: ${dupes}`);
+        }
+      }
+
       if (payload.users.length > 0) {
         for (const u of payload.users) {
           const { firstName, lastName } = splitName(u.fullName);

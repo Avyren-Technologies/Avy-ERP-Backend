@@ -86,8 +86,33 @@ export class ESSController {
   // ── Approval Workflow Config (trigger events + approver roles) ────
 
   getWorkflowConfig = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const tenantId = req.user?.tenantId;
+
+    // Build dynamic approver roles from actual RBAC roles that have approve permissions
+    let dynamicRoles: Array<{ value: string; label: string; description: string }> = [];
+    if (tenantId) {
+      const { rbacService } = await import('../../../core/rbac/rbac.service');
+      const allRoles = await rbacService.listRoles(tenantId);
+      const { expandPermissionsWithInheritance } = await import('../../../shared/constants/permissions');
+
+      dynamicRoles = allRoles
+        .filter((role) => {
+          const expanded = expandPermissionsWithInheritance(role.permissions);
+          // Role must have at least one approve-level permission (hr:approve, *, hr:*, hr:configure)
+          return expanded.some((p) =>
+            p === '*' || p.endsWith(':approve') || p.endsWith(':configure') || p.endsWith(':*'),
+          );
+        })
+        .map((role) => ({
+          value: role.id,
+          label: role.name,
+          description: `Assigned role: ${role.name}`,
+        }));
+    }
+
     res.json(createSuccessResponse(
-      { triggerEvents: TRIGGER_EVENTS, approverRoles: APPROVER_ROLES },
+      { triggerEvents: TRIGGER_EVENTS, approverRoles: dynamicRoles },
       'Workflow configuration retrieved',
     ));
   });

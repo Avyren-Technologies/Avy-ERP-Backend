@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { LocationAccuracy } from '@prisma/client';
 import { isValidTriggerEvent } from '../../../shared/constants/trigger-events';
-import { isValidApproverRole } from '../../../shared/constants/approver-roles';
+// Approver roles are now dynamic (RBAC role IDs fetched from DB)
+// No static validation needed — role existence is verified at service level
 
 // ── ESS Config (36 fields — spec Screen 6) ──────────────────────────
 
@@ -63,20 +64,38 @@ export const essConfigSchema = z.object({
 
 // ── Approval Workflows ──────────────────────────────────────────────
 
+/** Normalize client payloads: default step order from array index; accept `order` alias; map `active` → `isActive`. */
+function normalizeApprovalWorkflowBody(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null) return input;
+  const o = input as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...o };
+  if ('active' in o && !('isActive' in o)) {
+    out.isActive = o.active;
+    delete out.active;
+  }
+  if (Array.isArray(o.steps)) {
+    out.steps = o.steps.map((step: unknown, i: number) => {
+      if (typeof step !== 'object' || step === null) return step;
+      const s = step as Record<string, unknown>;
+      const stepOrder = Number(s.stepOrder ?? s.order ?? i + 1);
+      const { order: _order, ...rest } = s;
+      return { ...rest, stepOrder };
+    });
+  }
+  return out;
+}
+
 const workflowStepSchema = z.object({
   stepOrder: z.number().int().min(1),
-  approverRole: z.string().min(1, 'Approver role is required').refine(
-    (v) => isValidApproverRole(v),
-    { message: 'Invalid approver role' },
-  ),
+  approverRole: z.string().min(1, 'Approver role is required'),
   approverId: z.string().optional(),
-  slaHours: z.number().min(1),
+  slaHours: z.coerce.number().min(1),
   autoEscalate: z.boolean().optional().default(false),
   autoApprove: z.boolean().optional().default(false),
   autoReject: z.boolean().optional().default(false),
 });
 
-export const createWorkflowSchema = z.object({
+const approvalWorkflowBaseSchema = z.object({
   name: z.string().min(1, 'Workflow name is required'),
   triggerEvent: z.string().min(1, 'Trigger event is required').refine(
     (v) => isValidTriggerEvent(v),
@@ -86,7 +105,15 @@ export const createWorkflowSchema = z.object({
   isActive: z.boolean().optional().default(true),
 });
 
-export const updateWorkflowSchema = createWorkflowSchema.partial();
+export const createWorkflowSchema = z.preprocess(
+  normalizeApprovalWorkflowBody,
+  approvalWorkflowBaseSchema,
+);
+
+export const updateWorkflowSchema = z.preprocess(
+  normalizeApprovalWorkflowBody,
+  approvalWorkflowBaseSchema.partial(),
+);
 
 // ── Approval Requests ───────────────────────────────────────────────
 
