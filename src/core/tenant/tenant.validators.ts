@@ -1,4 +1,13 @@
 import { z } from 'zod';
+import { RESERVED_SLUGS } from '../../middleware/tenant.middleware';
+
+// ── Slug schema ──────────────────────────────────────────────────────
+
+const slugSchema = z.string()
+  .min(3, 'Slug must be at least 3 characters')
+  .max(50, 'Slug must be at most 50 characters')
+  .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, 'Slug must be lowercase, alphanumeric with hyphens only, cannot start or end with hyphen')
+  .refine((val) => !RESERVED_SLUGS.has(val), 'This slug is reserved and cannot be used');
 
 // ── Sub-schemas ──────────────────────────────────────────────────────
 
@@ -120,6 +129,7 @@ export const onboardTenantSchema = z.object({
     businessType: z.string().min(1, 'Business type is required'),
     industry: z.string().min(1, 'Industry is required'),
     companyCode: z.string().min(2, 'Company code is required').regex(/^[A-Z0-9_-]+$/i, 'Company code must contain only letters, numbers, hyphens, and underscores'),
+    slug: slugSchema,
     shortName: z.string().optional(),
     incorporationDate: z.string().optional(),
     employeeCount: z.string().optional(),
