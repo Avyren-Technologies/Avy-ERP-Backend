@@ -2,51 +2,100 @@ import { Request, Response, NextFunction } from 'express';
 import { cacheRedis } from '../config/redis';
 import { createTenantCacheKey } from '../shared/utils';
 import { AuthError } from '../shared/errors';
+import { ApiError } from '../shared/errors/api-error';
 import { logger } from '../config/logger';
 import { env } from '../config/env';
+import { tenantConnectionManager } from '../config/tenant-connection-manager';
+import { platformPrisma } from '../config/database';
+
+const RESERVED_SLUGS = new Set([
+  'admin', 'www', 'api', 'app', 'staging', 'dev', 'test', 'demo',
+  'mail', 'ftp', 'cdn', 'static', 'assets', 'docs', 'help',
+  'support', 'status', 'blog',
+]);
 
 export function tenantMiddleware() {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     try {
       const tenantId = extractTenantFromRequest(req);
 
       if (!tenantId) {
-        // If no tenant specified, continue without tenant context
-        // Some endpoints might be tenant-agnostic
         return next();
       }
 
-      // Get tenant details from cache or database
+      // Try cache first
       const tenantKey = createTenantCacheKey(tenantId);
-      let tenantData = await cacheRedis.get(tenantKey);
+      let tenantDataStr = await cacheRedis.get(tenantKey);
 
-      if (!tenantData) {
-        // TODO: Fetch tenant from database
-        // For now, create mock tenant data
-        tenantData = JSON.stringify({
-          id: tenantId,
-          schemaName: `tenant_${tenantId.replace(/-/g, '_')}`,
-          companyId: tenantId, // For simplicity, tenantId = companyId
-          databaseUrl: env.DATABASE_URL_TEMPLATE.replace('{schema}', `tenant_${tenantId.replace(/-/g, '_')}`),
-          status: 'active',
+      if (!tenantDataStr) {
+        // Fetch from database — try by slug first, then by ID
+        const selectFields = {
+          id: true,
+          schemaName: true,
+          slug: true,
+          companyId: true,
+          status: true,
+          dbStrategy: true,
+          databaseUrl: true,
+        } as const;
+
+        let dbTenant = await platformPrisma.tenant.findUnique({
+          where: { slug: tenantId },
+          select: selectFields,
+        });
+
+        if (!dbTenant) {
+          dbTenant = await platformPrisma.tenant.findUnique({
+            where: { id: tenantId },
+            select: selectFields,
+          });
+        }
+
+        if (!dbTenant) {
+          throw AuthError.tenantNotFound();
+        }
+
+        tenantDataStr = JSON.stringify({
+          id: dbTenant.id,
+          schemaName: dbTenant.schemaName,
+          slug: dbTenant.slug,
+          companyId: dbTenant.companyId,
+          databaseUrl: dbTenant.databaseUrl || env.DATABASE_URL_TEMPLATE.replace('{schema}', dbTenant.schemaName),
+          status: dbTenant.status.toLowerCase(),
+          dbStrategy: dbTenant.dbStrategy,
         });
 
         // Cache for 24 hours
-        await cacheRedis.setex(tenantKey, 86400, tenantData);
+        await cacheRedis.setex(tenantKey, 86400, tenantDataStr);
       }
 
-      const tenant = JSON.parse(tenantData);
+      const tenant = JSON.parse(tenantDataStr);
 
-      // Check if tenant is active
-      if (tenant.status !== 'active') {
-        if (tenant.status === 'suspended') {
-          throw AuthError.tenantSuspended();
-        }
-        throw AuthError.tenantNotFound();
+      // Tenant status blocking
+      if (tenant.status === 'suspended') {
+        throw ApiError.forbidden('This company account has been suspended. Contact support.');
+      }
+      if (tenant.status === 'cancelled' || tenant.status === 'expired') {
+        throw ApiError.forbidden('This company account is inactive.');
       }
 
-      // Attach tenant to request
+      // Attach tenant context to request
       req.tenant = tenant;
+
+      // Attach tenant-scoped Prisma client from LRU cache
+      req.prisma = tenantConnectionManager.getClient({
+        schemaName: tenant.schemaName,
+        dbStrategy: tenant.dbStrategy,
+        databaseUrl: tenant.databaseUrl,
+      });
+
+      // Audit log for tenant resolution
+      logger.debug('Tenant resolved', {
+        hostname: req.hostname,
+        tenantId: tenant.id,
+        slug: tenant.slug,
+        method: req.headers['x-tenant-id'] ? 'header' : 'auto',
+      });
 
       next();
     } catch (error) {
@@ -56,58 +105,42 @@ export function tenantMiddleware() {
 }
 
 function extractTenantFromRequest(req: Request): string | null {
-  // Priority order for tenant identification:
-  // 1. Custom header (X-Tenant-ID)
-  // 2. Subdomain
-  // 3. Query parameter
-  // 4. Path parameter
-
-  // Check custom header
+  // Priority 1: Custom header (X-Tenant-ID)
   const tenantHeader = req.headers['x-tenant-id'] as string;
-  if (tenantHeader) {
-    return tenantHeader;
-  }
+  if (tenantHeader) return tenantHeader;
 
-  // Check subdomain (e.g., company1.avyerp.com)
+  // Priority 2: Subdomain
   const host = req.headers.host?.split(':')[0]; // strip port
   if (host) {
-    // Skip IP addresses (e.g., 100.121.191.43, 192.168.1.1, localhost)
     const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host === 'localhost';
     if (!isIP) {
-      const subdomain = host.split('.')[0];
-      // Skip service subdomains (www, api, app, and compound names like avy-erp-api)
-      const SERVICE_SUBDOMAINS = ['www', 'api', 'app', 'admin', 'staging', 'dev'];
-      const isServiceSubdomain = subdomain && SERVICE_SUBDOMAINS.some(
-        svc => subdomain === svc || subdomain.endsWith(`-${svc}`)
-      );
-      if (subdomain && !isServiceSubdomain) {
-        return subdomain;
+      const mainDomain = env.MAIN_DOMAIN;
+      // Check if host is a subdomain of the main domain
+      if (host !== mainDomain && host.endsWith(`.${mainDomain}`)) {
+        const slug = host.replace(`.${mainDomain}`, '');
+        if (slug && !RESERVED_SLUGS.has(slug)) {
+          return slug;
+        }
       }
     }
   }
 
-  // Check query parameter
+  // Priority 3: Query parameter
   const tenantQuery = req.query.tenantId as string;
-  if (tenantQuery) {
-    return tenantQuery;
-  }
+  if (tenantQuery) return tenantQuery;
 
-  // Check path parameter (for specific routes)
+  // Priority 4: Path parameter
   const tenantPath = req.params.tenantId;
-  if (tenantPath) {
-    return tenantPath;
-  }
+  if (tenantPath) return tenantPath;
 
-  // For authenticated requests, use tenant from user context
-  if (req.user?.tenantId) {
-    return req.user.tenantId;
-  }
+  // Priority 5: User context from JWT
+  if (req.user?.tenantId) return req.user.tenantId;
 
   return null;
 }
 
 export function requireTenant() {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return (req: Request, _res: Response, next: NextFunction): void => {
     if (!req.tenant) {
       throw AuthError.tenantNotFound();
     }
@@ -116,12 +149,13 @@ export function requireTenant() {
 }
 
 export function validateTenantAccess() {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    // If user is authenticated and tenant context exists,
-    // ensure user belongs to the correct tenant
-    if (req.user && req.tenant && req.user.tenantId !== req.tenant!.id) {
-      throw AuthError.insufficientPermissions();
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    // Cross-tenant security: JWT tenantId must match resolved tenant
+    if (req.user && req.tenant && req.user.tenantId !== req.tenant.id) {
+      throw ApiError.forbidden('Access denied: tenant mismatch');
     }
     next();
   };
 }
+
+export { RESERVED_SLUGS };

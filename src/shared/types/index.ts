@@ -1,3 +1,5 @@
+import type { PrismaClient } from '@prisma/client';
+
 // Common types used across the application
 
 export interface ApiResponse<T = any> {
@@ -41,9 +43,13 @@ declare global {
       tenant?: {
         id: string;
         schemaName: string;
+        slug?: string;
         companyId: string;
         databaseUrl: string;
+        status?: string;
+        dbStrategy?: string;
       };
+      prisma?: PrismaClient; // Tenant-scoped Prisma client from LRU cache
     }
   }
 }
