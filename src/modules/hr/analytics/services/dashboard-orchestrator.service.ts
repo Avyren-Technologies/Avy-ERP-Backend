@@ -1,4 +1,4 @@
-import { platformPrisma, createTenantPrisma } from '../../../../config/database';
+import { platformPrisma, tenantConnectionManager } from '../../../../config/database';
 import { logger } from '../../../../config/logger';
 import type {
   DashboardFilters,
@@ -636,7 +636,7 @@ class DashboardOrchestratorService {
       });
       if (!tenant) return null;
 
-      tenantDb = createTenantPrisma(tenant.schemaName);
+      tenantDb = tenantConnectionManager.getClient({ schemaName: tenant.schemaName });
       return await fn(tenantDb);
     } catch (error) {
       logger.error('analytics_tenant_db_error', { error, companyId });

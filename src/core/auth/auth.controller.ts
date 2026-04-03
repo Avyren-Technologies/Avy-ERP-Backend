@@ -7,7 +7,11 @@ import { createSuccessResponse } from '../../shared/utils';
 import type { LoginRequest, RegisterRequest, RefreshTokenRequest, ChangePasswordRequest, ForgotPasswordRequest, VerifyResetCodeRequest, ResetPasswordRequest } from './auth.types';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { platformPrisma } from '../../config/database';
+import { TenantStatus } from '@prisma/client';
 import jwt from 'jsonwebtoken';
+
+/** Subdomain login branding only for tenants that may use the app (aligned with tenant middleware). */
+const TENANT_BRANDING_ALLOWED = new Set<TenantStatus>([TenantStatus.ACTIVE, TenantStatus.TRIAL]);
 
 export class AuthController {
   /** Extract userId from an MFA token (setup or challenge), returns null if invalid. */
@@ -200,6 +204,40 @@ export class AuthController {
     if (!userId) throw ApiError.badRequest('Authentication required');
     await authService.confirmMfa(userId, code);
     res.json(createSuccessResponse(null, 'MFA enabled successfully'));
+  });
+
+  /** GET /auth/tenant-branding?slug=<slug> — Public endpoint for subdomain login branding */
+  tenantBranding = asyncHandler(async (req: Request, res: Response) => {
+    const slug = req.query.slug as string;
+    if (!slug) {
+      return res.json(createSuccessResponse({ exists: false }));
+    }
+
+    const tenant = await platformPrisma.tenant.findUnique({
+      where: { slug },
+      select: {
+        id: true,
+        status: true,
+        company: {
+          select: {
+            displayName: true,
+            name: true,
+            logoUrl: true,
+          },
+        },
+      },
+    });
+
+    // Generic response for invalid slug or non-operational tenant (prevents enumeration + no branding leak)
+    if (!tenant || !TENANT_BRANDING_ALLOWED.has(tenant.status)) {
+      return res.json(createSuccessResponse({ exists: false }));
+    }
+
+    return res.json(createSuccessResponse({
+      exists: true,
+      companyName: tenant.company.displayName || tenant.company.name,
+      logoUrl: tenant.company.logoUrl,
+    }));
   });
 
   // Disable MFA

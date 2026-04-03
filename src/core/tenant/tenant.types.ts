@@ -8,6 +8,7 @@ export interface OnboardTenantPayload {
     businessType: string;
     industry: string;
     companyCode: string;
+    slug: string;
     shortName?: string;
     incorporationDate?: string;
     employeeCount?: string;

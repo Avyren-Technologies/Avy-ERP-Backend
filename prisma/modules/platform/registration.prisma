@@ -1,0 +1,28 @@
+// ==========================================
+// PLATFORM — Company Registration Requests
+// ==========================================
+// Models: CompanyRegistrationRequest
+// Enums: RegistrationRequestStatus
+
+model CompanyRegistrationRequest {
+  id              String                    @id @default(cuid())
+  companyName     String
+  adminName       String
+  email           String                    @unique
+  phone           String
+  status          RegistrationRequestStatus @default(PENDING)
+  ticketId        String?                   @unique
+  rejectionReason String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  ticket SupportTicket? @relation(fields: [ticketId], references: [id])
+
+  @@map("company_registration_requests")
+}
+
+enum RegistrationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}

@@ -24,6 +24,7 @@ import type {
 
 export interface CreateTenantData {
   companyId: string;
+  slug: string;
   schemaName?: string;
   status?: TenantStatus;
 }
@@ -291,11 +292,13 @@ export class TenantService {
       });
 
       // ── 2. Create Tenant ───────────────────────────────────────
-      const schemaName = `tenant_${company.id.replace(/-/g, '_')}`;
+      const slug = identity.slug;
+      const schemaName = `tenant_${slug.replace(/-/g, '_')}`;
       const tenant = await tx.tenant.create({
         data: {
           companyId: company.id,
           schemaName,
+          slug,
           status: tenantStatus,
         },
       });
@@ -1096,7 +1099,7 @@ export class TenantService {
 
   // Create new tenant
   async createTenant(tenantData: CreateTenantData) {
-    const { companyId, schemaName, status = TenantStatus.ACTIVE } = tenantData;
+    const { companyId, slug, schemaName, status = TenantStatus.ACTIVE } = tenantData;
 
     // Check if company already has a tenant
     const existingTenant = await platformPrisma.tenant.findUnique({
@@ -1107,8 +1110,8 @@ export class TenantService {
       throw ApiError.conflict('Company already has a tenant');
     }
 
-    // Generate schema name if not provided
-    const finalSchemaName = schemaName || `tenant_${companyId.replace(/-/g, '_')}`;
+    // Generate schema name from slug if not provided
+    const finalSchemaName = schemaName || `tenant_${slug.replace(/-/g, '_')}`;
 
     // Check if schema name is unique
     const existingSchema = await platformPrisma.tenant.findUnique({
@@ -1119,10 +1122,20 @@ export class TenantService {
       throw ApiError.conflict('Schema name already exists');
     }
 
+    // Check if slug is unique
+    const existingSlug = await platformPrisma.tenant.findUnique({
+      where: { slug },
+    });
+
+    if (existingSlug) {
+      throw ApiError.conflict('Slug already exists');
+    }
+
     // Create tenant
     const createData: Prisma.TenantUncheckedCreateInput = {
       companyId,
       schemaName: finalSchemaName,
+      slug,
       status,
     };
 

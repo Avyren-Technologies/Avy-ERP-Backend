@@ -1,6 +1,6 @@
 # ============================================
 # Avy ERP Backend - Docker Compose (Production)
-# Services: App + PostgreSQL 18 + Redis
+# Services: App + PostgreSQL 18 + Redis + PgBouncer
 # ============================================
 
 services:
@@ -62,6 +62,36 @@ services:
         limits:
           memory: 512m
 
+  # ---------- PgBouncer (Connection Pooler) ----------
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: avy-erp-pgbouncer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-avy_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-avy_erp}"
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: 20
+      MAX_CLIENT_CONN: 100
+      SERVER_RESET_QUERY: "DISCARD ALL"
+      ADMIN_USERS: "${POSTGRES_USER:-avy_admin}"
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:6432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432 -U ${POSTGRES_USER:-avy_admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - avy-network
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
   # ---------- Avy ERP Backend ----------
   app:
     build:
@@ -74,6 +104,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
     ports:
       - "${APP_PORT:-3000}:3000"
     environment:
@@ -81,9 +113,9 @@ services:
       NODE_ENV: production
       PORT: 3000
 
-      # Database — points to the postgres service
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-avy_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-avy_erp}?schema=public"
-      DATABASE_URL_TEMPLATE: "postgresql://${POSTGRES_USER:-avy_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-avy_erp}?schema={schema}"
+      # Database — routed through PgBouncer
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-avy_admin}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-avy_erp}?schema=public&pgbouncer=true"
+      DATABASE_URL_TEMPLATE: "postgresql://${POSTGRES_USER:-avy_admin}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-avy_erp}?schema={schema}&pgbouncer=true&connection_limit=5"
 
       # Redis — points to the redis service
       REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
@@ -147,6 +179,11 @@ services:
       # Queue
       QUEUE_REMOVE_ON_COMPLETE: ${QUEUE_REMOVE_ON_COMPLETE:-50}
       QUEUE_REMOVE_ON_FAIL: ${QUEUE_REMOVE_ON_FAIL:-100}
+
+      # Multi-tenancy
+      MAIN_DOMAIN: ${MAIN_DOMAIN:-avyerp.avyren.in}
+      TENANT_CLIENT_CACHE_SIZE: ${TENANT_CLIENT_CACHE_SIZE:-50}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
 
       # Features
       ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}

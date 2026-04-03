@@ -23,19 +23,8 @@ if (env.NODE_ENV === 'production') {
   prisma = global.__prisma;
 }
 
-// Tenant-specific Prisma client factory
-export function createTenantPrisma(schemaName: string): PrismaClient {
-  const databaseUrl = env.DATABASE_URL_TEMPLATE.replace('{schema}', schemaName);
-
-  return new PrismaClient({
-    datasources: {
-      db: {
-        url: databaseUrl,
-      },
-    },
-    log: ['error', 'warn'],
-  });
-}
+// Tenant connection management — re-export from dedicated module
+export { tenantConnectionManager } from './tenant-connection-manager';
 
 // Platform database connection (for tenant registry, etc.)
 export { prisma as platformPrisma };
@@ -55,8 +44,10 @@ export async function checkDatabaseConnection(): Promise<boolean> {
 // Graceful shutdown
 export async function disconnectDatabase(): Promise<void> {
   try {
+    const { tenantConnectionManager } = await import('./tenant-connection-manager');
+    await tenantConnectionManager.disconnectAll();
     await prisma.$disconnect();
-    logger.info('✅ Database disconnected successfully');
+    logger.info('✅ All database connections disconnected successfully');
   } catch (error) {
     logger.error('❌ Error disconnecting database:', error);
   }

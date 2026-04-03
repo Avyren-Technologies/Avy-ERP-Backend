@@ -19,6 +19,7 @@
     "worker:reports": "ts-node src/workers/report.worker.ts",
     "worker:analytics": "ts-node src/workers/analytics.worker.ts",
     "worker:notifications": "ts-node src/workers/notification.worker.ts",
+    "db:migrate-tenants": "node scripts/merge-prisma.js && prisma migrate deploy && npx tsx scripts/migrate-tenants.ts",
     "company:seed": "npx tsx scripts/seed-company.ts --api-url http://localhost:3030/api/v1 --email superadmin@avyerp.local --password SuperAdmin@12345"
   },
   "keywords": [
@@ -45,6 +46,7 @@
     "helmet": "^7.1.0",
     "ioredis": "^5.3.2",
     "jsonwebtoken": "^9.0.2",
+    "lru-cache": "^11.2.7",
     "luxon": "^3.7.2",
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",

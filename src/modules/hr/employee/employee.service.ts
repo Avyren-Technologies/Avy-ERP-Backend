@@ -56,24 +56,52 @@ export class EmployeeService {
       ];
     }
 
-    const [employees, total] = await Promise.all([
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      select: { tenant: { select: { id: true } } },
+    });
+    const tenantId = company?.tenant?.id;
+
+    const listInclude = {
+      department: { select: { id: true, name: true, code: true } },
+      designation: { select: { id: true, name: true, code: true } },
+      grade: { select: { id: true, name: true, code: true } },
+      employeeType: { select: { id: true, name: true, code: true } },
+      location: { select: { id: true, name: true, code: true } },
+      shift: { select: { id: true, name: true } },
+      reportingManager: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
+      ...(tenantId
+        ? {
+            user: {
+              select: {
+                tenantUsers: {
+                  where: { tenantId },
+                  take: 1,
+                  select: { role: { select: { name: true } } },
+                },
+              },
+            },
+          }
+        : {}),
+    } satisfies Prisma.EmployeeInclude;
+
+    const [rows, total] = await Promise.all([
       platformPrisma.employee.findMany({
         where,
-        include: {
-          department: { select: { id: true, name: true, code: true } },
-          designation: { select: { id: true, name: true, code: true } },
-          grade: { select: { id: true, name: true, code: true } },
-          employeeType: { select: { id: true, name: true, code: true } },
-          location: { select: { id: true, name: true, code: true } },
-          shift: { select: { id: true, name: true } },
-          reportingManager: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
-        },
+        include: listInclude,
         skip: offset,
         take: limit,
         orderBy: { createdAt: 'desc' },
       }),
       platformPrisma.employee.count({ where }),
     ]);
+
+    const employees = rows.map((e) => {
+      const u = e.user as { tenantUsers?: Array<{ role?: { name: string } | null }> } | null | undefined;
+      const rbacRoleName = u?.tenantUsers?.[0]?.role?.name ?? null;
+      const { user: _user, ...rest } = e;
+      return { ...rest, rbacRoleName };
+    });
 
     return { employees, total, page, limit };
   }

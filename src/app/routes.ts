@@ -16,6 +16,7 @@ import { dashboardPlatformRoutes, dashboardTenantRoutes } from '../core/dashboar
 import { auditRoutes } from '../core/audit/audit.routes';
 import { companyAdminRoutes } from '../core/company-admin/company-admin.routes';
 import { supportCompanyRoutes, supportPlatformRoutes } from '../core/support/support.routes';
+import { registrationPublicRoutes, registrationPlatformRoutes } from '../core/registration/registration.routes';
 
 // Import business module routes
 import { hrRoutes } from '../modules/hr/routes';
@@ -43,6 +44,7 @@ router.get('/health', (req, res) => {
 
 // Authentication routes (no tenant required)
 router.use('/auth', authRoutes);
+router.use('/auth', registrationPublicRoutes);
 
 // API documentation (gated by ENABLE_SWAGGER env)
 if (env.ENABLE_SWAGGER) {
@@ -78,6 +80,7 @@ router.use('/platform/billing', billingRoutes);
 router.use('/platform/dashboard', dashboardPlatformRoutes);
 router.use('/platform/audit-logs', auditRoutes);
 router.use('/platform/support', supportPlatformRoutes);
+router.use('/platform/registrations', registrationPlatformRoutes);
 
 // Tenant-scoped routes (require tenant context)
 router.use(

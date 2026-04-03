@@ -100,6 +100,11 @@ const envSchema = z.object({
   ENABLE_SWAGGER: envBoolean.default(false),
   ENABLE_CORS: envBoolean.default(true),
   CORS_ALLOWED_ORIGINS: z.string().default(''),
+
+  // Multi-tenancy
+  MAIN_DOMAIN: z.string().default('avyerp.avyren.in'),
+  TENANT_CLIENT_CACHE_SIZE: z.coerce.number().default(50),
+  SUPER_ADMIN_EMAIL: z.string().email().optional(),
 });
 
 // Parse and validate environment variables

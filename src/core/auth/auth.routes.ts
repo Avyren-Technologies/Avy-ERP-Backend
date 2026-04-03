@@ -21,6 +21,9 @@ router.post('/mfa/verify', authController.verifyMfa);
 router.post('/mfa/setup', authMiddleware({ optional: true }), authController.setupMfa);
 router.post('/mfa/confirm', authMiddleware({ optional: true }), authController.confirmMfa);
 
+// Public tenant branding (for subdomain login pages)
+router.get('/tenant-branding', authController.tenantBranding);
+
 // Protected routes
 router.use(authMiddleware());
 
