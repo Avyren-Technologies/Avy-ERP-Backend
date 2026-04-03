@@ -13,7 +13,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-avy_erp}
       POSTGRES_USER: ${POSTGRES_USER:-avy_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      # Keep host auth compatible with edoburu/pgbouncer default password mode.
+      # (PgBouncer in this image generates md5 userlist entries by default.)
+      POSTGRES_INITDB_ARGS: "--auth-host=md5"
     # Postgres 18+ images expect a single mount at /var/lib/postgresql (not .../data).
     # See: https://github.com/docker-library/postgres/pull/1259
     volumes:
