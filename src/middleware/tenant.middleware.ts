@@ -7,7 +7,7 @@ import { logger } from '../config/logger';
 import { env } from '../config/env';
 import { tenantConnectionManager } from '../config/tenant-connection-manager';
 import { platformPrisma } from '../config/database';
-import { isValidTenantSlug } from '@/shared/constants/tenancy';
+import { isValidTenantSlug, RESERVED_SLUGS } from '../shared/constants/tenancy';
 
 export function tenantMiddleware() {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
@@ -148,6 +148,8 @@ export function requireTenant() {
     next();
   };
 }
+
+export { RESERVED_SLUGS };
 
 export function validateTenantAccess() {
   return (req: Request, _res: Response, next: NextFunction): void => {
