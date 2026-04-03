@@ -1,7 +1,7 @@
 import { env } from '../../config/env';
 import { sendEmail } from './email.service';
 import { logger } from '../../config/logger';
-import { escapeHtml, sanitizeEmailSubjectLine } from '@/shared/utils/html-escape';
+import { escapeHtml, sanitizeEmailSubjectLine } from '../../shared/utils/html-escape';
 
 /**
  * Notify super admin of a new company registration request.

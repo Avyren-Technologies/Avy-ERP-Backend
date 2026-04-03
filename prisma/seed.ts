@@ -153,12 +153,14 @@ async function upsertTenant(companyId: string, config: SeedConfig) {
 
   const defaultSchemaName = `tenant_${safeSchemaName(config.companyName) || 'default'}`;
   const schemaName = config.seedSchemaName ?? existing?.schemaName ?? defaultSchemaName;
+  const slug = safeSchemaName(config.companyName).replace(/_/g, '-') || 'default';
 
   if (existing) {
     return prisma.tenant.update({
       where: { id: existing.id },
       data: {
         schemaName,
+        slug: existing.slug || slug, // preserve existing slug
         status: TenantStatus.ACTIVE,
       },
     });
@@ -168,6 +170,7 @@ async function upsertTenant(companyId: string, config: SeedConfig) {
     data: {
       companyId,
       schemaName,
+      slug,
       status: TenantStatus.ACTIVE,
     },
   });
