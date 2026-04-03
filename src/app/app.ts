@@ -46,8 +46,10 @@ app.use(helmet({
 if (env.ENABLE_CORS) {
   const mainDomain = env.MAIN_DOMAIN;
   const mainOrigin = `https://${mainDomain}`;
+  const escapedMainDomain = mainDomain.replace(/\./g, '\\.');
+  const subdomainPortPattern = env.NODE_ENV === 'development' ? '(?::\\d+)?' : '';
   const subdomainPattern = new RegExp(
-    `^https:\\/\\/[\\w-]+\\.${mainDomain.replace(/\./g, '\\.')}$`
+    `^https:\\/\\/[a-z0-9-]+\\.${escapedMainDomain}${subdomainPortPattern}$`
   );
 
   // Additional origins from env (for development)

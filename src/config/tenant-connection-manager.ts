@@ -10,15 +10,28 @@ interface TenantConnectionInfo {
   databaseUrl?: string | null;
 }
 
+function withDefaultConnectionParams(connectionString: string): string {
+  const url = new URL(connectionString);
+
+  if (!url.searchParams.has('pgbouncer')) {
+    url.searchParams.set('pgbouncer', 'true');
+  }
+
+  if (!url.searchParams.has('connection_limit')) {
+    url.searchParams.set('connection_limit', '5');
+  }
+
+  return url.toString();
+}
+
 function buildConnectionString(tenant: TenantConnectionInfo): string {
   if (tenant.dbStrategy === 'database' && tenant.databaseUrl) {
     // Future: dedicated database per tenant
-    const separator = tenant.databaseUrl.includes('?') ? '&' : '?';
-    return `${tenant.databaseUrl}${separator}pgbouncer=true&connection_limit=5`;
+    return withDefaultConnectionParams(tenant.databaseUrl);
   }
+
   const base = env.DATABASE_URL_TEMPLATE.replace('{schema}', tenant.schemaName);
-  const separator = base.includes('?') ? '&' : '?';
-  return `${base}${separator}pgbouncer=true&connection_limit=5`;
+  return withDefaultConnectionParams(base);
 }
 
 function hashKey(connectionString: string): string {
