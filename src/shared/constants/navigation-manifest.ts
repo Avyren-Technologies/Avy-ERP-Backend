@@ -30,6 +30,7 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'sa-modules', label: 'Module Catalogue', icon: 'blocks', requiredPerm: 'platform:admin', path: '/app/modules', module: null, group: 'System', moduleSeparator: 'System', roleScope: 'super_admin', sortOrder: 200 },
   { id: 'sa-monitor', label: 'Platform Monitor', icon: 'activity', requiredPerm: 'platform:admin', path: '/app/monitor', module: null, group: 'System', roleScope: 'super_admin', sortOrder: 201 },
   { id: 'sa-users', label: 'User Management', icon: 'user-cog', requiredPerm: 'platform:admin', path: '/app/admin/users', module: null, group: 'System', roleScope: 'super_admin', sortOrder: 202 },
+  { id: 'sa-registrations', label: 'Registrations', icon: 'user-plus', requiredPerm: 'platform:admin', path: '/app/registrations', module: null, group: 'Platform Management', roleScope: 'super_admin', sortOrder: 103 },
   { id: 'sa-support', label: 'Support Dashboard', icon: 'support', requiredPerm: 'platform:admin', path: '/app/support', module: null, group: 'System', roleScope: 'super_admin', sortOrder: 203 },
 
   // ═══════ SELF-SERVICE (ESS) — visible to employees, managers, and admins ═══════
