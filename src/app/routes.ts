@@ -43,8 +43,10 @@ router.get('/health', (req, res) => {
 });
 
 // Authentication routes (no tenant required)
-router.use('/auth', authRoutes);
+// Registration public route MUST be mounted before authRoutes to avoid
+// being caught by authRoutes' blanket authMiddleware()
 router.use('/auth', registrationPublicRoutes);
+router.use('/auth', authRoutes);
 
 // API documentation (gated by ENABLE_SWAGGER env)
 if (env.ENABLE_SWAGGER) {
