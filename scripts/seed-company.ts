@@ -334,6 +334,7 @@ function buildPayload(multiLocation: boolean) {
   const payload = {
     identity: {
       displayName, legalName: `${displayName} Private Limited`,
+      slug: `test-${id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
       businessType: 'Private Limited (Pvt. Ltd.)', industry, companyCode,
       shortName: `TC${id.slice(-6).toUpperCase()}`,
       incorporationDate: randomDate(2015, 2023), employeeCount: pickRandom(['1-50', '50-100', '100-200', '200-500']),

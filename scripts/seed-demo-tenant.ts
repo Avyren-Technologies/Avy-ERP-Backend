@@ -13,7 +13,7 @@
 //   pnpm demo:seed
 // ============================================================
 
-import { PrismaClient, TenantStatus } from '@prisma/client';
+import { PrismaClient, TenantStatus, CompanySize, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const DEMO_SLUG = 'demo';
@@ -51,13 +51,9 @@ async function main(): Promise<void> {
     company = await prisma.company.create({
       data: {
         name: DEMO_COMPANY_NAME,
-        registeredName: DEMO_COMPANY_NAME,
+        displayName: DEMO_COMPANY_NAME,
         industry: DEMO_INDUSTRY,
-        companySize: 'SMALL',
-        country: 'India',
-        state: 'Maharashtra',
-        city: 'Mumbai',
-        status: 'Active',
+        size: CompanySize.SMALL,
       },
     });
     console.log(`  Created company: ${company.name} (${company.id})`);
@@ -117,10 +113,9 @@ async function main(): Promise<void> {
         password: hashedPassword,
         firstName: 'Demo',
         lastName: 'Admin',
-        role: 'COMPANY_ADMIN',
+        role: UserRole.COMPANY_ADMIN,
         companyId: company.id,
         isActive: true,
-        emailVerified: true,
       },
     });
     console.log(`  Created admin user: ${adminUser.email}`);
@@ -145,10 +140,9 @@ async function main(): Promise<void> {
         password: hashedPassword,
         firstName: 'Demo',
         lastName: 'User',
-        role: 'USER',
+        role: UserRole.USER,
         companyId: company.id,
         isActive: true,
-        emailVerified: true,
       },
     });
     console.log(`  Created regular user: ${regularUser.email}`);
