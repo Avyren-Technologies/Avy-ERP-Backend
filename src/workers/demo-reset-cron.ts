@@ -62,73 +62,75 @@ async function resetDemoTenant(): Promise<void> {
 }
 
 async function wipeTenantData(tenantDb: PrismaClient, companyId: string): Promise<void> {
-  const where = { where: { companyId } };
+  // Demo schema is isolated — safe to wipe all records with deleteMany({}).
+  // Using empty where clause avoids TS errors for models that don't have companyId.
+  const all = {};
 
   // Delete in dependency order — leaf tables first
   // ESS / Workflows
-  await tenantDb.approvalRequest.deleteMany(where);
-  await tenantDb.approvalWorkflow.deleteMany(where);
-  await tenantDb.notificationRule.deleteMany(where);
-  await tenantDb.notificationTemplate.deleteMany(where);
+  await tenantDb.approvalRequest.deleteMany(all);
+  await tenantDb.approvalWorkflow.deleteMany(all);
+  await tenantDb.notificationRule.deleteMany(all);
+  await tenantDb.notificationTemplate.deleteMany(all);
 
   // Attendance & Leave
-  await tenantDb.attendanceOverride.deleteMany(where);
-  await tenantDb.attendanceRecord.deleteMany(where);
-  await tenantDb.leaveRequest.deleteMany(where);
-  await tenantDb.leaveBalance.deleteMany(where);
-  await tenantDb.leavePolicy.deleteMany(where);
+  await tenantDb.attendanceOverride.deleteMany(all);
+  await tenantDb.attendanceRecord.deleteMany(all);
+  await tenantDb.leaveRequest.deleteMany(all);
+  await tenantDb.leaveBalance.deleteMany(all);
+  await tenantDb.leavePolicy.deleteMany(all);
 
   // Offboarding
-  await tenantDb.fnFSettlement.deleteMany(where);
-  await tenantDb.exitInterview.deleteMany(where);
-  await tenantDb.exitClearance.deleteMany(where);
-  await tenantDb.exitRequest.deleteMany(where);
+  await tenantDb.fnFSettlement.deleteMany(all);
+  await tenantDb.exitInterview.deleteMany(all);
+  await tenantDb.exitClearance.deleteMany(all);
+  await tenantDb.exitRequest.deleteMany(all);
 
   // Payroll
-  await tenantDb.employeeSalary.deleteMany(where);
+  await tenantDb.employeeSalary.deleteMany(all);
 
   // Assets
-  await tenantDb.assetAssignment.deleteMany(where);
-  await tenantDb.asset.deleteMany(where);
+  await tenantDb.assetAssignment.deleteMany(all);
+  await tenantDb.asset.deleteMany(all);
 
   // Expenses & Letters
-  await tenantDb.expenseClaimItem.deleteMany(where);
-  await tenantDb.expenseClaim.deleteMany(where);
-  await tenantDb.hRLetter.deleteMany(where);
+  await tenantDb.expenseClaimItem.deleteMany(all);
+  await tenantDb.expenseClaim.deleteMany(all);
+  await tenantDb.hRLetter.deleteMany(all);
 
   // Grievance & Disciplinary
-  await tenantDb.grievanceCase.deleteMany(where);
-  await tenantDb.disciplinaryAction.deleteMany(where);
+  await tenantDb.grievanceCase.deleteMany(all);
+  await tenantDb.disciplinaryAction.deleteMany(all);
 
   // Performance / Onboarding / Probation
-  await tenantDb.probationReview.deleteMany(where);
-  await tenantDb.onboardingTask.deleteMany(where);
-  await tenantDb.onboardingTemplate.deleteMany(where);
+  await tenantDb.probationReview.deleteMany(all);
+  await tenantDb.onboardingTask.deleteMany(all);
+  await tenantDb.onboardingTemplate.deleteMany(all);
 
   // IT Declarations
-  await tenantDb.iTDeclaration.deleteMany(where);
+  await tenantDb.iTDeclaration.deleteMany(all);
 
   // Employee sub-records
-  await tenantDb.employeeTimeline.deleteMany(where);
-  await tenantDb.employeeDocument.deleteMany(where);
-  await tenantDb.employeePrevEmployment.deleteMany(where);
-  await tenantDb.employeeEducation.deleteMany(where);
-  await tenantDb.employeeNominee.deleteMany(where);
+  await tenantDb.employeeTimeline.deleteMany(all);
+  await tenantDb.employeeDocument.deleteMany(all);
+  await tenantDb.employeePrevEmployment.deleteMany(all);
+  await tenantDb.employeeEducation.deleteMany(all);
+  await tenantDb.employeeNominee.deleteMany(all);
 
   // Employee master
-  await tenantDb.employee.deleteMany(where);
+  await tenantDb.employee.deleteMany(all);
 
   // Org structure
-  await tenantDb.leaveType.deleteMany(where);
-  await tenantDb.designation.deleteMany(where);
-  await tenantDb.department.deleteMany(where);
+  await tenantDb.leaveType.deleteMany(all);
+  await tenantDb.designation.deleteMany(all);
+  await tenantDb.department.deleteMany(all);
 
   // Analytics
-  await tenantDb.employeeAnalyticsDaily.deleteMany(where);
-  await tenantDb.attendanceAnalyticsDaily.deleteMany(where);
-  await tenantDb.payrollAnalyticsMonthly.deleteMany(where);
-  await tenantDb.attritionMetricsMonthly.deleteMany(where);
-  await tenantDb.analyticsAlert.deleteMany(where);
+  await tenantDb.employeeAnalyticsDaily.deleteMany(all);
+  await tenantDb.attendanceAnalyticsDaily.deleteMany(all);
+  await tenantDb.payrollAnalyticsMonthly.deleteMany(all);
+  await tenantDb.attritionMetricsMonthly.deleteMany(all);
+  await tenantDb.analyticsAlert.deleteMany(all);
 
   logger.info('demo_reset_wipe_done', { companyId });
 }
