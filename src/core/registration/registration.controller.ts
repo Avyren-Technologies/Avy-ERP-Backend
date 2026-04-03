@@ -3,8 +3,11 @@ import { registrationService } from './registration.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { ApiError } from '../../shared/errors';
-import { registerCompanySchema, updateRegistrationSchema } from './registration.validators';
-import type { RegistrationRequestStatus } from '@prisma/client';
+import {
+  listRegistrationsQuerySchema,
+  registerCompanySchema,
+  updateRegistrationSchema,
+} from './registration.validators';
 
 export class RegistrationController {
   // Public — submit a new company registration
@@ -21,10 +24,21 @@ export class RegistrationController {
   // Super admin — list all registration requests
   listRegistrations = asyncHandler(async (req: Request, res: Response) => {
     const { page, limit, offset } = getPaginationParams(req.query);
-    const statusParam = req.query.status as string | undefined;
+    const rawStatus = req.query.status;
+    const statusStr =
+      typeof rawStatus === 'string'
+        ? rawStatus
+        : Array.isArray(rawStatus) && typeof rawStatus[0] === 'string'
+          ? rawStatus[0]
+          : undefined;
+
+    const queryParsed = listRegistrationsQuerySchema.safeParse({ status: statusStr });
+    if (!queryParsed.success) {
+      throw ApiError.badRequest(queryParsed.error.errors.map((e) => e.message).join(', '));
+    }
 
     const { requests, total } = await registrationService.listRegistrations({
-      ...(statusParam ? { status: statusParam as RegistrationRequestStatus } : {}),
+      ...(queryParsed.data.status ? { status: queryParsed.data.status } : {}),
       page,
       limit,
       offset,

@@ -7,12 +7,7 @@ import { logger } from '../config/logger';
 import { env } from '../config/env';
 import { tenantConnectionManager } from '../config/tenant-connection-manager';
 import { platformPrisma } from '../config/database';
-
-const RESERVED_SLUGS = new Set([
-  'admin', 'www', 'api', 'app', 'staging', 'dev', 'test', 'demo',
-  'mail', 'ftp', 'cdn', 'static', 'assets', 'docs', 'help',
-  'support', 'status', 'blog',
-]);
+import { isValidTenantSlug } from '@/shared/constants/tenancy';
 
 export function tenantMiddleware() {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
@@ -117,11 +112,15 @@ function extractTenantFromRequest(req: Request): { tenantId: string; method: str
     const isIP = /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host === 'localhost';
     if (!isIP) {
       const mainDomain = env.MAIN_DOMAIN;
-      // Check if host is a subdomain of the main domain
-      if (host !== mainDomain && host.endsWith(`.${mainDomain}`)) {
-        const slug = host.replace(`.${mainDomain}`, '');
-        if (slug && !RESERVED_SLUGS.has(slug)) {
-          return { tenantId: slug, method: 'subdomain' };
+      const suffix = `.${mainDomain}`;
+      // Only single-label tenant hosts: {slug}.MAIN_DOMAIN (reject foo.bar.MAIN_DOMAIN)
+      if (host !== mainDomain && host.endsWith(suffix)) {
+        const remainder = host.slice(0, -suffix.length);
+        if (remainder.length > 0 && !remainder.includes('.')) {
+          const slug = remainder.toLowerCase();
+          if (isValidTenantSlug(slug)) {
+            return { tenantId: slug, method: 'subdomain' };
+          }
         }
       }
     }
@@ -159,5 +158,3 @@ export function validateTenantAccess() {
     next();
   };
 }
-
-export { RESERVED_SLUGS };

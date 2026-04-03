@@ -129,12 +129,12 @@ export class RegistrationService {
       where: { id },
       data: {
         status: data.status,
-        ...(data.rejectionReason ? { rejectionReason: data.rejectionReason } : {}),
+        ...(data.status === 'REJECTED' ? { rejectionReason: data.rejectionReason } : {}),
       },
     });
 
     // On rejection, send rejection email (non-blocking)
-    if (data.status === 'REJECTED' && data.rejectionReason) {
+    if (data.status === 'REJECTED') {
       sendRegistrationRejected({
         email: request.email,
         adminName: request.adminName,

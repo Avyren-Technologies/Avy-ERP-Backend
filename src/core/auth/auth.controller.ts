@@ -7,7 +7,11 @@ import { createSuccessResponse } from '../../shared/utils';
 import type { LoginRequest, RegisterRequest, RefreshTokenRequest, ChangePasswordRequest, ForgotPasswordRequest, VerifyResetCodeRequest, ResetPasswordRequest } from './auth.types';
 import { asyncHandler } from '../../middleware/error.middleware';
 import { platformPrisma } from '../../config/database';
+import { TenantStatus } from '@prisma/client';
 import jwt from 'jsonwebtoken';
+
+/** Subdomain login branding only for tenants that may use the app (aligned with tenant middleware). */
+const TENANT_BRANDING_ALLOWED = new Set<TenantStatus>([TenantStatus.ACTIVE, TenantStatus.TRIAL]);
 
 export class AuthController {
   /** Extract userId from an MFA token (setup or challenge), returns null if invalid. */
@@ -224,8 +228,8 @@ export class AuthController {
       },
     });
 
-    // Generic response for invalid slugs (prevents enumeration)
-    if (!tenant || tenant.status === 'CANCELLED') {
+    // Generic response for invalid slug or non-operational tenant (prevents enumeration + no branding leak)
+    if (!tenant || !TENANT_BRANDING_ALLOWED.has(tenant.status)) {
       return res.json(createSuccessResponse({ exists: false }));
     }
 

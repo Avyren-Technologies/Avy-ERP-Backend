@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RESERVED_SLUGS } from '../../middleware/tenant.middleware';
+import { RESERVED_SLUGS } from '@/shared/constants/tenancy';
 
 // ── Slug schema ──────────────────────────────────────────────────────
 
