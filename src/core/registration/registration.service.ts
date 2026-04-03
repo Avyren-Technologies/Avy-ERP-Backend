@@ -145,6 +145,33 @@ export class RegistrationService {
       });
     }
 
+    // On approval, return wizard pre-fill data for the onboarding wizard
+    if (data.status === 'APPROVED') {
+      const suggestedSlug = request.companyName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 50);
+
+      return {
+        ...updated,
+        wizardPrefill: {
+          identity: {
+            name: request.companyName,
+            displayName: request.companyName,
+            slug: suggestedSlug,
+          },
+          users: [{
+            name: request.adminName,
+            email: request.email,
+            phone: request.phone,
+            role: 'COMPANY_ADMIN',
+          }],
+          registrationRequestId: request.id,
+        },
+      };
+    }
+
     return updated;
   }
 }
