@@ -75,7 +75,7 @@ if (env.ENABLE_CORS) {
         return callback(null, true);
       }
 
-      // Wildcard subdomains (e.g., https://company1.avyerp.avyren.in)
+      // Wildcard subdomains (e.g., https://company1.avyren.in)
       if (subdomainPattern.test(origin)) return callback(null, true);
 
       // Extra configured origins (dev/staging)

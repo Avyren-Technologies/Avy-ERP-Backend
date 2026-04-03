@@ -5,7 +5,7 @@
 export const RESERVED_SLUGS = new Set<string>([
   'admin', 'www', 'api', 'app', 'staging', 'dev', 'test', 'demo',
   'mail', 'ftp', 'cdn', 'static', 'assets', 'docs', 'help',
-  'support', 'status', 'blog',
+  'support', 'status', 'blog', 'avy-erp-api', 'pg', 'ssh',
 ]);
 
 /** Aligned with `slug` in `tenant.validators` — single DNS label, no dots. */

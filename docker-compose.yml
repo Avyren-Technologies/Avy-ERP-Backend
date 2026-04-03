@@ -181,7 +181,7 @@ services:
       QUEUE_REMOVE_ON_FAIL: ${QUEUE_REMOVE_ON_FAIL:-100}
 
       # Multi-tenancy
-      MAIN_DOMAIN: ${MAIN_DOMAIN:-avyerp.avyren.in}
+      MAIN_DOMAIN: ${MAIN_DOMAIN:-avyren.in}
       TENANT_CLIENT_CACHE_SIZE: ${TENANT_CLIENT_CACHE_SIZE:-50}
       SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
 
