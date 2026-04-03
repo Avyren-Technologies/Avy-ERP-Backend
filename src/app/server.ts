@@ -7,6 +7,7 @@ import { checkAllRedisConnections, disconnectRedis } from '../config/redis';
 import { startSLACron } from '../workers/sla-cron';
 import { initSocket } from '../lib/socket';
 import { analyticsCronService } from '../modules/hr/analytics/services/analytics-cron.service';
+import { startDemoResetCron } from '../workers/demo-reset-cron';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -43,6 +44,9 @@ async function startServer(): Promise<void> {
 
       // Start analytics cron jobs
       analyticsCronService.startAll();
+
+      // Start demo tenant reset cron (daily at 2 AM)
+      startDemoResetCron();
     });
 
     // Handle server errors
