@@ -221,6 +221,9 @@ CREATE TYPE "SubscriptionStatus" AS ENUM ('TRIAL', 'ACTIVE', 'SUSPENDED', 'CANCE
 CREATE TYPE "InvoiceStatus" AS ENUM ('PENDING', 'PAID', 'OVERDUE', 'CANCELLED');
 
 -- CreateEnum
+CREATE TYPE "RegistrationRequestStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+
+-- CreateEnum
 CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'CANCELLED', 'TRIAL', 'EXPIRED');
 
 -- CreateEnum
@@ -394,6 +397,7 @@ CREATE TABLE "system_controls" (
     "passwordComplexity" BOOLEAN NOT NULL DEFAULT true,
     "accountLockThreshold" INTEGER NOT NULL DEFAULT 5,
     "accountLockDurationMinutes" INTEGER NOT NULL DEFAULT 30,
+    "biometricLoginEnabled" BOOLEAN NOT NULL DEFAULT true,
     "auditLogRetentionDays" INTEGER NOT NULL DEFAULT 365,
     "createdBy" TEXT,
     "updatedBy" TEXT,
@@ -803,6 +807,7 @@ CREATE TABLE "asset_categories" (
 -- CreateTable
 CREATE TABLE "assets" (
     "id" TEXT NOT NULL,
+    "assetNumber" TEXT,
     "name" TEXT NOT NULL,
     "categoryId" TEXT NOT NULL,
     "serialNumber" TEXT,
@@ -1422,6 +1427,7 @@ CREATE TABLE "hr_letter_templates" (
 -- CreateTable
 CREATE TABLE "hr_letters" (
     "id" TEXT NOT NULL,
+    "letterNumber" TEXT,
     "templateId" TEXT NOT NULL,
     "employeeId" TEXT NOT NULL,
     "effectiveDate" DATE,
@@ -1583,6 +1589,7 @@ CREATE TABLE "leave_requests" (
 -- CreateTable
 CREATE TABLE "exit_requests" (
     "id" TEXT NOT NULL,
+    "exitNumber" TEXT,
     "employeeId" TEXT NOT NULL,
     "separationType" "SeparationType" NOT NULL,
     "resignationDate" DATE,
@@ -2251,6 +2258,7 @@ CREATE TABLE "arrear_entries" (
 -- CreateTable
 CREATE TABLE "appraisal_cycles" (
     "id" TEXT NOT NULL,
+    "referenceNumber" TEXT,
     "name" TEXT NOT NULL,
     "frequency" TEXT NOT NULL DEFAULT 'ANNUAL',
     "startDate" DATE NOT NULL,
@@ -2409,6 +2417,7 @@ CREATE TABLE "policy_documents" (
 -- CreateTable
 CREATE TABLE "job_requisitions" (
     "id" TEXT NOT NULL,
+    "requisitionNumber" TEXT,
     "title" TEXT NOT NULL,
     "designationId" TEXT,
     "departmentId" TEXT,
@@ -2506,6 +2515,7 @@ CREATE TABLE "wfh_requests" (
 -- CreateTable
 CREATE TABLE "training_catalogues" (
     "id" TEXT NOT NULL,
+    "catalogueNumber" TEXT,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL DEFAULT 'TECHNICAL',
     "mode" "TrainingMode" NOT NULL DEFAULT 'CLASSROOM',
@@ -2641,10 +2651,28 @@ CREATE TABLE "users" (
     "lastLogin" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "failedLoginAttempts" INTEGER NOT NULL DEFAULT 0,
+    "lockedUntil" TIMESTAMP(3),
+    "mfaEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "mfaSecret" TEXT,
     "companyId" TEXT,
     "employeeId" TEXT,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "active_sessions" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "deviceInfo" TEXT,
+    "ipAddress" TEXT,
+    "refreshToken" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastActiveAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "active_sessions_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -2771,9 +2799,29 @@ CREATE TABLE "platform_billing_config" (
 );
 
 -- CreateTable
+CREATE TABLE "company_registration_requests" (
+    "id" TEXT NOT NULL,
+    "companyName" TEXT NOT NULL,
+    "adminName" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "phone" TEXT NOT NULL,
+    "status" "RegistrationRequestStatus" NOT NULL DEFAULT 'PENDING',
+    "ticketId" TEXT,
+    "rejectionReason" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "company_registration_requests_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "tenants" (
     "id" TEXT NOT NULL,
     "schemaName" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "customDomain" TEXT,
+    "dbStrategy" TEXT NOT NULL DEFAULT 'schema',
+    "databaseUrl" TEXT,
     "companyId" TEXT NOT NULL,
     "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2841,6 +2889,7 @@ CREATE TABLE "companies" (
 -- CreateTable
 CREATE TABLE "support_tickets" (
     "id" TEXT NOT NULL,
+    "ticketNumber" TEXT,
     "tenantId" TEXT NOT NULL,
     "companyId" TEXT NOT NULL,
     "companyName" TEXT NOT NULL,
@@ -3139,6 +3188,12 @@ CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 CREATE UNIQUE INDEX "users_employeeId_key" ON "users"("employeeId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "active_sessions_refreshToken_key" ON "active_sessions"("refreshToken");
+
+-- CreateIndex
+CREATE INDEX "active_sessions_userId_idx" ON "active_sessions"("userId");
+
+-- CreateIndex
 CREATE INDEX "password_reset_tokens_userId_idx" ON "password_reset_tokens"("userId");
 
 -- CreateIndex
@@ -3160,7 +3215,19 @@ CREATE UNIQUE INDEX "subscriptions_tenantId_key" ON "subscriptions"("tenantId");
 CREATE UNIQUE INDEX "invoices_invoiceNumber_key" ON "invoices"("invoiceNumber");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "company_registration_requests_email_key" ON "company_registration_requests"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "company_registration_requests_ticketId_key" ON "company_registration_requests"("ticketId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "tenants_schemaName_key" ON "tenants"("schemaName");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tenants_slug_key" ON "tenants"("slug");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tenants_customDomain_key" ON "tenants"("customDomain");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "tenants_companyId_key" ON "tenants"("companyId");
@@ -3853,6 +3920,9 @@ ALTER TABLE "users" ADD CONSTRAINT "users_companyId_fkey" FOREIGN KEY ("companyI
 ALTER TABLE "users" ADD CONSTRAINT "users_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "employees"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "active_sessions" ADD CONSTRAINT "active_sessions_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "password_reset_tokens" ADD CONSTRAINT "password_reset_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -3869,6 +3939,9 @@ ALTER TABLE "invoices" ADD CONSTRAINT "invoices_subscriptionId_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "payments" ADD CONSTRAINT "payments_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "invoices"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "company_registration_requests" ADD CONSTRAINT "company_registration_requests_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "support_tickets"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "tenants" ADD CONSTRAINT "tenants_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;

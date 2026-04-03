@@ -334,11 +334,33 @@ export class TenantService {
         });
       }
 
-      // ── 6. No. Series (batch) ──────────────────────────────────
+      // ── 6. No. Series (custom from wizard + auto-seed defaults) ──
+      // First create any custom series from the wizard
       if (payload.noSeries.length > 0) {
         await tx.noSeriesConfig.createMany({
           data: payload.noSeries.map((ns) => buildNoSeriesData(company.id, ns)),
         });
+      }
+
+      // Auto-seed default number series for any linked screens not already configured
+      const { LINKED_SCREENS } = await import('../../shared/constants/linked-screens');
+      const configuredScreens = new Set(payload.noSeries.map((ns) => ns.linkedScreen));
+      const missingDefaults = LINKED_SCREENS
+        .filter((ls) => !configuredScreens.has(ls.value))
+        .map((ls) => ({
+          companyId: company.id,
+          code: ls.defaultPrefix.replace(/-$/, ''), // strip trailing dash for code
+          linkedScreen: ls.value,
+          description: ls.description,
+          prefix: ls.defaultPrefix,
+          suffix: null as string | null,
+          numberCount: 5,
+          startNumber: 1,
+        }));
+
+      if (missingDefaults.length > 0) {
+        await tx.noSeriesConfig.createMany({ data: missingDefaults });
+        logger.info(`Auto-seeded ${missingDefaults.length} default number series for company ${company.id}`);
       }
 
       // ── 7. IOT Reasons (batch) ─────────────────────────────────
