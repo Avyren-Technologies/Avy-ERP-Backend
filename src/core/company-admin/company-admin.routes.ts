@@ -9,8 +9,8 @@ router.get('/profile', requirePermissions(['company:read']), controller.getProfi
 router.patch('/profile/sections/:sectionKey', requirePermissions(['company:update']), controller.updateProfileSection);
 
 // ── Locations (NO create — explicit 403) ────────────────────────────
-router.get('/locations', requirePermissions(['company:read']), controller.listLocations);
-router.get('/locations/:id', requirePermissions(['company:read']), controller.getLocation);
+router.get('/locations', requirePermissions(['company:read', 'hr:read']), controller.listLocations);
+router.get('/locations/:id', requirePermissions(['company:read', 'hr:read']), controller.getLocation);
 router.post('/locations', requirePermissions(['location:write']), controller.createLocation); // Returns 403
 router.patch('/locations/:id', requirePermissions(['company:update']), controller.updateLocation);
 router.delete('/locations/:id', requirePermissions(['company:delete']), controller.deleteLocation);
