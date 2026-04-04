@@ -1,7 +1,11 @@
 #!/bin/bash
 # ============================================
 # Avy ERP Backend — Production Deployment Script
-# Usage: ./deploy.sh [up|down|restart|logs|migrate|seed|db-push-reset|seed-company|status]
+# Usage: ./deploy.sh [up|down|restart|logs|migrate|migrate-baseline|seed|db-push-reset|seed-company|status]
+#
+# If `migrate deploy` fails with P3005 (schema not empty, no migration history), the DB was likely
+# created before Prisma Migrate. Run ONCE: ./deploy.sh migrate-baseline
+# then ./deploy.sh migrate — see https://www.prisma.io/docs/guides/migrate/developing-with-prisma-migrate/add-prisma-migrate-to-an-existing-project
 #
 # Prisma uses a modular schema (prisma/base.prisma + prisma/modules/**/*.prisma).
 # npm scripts run `node scripts/merge-prisma.js` first; Docker commands here do the same
@@ -118,6 +122,14 @@ cmd_migrate() {
   log "Migrations complete."
 }
 
+# One-time: register the initial migration as already applied (fixes P3005 on non-empty DBs with no _prisma_migrations rows).
+# Only use if your public schema already matches prisma/migrations/20260403060633_init (e.g. created via db push).
+cmd_migrate_baseline() {
+  log "Baselining: marking migration 20260403060633_init as applied (no SQL runs)..."
+  run_in_app_after_prisma_merge "npx prisma migrate resolve --applied 20260403060633_init"
+  log "Baseline recorded. Next: ./deploy.sh migrate"
+}
+
 # Run database seed
 cmd_seed() {
   log "Seeding database..."
@@ -168,6 +180,7 @@ cmd_help() {
   echo "  restart         Rebuild and restart app only (keeps DB & Redis)"
   echo "  logs            View logs (optionally: ./deploy.sh logs app)"
   echo "  migrate         Merge modular Prisma schema, then prisma migrate deploy"
+  echo "  migrate-baseline  One-time P3005 fix: resolve --applied 20260403060633_init (existing DB, no history)"
   echo "  seed            Run prisma/seed-rbac-fix.ts inside the app container"
   echo "  db-push-reset   DANGER: merge schema, then prisma db push --force-reset (./deploy.sh db-push-reset --yes)"
   echo "  seed-company    Run scripts/seed-company.ts on host (pass script flags after command)"
@@ -182,6 +195,7 @@ case "${1:-help}" in
   restart)  cmd_restart ;;
   logs)     cmd_logs "$@" ;;
   migrate)  cmd_migrate ;;
+  migrate-baseline) cmd_migrate_baseline ;;
   seed)     cmd_seed ;;
   db-push-reset)
     if [ "${2:-}" != "--yes" ]; then
