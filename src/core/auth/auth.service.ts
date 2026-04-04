@@ -309,7 +309,7 @@ export class AuthService {
           name: 'Company Admin',
           description: 'Full company access — all modules and actions',
           permissions: [
-            'company:*', 'hr:*', 'production:*', 'inventory:*', 'sales:*',
+            'company:*', 'hr:*', 'ess:*', 'production:*', 'inventory:*', 'sales:*',
             'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
             'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
           ],
