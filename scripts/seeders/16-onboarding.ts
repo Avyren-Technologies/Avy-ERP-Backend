@@ -142,8 +142,10 @@ export const seeder: SeederModule = {
       const probationEnd = new Date(joiningDate);
       probationEnd.setMonth(probationEnd.getMonth() + 6); // 6-month probation
 
-      const reviewDate = new Date(probationEnd);
-      reviewDate.setDate(reviewDate.getDate() - 15); // Review 15 days before end
+      // Set review date to 1-2 months in the past so it shows as due/completed on screens
+      const reviewDate = new Date();
+      reviewDate.setMonth(reviewDate.getMonth() - randomInt(1, 2));
+      reviewDate.setDate(reviewDate.getDate() - randomInt(0, 10));
 
       // Check for unique constraint
       const exists = await prisma.probationReview.findUnique({

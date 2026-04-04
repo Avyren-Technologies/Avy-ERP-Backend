@@ -1,7 +1,6 @@
 import type { SeederModule, SeedContext } from './types';
 import { log, vlog } from './types';
 import {
-  getPastMonths,
   getWorkingDays,
   shiftTime,
   buildDateTime,
@@ -9,6 +8,7 @@ import {
   randomDecimal,
   weightedPick,
   pickRandom,
+  pickRandomN,
 } from './utils';
 
 type AttendanceType = 'PRESENT' | 'LATE' | 'HALF_DAY' | 'ABSENT' | 'ON_LEAVE' | 'OVERTIME';
@@ -22,8 +22,24 @@ const ATTENDANCE_DISTRIBUTION: { value: AttendanceType; weight: number }[] = [
   { value: 'OVERTIME', weight: 1 },
 ];
 
+/**
+ * Get past months INCLUDING the current month (partial — up to today).
+ */
+function getPastMonthsIncludingCurrent(count: number): { year: number; month: number }[] {
+  const result: { year: number; month: number }[] = [];
+  const now = new Date();
+  // Past months (excluding current)
+  for (let i = count; i >= 1; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    result.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
+  }
+  // Current month
+  result.push({ year: now.getFullYear(), month: now.getMonth() + 1 });
+  return result;
+}
+
 const seed = async (ctx: SeedContext): Promise<void> => {
-  const pastMonths = getPastMonths(ctx.months);
+  const pastMonths = getPastMonthsIncludingCurrent(ctx.months);
   const activeEmployees = Array.from(ctx.employeeMap.values()).filter(
     (e) => e.status === 'ACTIVE',
   );
@@ -36,8 +52,15 @@ const seed = async (ctx: SeedContext): Promise<void> => {
     where: { companyId: ctx.companyId },
   });
 
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
   for (const { year, month } of pastMonths) {
-    const workingDays = getWorkingDays(year, month, ctx.weeklyOffs, ctx.holidays);
+    let workingDays = getWorkingDays(year, month, ctx.weeklyOffs, ctx.holidays);
+    // For the current month, only include days up to today
+    if (year === today.getFullYear() && month === today.getMonth() + 1) {
+      workingDays = workingDays.filter((d) => d <= todayStr);
+    }
     if (workingDays.length === 0) continue;
 
     const attendanceRecords: Parameters<typeof ctx.prisma.attendanceRecord.createMany>[0]['data'] = [];
@@ -195,9 +218,57 @@ const seed = async (ctx: SeedContext): Promise<void> => {
     vlog(ctx, 'attendance', `Month ${year}-${String(month).padStart(2, '0')}: ${attendanceRecords.length} records`);
   }
 
+  // ── Create AttendanceOverride records for ABSENT/LATE days ──
+  let totalOverrides = 0;
+  const overrideCandidates = await ctx.prisma.attendanceRecord.findMany({
+    where: {
+      companyId: ctx.companyId,
+      status: { in: ['ABSENT', 'LATE'] },
+    },
+    take: 50,
+    orderBy: { date: 'desc' },
+  });
+
+  const overrideTargets = pickRandomN(overrideCandidates, Math.min(8, overrideCandidates.length));
+  for (const record of overrideTargets) {
+    const emp = ctx.employeeMap.get(record.employeeId);
+    const requestedBy = emp?.userId ?? record.employeeId;
+    const isAbsent = record.status === 'ABSENT';
+    const issueType = isAbsent
+      ? pickRandom(['ABSENT_OVERRIDE', 'NO_PUNCH'] as const)
+      : pickRandom(['LATE_OVERRIDE', 'MISSING_PUNCH_IN'] as const);
+
+    const status = pickRandom(['PENDING', 'APPROVED', 'REJECTED'] as const);
+
+    try {
+      await ctx.prisma.attendanceOverride.create({
+        data: {
+          attendanceRecordId: record.id,
+          issueType,
+          correctedPunchIn: isAbsent ? new Date(buildDateTime(record.date.toISOString().split('T')[0], shiftTime(9, 0, 15))) : undefined,
+          correctedPunchOut: isAbsent ? new Date(buildDateTime(record.date.toISOString().split('T')[0], shiftTime(18, 0, 30))) : undefined,
+          reason: isAbsent
+            ? pickRandom(['Was present but biometric failed', 'Forgot to punch, worked from client site', 'System error — was in office'])
+            : pickRandom(['Traffic delay due to accident', 'Cab breakdown', 'Doctor appointment ran late']),
+          requestedBy,
+          approvedBy: status === 'APPROVED' ? (ctx.managerIds[0] ?? requestedBy) : undefined,
+          status: status as any,
+          payrollImpact: status === 'APPROVED' ? (isAbsent ? 'LOP reduced by 1 day' : 'Late penalty waived') : undefined,
+          companyId: ctx.companyId,
+        },
+      });
+      totalOverrides++;
+    } catch {
+      // Skip duplicates
+    }
+  }
+
   log('attendance', `Created ${totalRecords} attendance records for ${activeEmployees.length} employees across ${pastMonths.length} months`);
   if (totalOvertimeRequests > 0) {
     log('attendance', `Created ${totalOvertimeRequests} overtime requests`);
+  }
+  if (totalOverrides > 0) {
+    log('attendance', `Created ${totalOverrides} attendance overrides`);
   }
 };
 

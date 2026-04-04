@@ -5,6 +5,7 @@ import {
   getWorkingDays,
   randomInt,
   randomDecimal,
+  pickRandomN,
 } from './utils';
 
 const PF_WAGE_CEILING = 15000;
@@ -271,6 +272,136 @@ const seed = async (ctx: SeedContext): Promise<void> => {
   }
 
   log('payroll', `Created ${totalRuns} payroll runs with ${totalEntries} entries and ${totalPayslips} payslips`);
+
+  // ── Salary Holds ──
+  // Find the most recent payroll run for holds
+  const latestRun = await ctx.prisma.payrollRun.findFirst({
+    where: { companyId: ctx.companyId },
+    orderBy: [{ year: 'desc' }, { month: 'desc' }],
+  });
+
+  if (latestRun && activeEmployees.length >= 2) {
+    const holdEmployees = pickRandomN(activeEmployees, 2);
+
+    // Active hold
+    await ctx.prisma.salaryHold.create({
+      data: {
+        payrollRunId: latestRun.id,
+        employeeId: holdEmployees[0].id,
+        holdType: 'FULL',
+        reason: 'Under investigation',
+        companyId: ctx.companyId,
+      },
+    });
+
+    // Released hold
+    const releasedDate = new Date();
+    releasedDate.setMonth(releasedDate.getMonth() - 1);
+    await ctx.prisma.salaryHold.create({
+      data: {
+        payrollRunId: latestRun.id,
+        employeeId: holdEmployees[1].id,
+        holdType: 'FULL',
+        reason: 'Pending compliance clearance',
+        releasedAt: releasedDate,
+        releasedBy: ctx.managerIds[0] ?? holdEmployees[1].userId ?? holdEmployees[1].id,
+        companyId: ctx.companyId,
+      },
+    });
+
+    log('payroll', 'Created 2 salary holds (1 active, 1 released)');
+  }
+
+  // ── Salary Revisions ──
+  if (activeEmployees.length >= 3) {
+    const revisionEmployees = pickRandomN(activeEmployees, 3);
+    const twoMonthsAgo = new Date();
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+
+    for (const emp of revisionEmployees) {
+      const oldCtc = emp.annualCtc;
+      const newCtc = Math.round(oldCtc * 1.10);
+      const incrementPercent = 10.0;
+
+      const newSal = computeSalaryBreakdown(newCtc);
+      await ctx.prisma.salaryRevision.create({
+        data: {
+          employeeId: emp.id,
+          oldCtc,
+          newCtc,
+          effectiveDate: twoMonthsAgo,
+          incrementPercent,
+          newComponents: {
+            BASIC: newSal.basic,
+            HRA: newSal.hra,
+            SPECIAL_ALLOWANCE: newSal.specialAllowance,
+            CONVEYANCE: newSal.conveyance,
+            MEDICAL: newSal.medical,
+          },
+          arrearsComputed: true,
+          totalArrears: Math.round((newCtc - oldCtc) / 12) * 2, // 2 months of arrears
+          status: 'APPLIED',
+          approvedBy: ctx.managerIds[0] ?? emp.userId ?? emp.id,
+          approvedAt: twoMonthsAgo,
+          companyId: ctx.companyId,
+        },
+      });
+    }
+
+    log('payroll', `Created 3 salary revisions (10% hike, status APPLIED)`);
+  }
+
+  // ── Bonus Batch ──
+  if (activeEmployees.length >= 10) {
+    const lastQuarterEnd = new Date();
+    lastQuarterEnd.setMonth(lastQuarterEnd.getMonth() - 1);
+    const bonusBatchEmployees = pickRandomN(activeEmployees, 10);
+
+    const bonusBatch = await ctx.prisma.bonusBatch.create({
+      data: {
+        name: `Q${Math.ceil(lastQuarterEnd.getMonth() / 3) || 4} ${lastQuarterEnd.getFullYear()} Performance Bonus`,
+        bonusType: 'PERFORMANCE',
+        status: 'APPROVED',
+        approvedBy: ctx.managerIds[0] ?? bonusBatchEmployees[0].userId ?? bonusBatchEmployees[0].id,
+        approvedAt: new Date(),
+        employeeCount: 10,
+        companyId: ctx.companyId,
+      },
+    });
+
+    let totalBonusAmount = 0;
+    const batchItems: Parameters<typeof ctx.prisma.bonusBatchItem.createMany>[0]['data'] = [];
+
+    for (const emp of bonusBatchEmployees) {
+      const amount = randomInt(5000, 15000);
+      const tdsAmount = Math.round(amount * 0.10);
+      const netAmount = amount - tdsAmount;
+      totalBonusAmount += amount;
+
+      batchItems.push({
+        batchId: bonusBatch.id,
+        employeeId: emp.id,
+        amount,
+        tdsAmount,
+        netAmount,
+        remarks: 'Performance bonus for last quarter',
+        companyId: ctx.companyId,
+      });
+    }
+
+    await ctx.prisma.bonusBatchItem.createMany({
+      data: batchItems,
+      skipDuplicates: true,
+    });
+
+    // Update batch total
+    await ctx.prisma.bonusBatch.update({
+      where: { id: bonusBatch.id },
+      data: { totalAmount: totalBonusAmount },
+    });
+
+    log('payroll', `Created 1 bonus batch (PERFORMANCE, APPROVED) with 10 items totaling ${totalBonusAmount}`);
+  }
 };
 
 const module: SeederModule = {

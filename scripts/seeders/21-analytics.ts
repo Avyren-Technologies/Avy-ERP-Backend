@@ -1,6 +1,6 @@
 import type { SeederModule } from './types';
 import { log, vlog } from './types';
-import { randomInt, randomDecimal, getPastMonths, getMonthDates } from './utils';
+import { randomInt, randomDecimal, getPastMonths, getWorkingDays } from './utils';
 
 const MODULE = 'analytics';
 
@@ -8,7 +8,7 @@ export const seeder: SeederModule = {
   name: 'Analytics',
   order: 21,
   seed: async (ctx) => {
-    const { prisma, companyId, months, employeeIds, departmentIds, locationIds, gradeIds } = ctx;
+    const { prisma, companyId, months, employeeIds, departmentIds, locationIds, gradeIds, employeeMap, weeklyOffs, holidays } = ctx;
 
     // Check existing analytics
     const existingDaily = await prisma.employeeAnalyticsDaily.count({ where: { companyId } });
@@ -36,91 +36,101 @@ export const seeder: SeederModule = {
       gradeIds.map((id) => [id, Math.max(1, Math.floor(totalEmployees / gradeIds.length) + randomInt(-2, 2))]),
     );
 
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
     for (const { year, month } of pastMonths) {
-      const dates = getMonthDates(year, month);
+      // Generate records for ALL working days in the month
+      let workingDays = getWorkingDays(year, month, weeklyOffs, holidays);
+      // For the current month, only include up to today
+      if (year === today.getFullYear() && month === today.getMonth() + 1) {
+        workingDays = workingDays.filter((d) => d <= todayStr);
+      }
 
-      // Sample 3 dates per month for daily analytics (first, mid, last)
-      const sampleDates = [dates[0], dates[Math.floor(dates.length / 2)], dates[dates.length - 1]];
+      // Batch arrays for bulk insert
+      const empDailyBatch: Parameters<typeof prisma.employeeAnalyticsDaily.createMany>[0]['data'] = [];
+      const attDailyBatch: Parameters<typeof prisma.attendanceAnalyticsDaily.createMany>[0]['data'] = [];
 
-      for (const dateStr of sampleDates) {
+      for (const dateStr of workingDays) {
         const date = new Date(dateStr);
 
         // ── Employee Analytics Daily ──
-        const existing = await prisma.employeeAnalyticsDaily.findUnique({
-          where: { companyId_date_version: { companyId, date, version: 1 } },
-        });
-        if (!existing) {
-          const joiners = randomInt(0, 2);
-          const leavers = randomInt(0, 1);
-          const active = totalEmployees - randomInt(0, 3);
-          const probation = randomInt(1, Math.max(1, Math.floor(totalEmployees * 0.15)));
+        const joiners = randomInt(0, 2);
+        const leavers = randomInt(0, 1);
+        const active = totalEmployees - randomInt(0, 3);
+        const probation = randomInt(1, Math.max(1, Math.floor(totalEmployees * 0.15)));
 
-          await prisma.employeeAnalyticsDaily.create({
-            data: {
-              companyId,
-              date,
-              version: 1,
-              totalHeadcount: totalEmployees,
-              activeCount: active,
-              probationCount: probation,
-              noticeCount: randomInt(0, 2),
-              separatedCount: leavers,
-              joinersCount: joiners,
-              leaversCount: leavers,
-              transfersCount: randomInt(0, 1),
-              promotionsCount: randomInt(0, 1),
-              byDepartment: deptBreakdown,
-              byLocation: locBreakdown,
-              byGrade: gradeBreakdown,
-              byEmployeeType: { fullTime: Math.floor(totalEmployees * 0.8), contract: Math.floor(totalEmployees * 0.2) },
-              byGender: { MALE: Math.floor(totalEmployees * 0.6), FEMALE: Math.floor(totalEmployees * 0.4) },
-              byAgeBand: { '20-30': Math.floor(totalEmployees * 0.35), '30-40': Math.floor(totalEmployees * 0.4), '40-50': Math.floor(totalEmployees * 0.2), '50+': Math.floor(totalEmployees * 0.05) },
-              byTenureBand: { '<1yr': Math.floor(totalEmployees * 0.3), '1-3yr': Math.floor(totalEmployees * 0.4), '3-5yr': Math.floor(totalEmployees * 0.2), '5yr+': Math.floor(totalEmployees * 0.1) },
-              avgSpanOfControl: randomDecimal(3, 8, 1),
-              vacancyRate: randomDecimal(2, 10, 1),
-            },
-          });
-          empDailyCreated++;
-        }
+        empDailyBatch.push({
+          companyId,
+          date,
+          version: 1,
+          totalHeadcount: totalEmployees,
+          activeCount: active,
+          probationCount: probation,
+          noticeCount: randomInt(0, 2),
+          separatedCount: leavers,
+          joinersCount: joiners,
+          leaversCount: leavers,
+          transfersCount: randomInt(0, 1),
+          promotionsCount: randomInt(0, 1),
+          byDepartment: deptBreakdown,
+          byLocation: locBreakdown,
+          byGrade: gradeBreakdown,
+          byEmployeeType: { fullTime: Math.floor(totalEmployees * 0.8), contract: Math.floor(totalEmployees * 0.2) },
+          byGender: { MALE: Math.floor(totalEmployees * 0.6), FEMALE: Math.floor(totalEmployees * 0.4) },
+          byAgeBand: { '20-30': Math.floor(totalEmployees * 0.35), '30-40': Math.floor(totalEmployees * 0.4), '40-50': Math.floor(totalEmployees * 0.2), '50+': Math.floor(totalEmployees * 0.05) },
+          byTenureBand: { '<1yr': Math.floor(totalEmployees * 0.3), '1-3yr': Math.floor(totalEmployees * 0.4), '3-5yr': Math.floor(totalEmployees * 0.2), '5yr+': Math.floor(totalEmployees * 0.1) },
+          avgSpanOfControl: randomDecimal(3, 8, 1),
+          vacancyRate: randomDecimal(2, 10, 1),
+        });
 
         // ── Attendance Analytics Daily ──
-        const existingAtt = await prisma.attendanceAnalyticsDaily.findUnique({
-          where: { companyId_date_version: { companyId, date, version: 1 } },
-        });
-        if (!existingAtt) {
-          const present = Math.floor(totalEmployees * randomDecimal(0.8, 0.95));
-          const onLeave = randomInt(1, Math.max(1, Math.floor(totalEmployees * 0.1)));
-          const absent = Math.max(0, totalEmployees - present - onLeave - randomInt(0, 2));
+        const present = Math.floor(totalEmployees * randomDecimal(0.85, 0.95));
+        const onLeave = randomInt(1, Math.max(1, Math.floor(totalEmployees * 0.1)));
+        const absent = Math.max(0, totalEmployees - present - onLeave - randomInt(0, 2));
 
-          await prisma.attendanceAnalyticsDaily.create({
-            data: {
-              companyId,
-              date,
-              version: 1,
-              totalEmployees,
-              presentCount: present,
-              absentCount: absent,
-              lateCount: randomInt(0, Math.floor(totalEmployees * 0.1)),
-              halfDayCount: randomInt(0, 3),
-              onLeaveCount: onLeave,
-              weekOffCount: 0,
-              holidayCount: 0,
-              avgWorkedHours: randomDecimal(7.5, 9, 1),
-              totalOvertimeHours: randomDecimal(0, 15, 1),
-              totalOvertimeCost: randomDecimal(0, 5000),
-              productivityIndex: randomDecimal(0.85, 0.98, 2),
-              avgLateMinutes: randomDecimal(5, 20, 1),
-              lateThresholdBreaches: randomInt(0, 5),
-              regularizationCount: randomInt(0, 3),
-              missedPunchCount: randomInt(0, 4),
-              byDepartment: deptBreakdown,
-              byLocation: locBreakdown,
-              byShift: { General: present, Night: 0 },
-              bySource: { BIOMETRIC: Math.floor(present * 0.6), MOBILE_GPS: Math.floor(present * 0.3), MANUAL: Math.floor(present * 0.1) },
-            },
-          });
-          attDailyCreated++;
-        }
+        attDailyBatch.push({
+          companyId,
+          date,
+          version: 1,
+          totalEmployees,
+          presentCount: present,
+          absentCount: absent,
+          lateCount: randomInt(0, Math.floor(totalEmployees * 0.1)),
+          halfDayCount: randomInt(0, 3),
+          onLeaveCount: onLeave,
+          weekOffCount: 0,
+          holidayCount: 0,
+          avgWorkedHours: randomDecimal(7.5, 9, 1),
+          totalOvertimeHours: randomDecimal(0, 15, 1),
+          totalOvertimeCost: randomDecimal(0, 5000),
+          productivityIndex: randomDecimal(0.85, 0.98, 2),
+          avgLateMinutes: randomDecimal(5, 20, 1),
+          lateThresholdBreaches: randomInt(0, 5),
+          regularizationCount: randomInt(0, 3),
+          missedPunchCount: randomInt(0, 4),
+          byDepartment: deptBreakdown,
+          byLocation: locBreakdown,
+          byShift: { General: present, Night: 0 },
+          bySource: { BIOMETRIC: Math.floor(present * 0.6), MOBILE_GPS: Math.floor(present * 0.3), MANUAL: Math.floor(present * 0.1) },
+        });
+      }
+
+      // Bulk insert daily analytics
+      if (empDailyBatch.length > 0) {
+        const empResult = await prisma.employeeAnalyticsDaily.createMany({
+          data: empDailyBatch,
+          skipDuplicates: true,
+        });
+        empDailyCreated += empResult.count;
+      }
+
+      if (attDailyBatch.length > 0) {
+        const attResult = await prisma.attendanceAnalyticsDaily.createMany({
+          data: attDailyBatch,
+          skipDuplicates: true,
+        });
+        attDailyCreated += attResult.count;
       }
 
       // ── Payroll Analytics Monthly ──
@@ -128,9 +138,12 @@ export const seeder: SeederModule = {
         where: { companyId_month_year_version: { companyId, month, year, version: 1 } },
       });
       if (!existingPayroll) {
-        const avgCtc = 900000;
-        const monthlyGross = (avgCtc / 12) * totalEmployees;
-        const deductions = monthlyGross * 0.25;
+        // Compute realistic values from actual employee CTCs
+        const activeEmps = Array.from(employeeMap.values()).filter((e) => e.status === 'ACTIVE');
+        const totalCtc = activeEmps.reduce((sum, e) => sum + e.annualCtc, 0);
+        const avgCtc = activeEmps.length > 0 ? Math.round(totalCtc / activeEmps.length) : 900000;
+        const monthlyGross = Math.round(totalCtc / 12);
+        const deductions = Math.round(monthlyGross * 0.25);
         const netPay = monthlyGross - deductions;
 
         await prisma.payrollAnalyticsMonthly.create({
