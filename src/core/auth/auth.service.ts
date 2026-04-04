@@ -777,15 +777,13 @@ export class AuthService {
     // SUPER_ADMIN always gets wildcard — platform-level, not tenant-scoped
     if (user.role === 'SUPER_ADMIN') return ['*'];
 
-    // COMPANY_ADMIN: full tenant access (must match auth.middleware — do not rely only on
-    // TenantUser→Role, or login/cache can end up with empty perms when modules are unset or RBAC cache misses).
-    if (user.role === 'COMPANY_ADMIN') return ['*'];
-
-    // Resolve tenantId if not provided
+    // Resolve tenantId
     const resolvedTenantId = tenantId || user.company?.tenant?.id;
     if (!resolvedTenantId) return [];
 
-    // Fetch permissions from TenantUser→Role (with Redis caching inside rbacService)
+    // All company users (COMPANY_ADMIN and USER) get permissions from TenantUser→Role.
+    // The "Company Admin" system role in the tenant has full permissions by default.
+    // Regular users/employees get whatever permissions their assigned role has.
     return rbacService.getUserPermissions(userId, resolvedTenantId);
   }
 
