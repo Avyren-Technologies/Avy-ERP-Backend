@@ -281,20 +281,52 @@ export class RbacService {
       }
     }
 
+    const isCompanyAdmin = userRole === 'COMPANY_ADMIN';
+    // Subscription is enforced for employees/managers via permissions + module list.
+    // Company admins must see the full company nav to configure modules and HR/ops —
+    // selectedModuleIds is often empty or incomplete while onboarding; do not hide by module.
+    const bypassModuleSubscription = isCompanyAdmin;
+
+    // Debug: log inputs to help diagnose missing nav items
+    logger.debug('nav_manifest_filter_inputs', {
+      userRole,
+      isCompanyAdmin,
+      isSuperAdmin,
+      bypassModuleSubscription,
+      permissionCount: userPermissions.length,
+      hasWildcard: userPermissions.includes('*'),
+      activeModuleIds,
+      essConfigKeys: Object.keys(essConfig),
+      systemControlsKeys: Object.keys(systemControls),
+    });
+
     const filtered = NAVIGATION_MANIFEST.filter((item) => {
       // Role scope filter
       if (item.roleScope === 'super_admin' && !isSuperAdmin) return false;
       if (item.roleScope === 'company' && isSuperAdmin) return false;
 
       // Module subscription filter (skip for system items with module: null)
-      if (item.module && !activeModuleIds.includes(item.module)) return false;
+      if (
+        item.module &&
+        !bypassModuleSubscription &&
+        !activeModuleIds.includes(item.module)
+      ) {
+        logger.debug('nav_item_filtered_by_module', { id: item.id, module: item.module });
+        return false;
+      }
 
       // Permission filter
-      if (item.requiredPerm && !hasPermission(userPermissions, item.requiredPerm)) return false;
+      if (item.requiredPerm && !hasPermission(userPermissions, item.requiredPerm)) {
+        logger.debug('nav_item_filtered_by_permission', { id: item.id, requiredPerm: item.requiredPerm });
+        return false;
+      }
 
       // SystemControls module enablement filter
       const sysField = NAV_TO_SYSTEM_MODULE[item.id];
-      if (sysField && systemControls[sysField] === false) return false;
+      if (sysField && systemControls[sysField] === false) {
+        logger.debug('nav_item_filtered_by_system_controls', { id: item.id, sysField });
+        return false;
+      }
 
       // ESS config feature filter (only for ess-* and mss-* items)
       const essField = NAV_TO_ESS_CONFIG[item.id];
@@ -303,6 +335,7 @@ export class RbacService {
         if (essField === 'aiChatbotEnabled') {
           if (systemControls[essField] === false) return false;
         } else if (essConfig[essField] === false) {
+          logger.debug('nav_item_filtered_by_ess_config', { id: item.id, essField, value: essConfig[essField] });
           return false;
         }
       }
