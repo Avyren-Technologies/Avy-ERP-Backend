@@ -6,6 +6,11 @@ import { logger } from '../../../config/logger';
 import { hashPassword, generateNextNumber } from '../../../shared/utils';
 import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { LeaveService } from '../leave/leave.service';
+import {
+  computeProbationEndDateFromMasters,
+  normalizeProbationEndForDb,
+  parseHrDateInput,
+} from '../../../shared/utils/employee-probation-notice';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -185,19 +190,49 @@ export class EmployeeService {
     const employee = await platformPrisma.$transaction(async (tx) => {
           const employeeId = await generateNextNumber(tx as any, companyId, ['Employee', 'Employee Onboarding'], 'Employee');
 
-          // Calculate probation end date if grade has probationMonths
-          let probationEndDate: Date | null = null;
-          if (data.gradeId) {
-            const grade = await tx.grade.findUnique({
-              where: { id: data.gradeId },
-              select: { probationMonths: true },
-            });
-            if (grade?.probationMonths) {
-              const joiningDate = new Date(data.joiningDate);
-              probationEndDate = new Date(joiningDate);
-              probationEndDate.setMonth(probationEndDate.getMonth() + grade.probationMonths);
-            }
+          const [designationRow, gradeRow] = await Promise.all([
+            data.designationId
+              ? tx.designation.findUnique({
+                  where: { id: data.designationId },
+                  select: { probationDays: true },
+                })
+              : null,
+            data.gradeId
+              ? tx.grade.findUnique({
+                  where: { id: data.gradeId },
+                  select: { probationMonths: true, noticeDays: true },
+                })
+              : null,
+          ]);
+
+          const joiningDateObj = parseHrDateInput(data.joiningDate);
+          if (!joiningDateObj) {
+            throw ApiError.badRequest('Invalid or out-of-range joining date');
           }
+
+          const dateOfBirthParsed = parseHrDateInput(data.dateOfBirth);
+          if (!dateOfBirthParsed) {
+            throw ApiError.badRequest('Invalid or out-of-range date of birth');
+          }
+
+          let noticePeriodDays = n(data.noticePeriodDays);
+          if (noticePeriodDays == null && gradeRow?.noticeDays != null) {
+            noticePeriodDays = gradeRow.noticeDays;
+          }
+
+          let probationEndDate: Date | null = null;
+          if (data.probationEndDate) {
+            probationEndDate = normalizeProbationEndForDb(parseHrDateInput(data.probationEndDate));
+          }
+          if (probationEndDate == null) {
+            probationEndDate = computeProbationEndDateFromMasters({
+              joiningDate: joiningDateObj,
+              designationProbationDays: designationRow?.probationDays ?? null,
+              gradeProbationMonths: gradeRow?.probationMonths ?? null,
+            });
+          }
+
+          const passportExpiryParsed = data.passportExpiry ? parseHrDateInput(data.passportExpiry) : null;
 
           const employee = await tx.employee.create({
             data: {
@@ -208,7 +243,7 @@ export class EmployeeService {
               firstName: data.firstName,
               middleName: n(data.middleName),
               lastName: data.lastName,
-              dateOfBirth: new Date(data.dateOfBirth),
+              dateOfBirth: dateOfBirthParsed,
               gender: data.gender,
               maritalStatus: n(data.maritalStatus),
               bloodGroup: n(data.bloodGroup),
@@ -232,7 +267,7 @@ export class EmployeeService {
               emergencyContactMobile: data.emergencyContactMobile,
 
               // Professional
-              joiningDate: new Date(data.joiningDate),
+              joiningDate: joiningDateObj,
               employeeTypeId: data.employeeTypeId,
               departmentId: data.departmentId,
               designationId: data.designationId,
@@ -243,7 +278,7 @@ export class EmployeeService {
               shiftId: n(data.shiftId),
               costCentreId: n(data.costCentreId),
               locationId: n(data.locationId),
-              noticePeriodDays: n(data.noticePeriodDays),
+              noticePeriodDays,
               probationEndDate,
 
               // Salary
@@ -264,7 +299,7 @@ export class EmployeeService {
               uan: n(data.uan),
               esiIpNumber: n(data.esiIpNumber),
               passportNumber: n(data.passportNumber),
-              passportExpiry: data.passportExpiry ? new Date(data.passportExpiry) : null,
+              passportExpiry: passportExpiryParsed,
               drivingLicence: n(data.drivingLicence),
               voterId: n(data.voterId),
               pran: n(data.pran),
@@ -386,7 +421,7 @@ export class EmployeeService {
           });
           if (defaultTemplate) {
             const items = defaultTemplate.items as any[];
-            const joiningDate = new Date(data.joiningDate);
+            const joiningDate = joiningDateObj;
             const tasks = items.map((item: any) => ({
               employeeId: employee.id,
               templateId: defaultTemplate.id,
@@ -512,20 +547,47 @@ export class EmployeeService {
       });
     }
 
-    // Recalculate probation end date if grade changes
-    let probationEndDate: Date | null | undefined = undefined;
-    if (data.gradeId && data.gradeId !== existing.gradeId) {
-      const grade = await platformPrisma.grade.findUnique({
-        where: { id: data.gradeId },
-        select: { probationMonths: true },
-      });
-      if (grade?.probationMonths) {
-        const joiningDate = data.joiningDate ? new Date(data.joiningDate) : existing.joiningDate;
-        probationEndDate = new Date(joiningDate);
-        probationEndDate.setMonth(probationEndDate.getMonth() + grade.probationMonths);
-      } else {
-        probationEndDate = null;
+    const nextDesignationId = data.designationId ?? existing.designationId;
+    const nextGradeId = data.gradeId ?? existing.gradeId;
+
+    let joiningForProbation = existing.joiningDate;
+    if (data.joiningDate !== undefined) {
+      const j = parseHrDateInput(data.joiningDate);
+      if (!j) {
+        throw ApiError.badRequest('Invalid or out-of-range joining date');
       }
+      joiningForProbation = j;
+    }
+
+    let probationEndDate: Date | null | undefined = undefined;
+    if (data.probationEndDate !== undefined) {
+      probationEndDate = data.probationEndDate
+        ? normalizeProbationEndForDb(parseHrDateInput(data.probationEndDate))
+        : null;
+    } else if (
+      (data.designationId && data.designationId !== existing.designationId) ||
+      (data.gradeId && data.gradeId !== existing.gradeId) ||
+      data.joiningDate !== undefined
+    ) {
+      const [designationRow, gradeRow] = await Promise.all([
+        nextDesignationId
+          ? platformPrisma.designation.findUnique({
+              where: { id: nextDesignationId },
+              select: { probationDays: true },
+            })
+          : null,
+        nextGradeId
+          ? platformPrisma.grade.findUnique({
+              where: { id: nextGradeId },
+              select: { probationMonths: true, noticeDays: true },
+            })
+          : null,
+      ]);
+      probationEndDate = computeProbationEndDateFromMasters({
+        joiningDate: joiningForProbation,
+        designationProbationDays: designationRow?.probationDays ?? null,
+        gradeProbationMonths: gradeRow?.probationMonths ?? null,
+      });
     }
 
     // Build update data, only including provided fields
@@ -535,7 +597,13 @@ export class EmployeeService {
     if (data.firstName !== undefined) updateData.firstName = data.firstName;
     if (data.middleName !== undefined) updateData.middleName = n(data.middleName);
     if (data.lastName !== undefined) updateData.lastName = data.lastName;
-    if (data.dateOfBirth !== undefined) updateData.dateOfBirth = new Date(data.dateOfBirth);
+    if (data.dateOfBirth !== undefined) {
+      const dob = parseHrDateInput(data.dateOfBirth);
+      if (!dob) {
+        throw ApiError.badRequest('Invalid or out-of-range date of birth');
+      }
+      updateData.dateOfBirth = dob;
+    }
     if (data.gender !== undefined) updateData.gender = data.gender;
     if (data.maritalStatus !== undefined) updateData.maritalStatus = n(data.maritalStatus);
     if (data.bloodGroup !== undefined) updateData.bloodGroup = n(data.bloodGroup);
@@ -559,7 +627,7 @@ export class EmployeeService {
     if (data.emergencyContactMobile !== undefined) updateData.emergencyContactMobile = data.emergencyContactMobile;
 
     // Professional
-    if (data.joiningDate !== undefined) updateData.joiningDate = new Date(data.joiningDate);
+    if (data.joiningDate !== undefined) updateData.joiningDate = joiningForProbation;
     if (data.employeeTypeId !== undefined) updateData.employeeTypeId = data.employeeTypeId;
     if (data.departmentId !== undefined) updateData.departmentId = data.departmentId;
     if (data.designationId !== undefined) updateData.designationId = data.designationId;
@@ -570,7 +638,17 @@ export class EmployeeService {
     if (data.shiftId !== undefined) updateData.shiftId = n(data.shiftId);
     if (data.costCentreId !== undefined) updateData.costCentreId = n(data.costCentreId);
     if (data.locationId !== undefined) updateData.locationId = n(data.locationId);
-    if (data.noticePeriodDays !== undefined) updateData.noticePeriodDays = n(data.noticePeriodDays);
+    if (data.noticePeriodDays !== undefined) {
+      updateData.noticePeriodDays = n(data.noticePeriodDays);
+    } else if (data.gradeId && data.gradeId !== existing.gradeId) {
+      const g = await platformPrisma.grade.findUnique({
+        where: { id: data.gradeId },
+        select: { noticeDays: true },
+      });
+      if (g?.noticeDays != null) {
+        updateData.noticePeriodDays = g.noticeDays;
+      }
+    }
     if (probationEndDate !== undefined) updateData.probationEndDate = probationEndDate;
 
     // Salary
@@ -591,7 +669,12 @@ export class EmployeeService {
     if (data.uan !== undefined) updateData.uan = n(data.uan);
     if (data.esiIpNumber !== undefined) updateData.esiIpNumber = n(data.esiIpNumber);
     if (data.passportNumber !== undefined) updateData.passportNumber = n(data.passportNumber);
-    if (data.passportExpiry !== undefined) updateData.passportExpiry = data.passportExpiry ? new Date(data.passportExpiry) : null;
+    if (data.passportExpiry !== undefined) {
+      updateData.passportExpiry = data.passportExpiry ? parseHrDateInput(data.passportExpiry) : null;
+      if (data.passportExpiry && updateData.passportExpiry == null) {
+        throw ApiError.badRequest('Invalid or out-of-range passport expiry date');
+      }
+    }
     if (data.drivingLicence !== undefined) updateData.drivingLicence = n(data.drivingLicence);
     if (data.voterId !== undefined) updateData.voterId = n(data.voterId);
     if (data.pran !== undefined) updateData.pran = n(data.pran);

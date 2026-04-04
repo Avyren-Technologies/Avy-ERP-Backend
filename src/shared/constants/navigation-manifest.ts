@@ -238,9 +238,12 @@ function collapseChildPaths(items: NavigationItem[]): NavigationItem[] {
       continue;
     }
 
-    const children = childCandidates
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map((candidate) => ({ label: candidate.label, path: candidate.path }));
+    const children = [
+      { label: 'Overview', path: item.path },
+      ...childCandidates
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((candidate) => ({ label: candidate.label, path: candidate.path })),
+    ];
 
     childCandidates.forEach((candidate) => consumed.add(candidate.id));
     result.push({ ...item, children });
