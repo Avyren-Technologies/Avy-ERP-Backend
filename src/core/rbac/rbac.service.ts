@@ -185,17 +185,30 @@ export class RbacService {
       throw new ApiError('Role not found', HttpStatus.NOT_FOUND, true, 'ROLE_NOT_FOUND');
     }
 
-    // Upsert tenant user record
-    await platformPrisma.tenantUser.upsert({
-      where: { userId_tenantId: { userId, tenantId } },
-      create: { userId, tenantId, roleId },
-      update: { roleId, isActive: true },
-    });
+    // Determine the platform-level UserRole based on the tenant role.
+    // Only the system "Company Admin" role gets COMPANY_ADMIN; all others get USER.
+    // This ensures the auth system respects TenantUser→Role permissions for non-admins.
+    const isCompanyAdminRole = role.isSystem && role.name === 'Company Admin';
+    const platformRole = isCompanyAdminRole ? 'COMPANY_ADMIN' : 'USER';
+
+    // Upsert tenant user record + sync User.role
+    await platformPrisma.$transaction([
+      platformPrisma.tenantUser.upsert({
+        where: { userId_tenantId: { userId, tenantId } },
+        create: { userId, tenantId, roleId },
+        update: { roleId, isActive: true },
+      }),
+      platformPrisma.user.update({
+        where: { id: userId },
+        data: { role: platformRole },
+      }),
+    ]);
 
     // Invalidate user's cached permissions
     await cacheRedis.del(createUserCacheKey(userId, 'auth'));
+    await cacheRedis.del(createUserPermissionsCacheKey(userId, tenantId));
 
-    logger.info(`Role ${role.name} assigned to user ${userId} in tenant ${tenantId}`);
+    logger.info(`Role ${role.name} (platform: ${platformRole}) assigned to user ${userId} in tenant ${tenantId}`);
   }
 
   // Get permissions for a user in a specific tenant (used by auth middleware)

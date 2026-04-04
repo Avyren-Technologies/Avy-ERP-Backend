@@ -999,6 +999,19 @@ export class CompanyAdminService {
         }
       }
 
+      // Determine the platform-level UserRole based on the assigned tenant role.
+      // Only the system "Company Admin" role gets COMPANY_ADMIN; all others get USER.
+      let platformRole: 'COMPANY_ADMIN' | 'USER' = 'USER';
+      if (tenantId && data.role) {
+        const assignedRole = await tx.role.findFirst({
+          where: { id: data.role, tenantId },
+          select: { isSystem: true, name: true },
+        });
+        if (assignedRole?.isSystem && assignedRole.name === 'Company Admin') {
+          platformRole = 'COMPANY_ADMIN';
+        }
+      }
+
       const user = await tx.user.create({
         data: {
           email: data.email,
@@ -1006,7 +1019,7 @@ export class CompanyAdminService {
           firstName: data.firstName,
           lastName: data.lastName,
           phone: n(data.phone),
-          role: 'COMPANY_ADMIN',
+          role: platformRole,
           companyId,
           employeeId,
         },

@@ -124,8 +124,9 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
 
       const user = JSON.parse(userData);
 
-      // Stale Redis cache from older login could store empty permissions for company admins.
-      if (user.roleId === 'SUPER_ADMIN' || user.roleId === 'COMPANY_ADMIN') {
+      // Stale Redis cache safeguard — only force wildcard for platform-level admins.
+      // USER role users get their permissions from TenantUser→Role (not forced here).
+      if (user.roleId === 'SUPER_ADMIN') {
         user.permissions = ['*'];
       }
 

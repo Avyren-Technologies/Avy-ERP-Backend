@@ -115,4 +115,5 @@ model TenantUser {
 enum UserRole {
   SUPER_ADMIN
   COMPANY_ADMIN
+  USER
 }
