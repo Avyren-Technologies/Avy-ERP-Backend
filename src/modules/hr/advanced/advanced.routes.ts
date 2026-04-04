@@ -126,11 +126,19 @@ router.delete('/letter-templates/:id', requirePermissions(['hr:delete']), contro
 router.get('/hr-letters', requirePermissions(['hr:read']), controller.listLetters);
 router.post('/hr-letters', requirePermissions(['hr:create']), controller.createLetter);
 // E-Sign routes MUST come before :id to avoid "pending-esign" being captured as an ID
-router.get('/hr-letters/pending-esign', requirePermissions(['hr:read']), controller.listPendingESignLetters);
+router.get(
+  '/hr-letters/pending-esign',
+  requirePermissions(['hr:read', 'ess:view-esign']),
+  controller.listPendingESignLetters,
+);
 router.post('/hr-letters/esign-callback', controller.processESignCallback);
 router.get('/hr-letters/:id', requirePermissions(['hr:read']), controller.getLetter);
 router.post('/hr-letters/:id/dispatch-esign', requirePermissions(['hr:update']), controller.dispatchESign);
-router.get('/hr-letters/:id/esign-status', requirePermissions(['hr:read']), controller.getESignStatus);
+router.get(
+  '/hr-letters/:id/esign-status',
+  requirePermissions(['hr:read', 'ess:view-esign']),
+  controller.getESignStatus,
+);
 router.delete('/hr-letters/:id', requirePermissions(['hr:delete']), controller.deleteLetter);
 
 // ═══════════════════════════════════════════════════════════════════
@@ -155,9 +163,17 @@ router.delete('/grievance-cases/:id', requirePermissions(['hr:delete']), control
 // ═══════════════════════════════════════════════════════════════════
 // DISCIPLINARY ACTIONS
 // ═══════════════════════════════════════════════════════════════════
-router.get('/disciplinary-actions', requirePermissions(['hr:read']), controller.listDisciplinaryActions);
+router.get(
+  '/disciplinary-actions',
+  requirePermissions(['hr:read', 'ess:view-disciplinary']),
+  controller.listDisciplinaryActions,
+);
 router.post('/disciplinary-actions', requirePermissions(['hr:create']), controller.createDisciplinaryAction);
-router.get('/disciplinary-actions/:id', requirePermissions(['hr:read']), controller.getDisciplinaryAction);
+router.get(
+  '/disciplinary-actions/:id',
+  requirePermissions(['hr:read', 'ess:view-disciplinary']),
+  controller.getDisciplinaryAction,
+);
 router.patch('/disciplinary-actions/:id', requirePermissions(['hr:update']), controller.updateDisciplinaryAction);
 router.delete('/disciplinary-actions/:id', requirePermissions(['hr:delete']), controller.deleteDisciplinaryAction);
 

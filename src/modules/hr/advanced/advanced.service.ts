@@ -2668,9 +2668,17 @@ export class AdvancedHRService {
     });
   }
 
-  async getESignStatus(companyId: string, letterId: string) {
-    const letter = await platformPrisma.hRLetter.findUnique({
-      where: { id: letterId },
+  async getESignStatus(
+    companyId: string,
+    letterId: string,
+    options?: { employeeId?: string },
+  ) {
+    const letter = await platformPrisma.hRLetter.findFirst({
+      where: {
+        id: letterId,
+        companyId,
+        ...(options?.employeeId ? { employeeId: options.employeeId } : {}),
+      },
       select: {
         id: true,
         eSignStatus: true,
@@ -2686,11 +2694,12 @@ export class AdvancedHRService {
     return letter;
   }
 
-  async listPendingESignLetters(companyId: string) {
+  async listPendingESignLetters(companyId: string, options?: { employeeId?: string }) {
     const letters = await platformPrisma.hRLetter.findMany({
       where: {
         companyId,
         eSignStatus: 'PENDING',
+        ...(options?.employeeId ? { employeeId: options.employeeId } : {}),
       },
       include: {
         employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },

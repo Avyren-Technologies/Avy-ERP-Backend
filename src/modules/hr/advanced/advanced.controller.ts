@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { advancedHRService } from './advanced.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../../shared/utils';
 import { asyncHandler } from '../../../middleware/error.middleware';
-import { ApiError } from '../../../shared/errors';
+import { ApiError, AuthError } from '../../../shared/errors';
+import { hasPermission } from '../../../shared/constants/permissions';
 import {
   createRequisitionSchema,
   updateRequisitionSchema,
@@ -1011,22 +1012,65 @@ export class AdvancedHRController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
+    const perms = req.user?.permissions ?? [];
+    const isHr = hasPermission(perms, 'hr:read');
+
     const { page, limit } = getPaginationParams(req.query);
-    const opts: any = { page, limit };
-    if (req.query.employeeId) opts.employeeId = req.query.employeeId as string;
+    const opts: {
+      page: number;
+      limit: number;
+      employeeId?: string;
+      type?: string;
+      status?: string;
+    } = { page, limit };
     if (req.query.type) opts.type = req.query.type as string;
     if (req.query.status) opts.status = req.query.status as string;
 
+    if (isHr) {
+      if (req.query.employeeId) opts.employeeId = req.query.employeeId as string;
+    } else {
+      if (!hasPermission(perms, 'ess:view-disciplinary')) {
+        throw AuthError.insufficientPermissions();
+      }
+      if (!req.user?.employeeId) {
+        return res.json(
+          createPaginatedResponse([], page, limit, 0, 'Disciplinary actions retrieved'),
+        );
+      }
+      opts.employeeId = req.user.employeeId;
+    }
+
     const result = await advancedHRService.listDisciplinaryActions(companyId, opts);
-    res.json(createPaginatedResponse(result.actions, result.page, result.limit, result.total, 'Disciplinary actions retrieved'));
+    return res.json(
+      createPaginatedResponse(
+        result.actions,
+        result.page,
+        result.limit,
+        result.total,
+        'Disciplinary actions retrieved',
+      ),
+    );
   });
 
   getDisciplinaryAction = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
+    const perms = req.user?.permissions ?? [];
+    const isHr = hasPermission(perms, 'hr:read');
+
     const action = await advancedHRService.getDisciplinaryAction(companyId, req.params.id!);
-    res.json(createSuccessResponse(action, 'Disciplinary action retrieved'));
+
+    if (!isHr) {
+      if (!hasPermission(perms, 'ess:view-disciplinary') || !req.user?.employeeId) {
+        throw AuthError.insufficientPermissions();
+      }
+      if (action.employeeId !== req.user.employeeId) {
+        throw ApiError.notFound('Disciplinary action not found');
+      }
+    }
+
+    return res.json(createSuccessResponse(action, 'Disciplinary action retrieved'));
   });
 
   createDisciplinaryAction = asyncHandler(async (req: Request, res: Response) => {
@@ -1150,16 +1194,43 @@ export class AdvancedHRController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const status = await advancedHRService.getESignStatus(companyId, req.params.id!);
-    res.json(createSuccessResponse(status, 'E-sign status retrieved'));
+    const perms = req.user?.permissions ?? [];
+    const isHr = hasPermission(perms, 'hr:read');
+    let essEmployeeId: string | undefined;
+    if (!isHr) {
+      if (!hasPermission(perms, 'ess:view-esign') || !req.user?.employeeId) {
+        throw AuthError.insufficientPermissions();
+      }
+      essEmployeeId = req.user.employeeId;
+    }
+
+    const status = await advancedHRService.getESignStatus(companyId, req.params.id!, {
+      ...(essEmployeeId ? { employeeId: essEmployeeId } : {}),
+    });
+    return res.json(createSuccessResponse(status, 'E-sign status retrieved'));
   });
 
   listPendingESignLetters = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const letters = await advancedHRService.listPendingESignLetters(companyId);
-    res.json(createSuccessResponse(letters, 'Pending e-sign letters retrieved'));
+    const perms = req.user?.permissions ?? [];
+    const isHr = hasPermission(perms, 'hr:read');
+    let essEmployeeId: string | undefined;
+    if (!isHr) {
+      if (!hasPermission(perms, 'ess:view-esign')) {
+        throw AuthError.insufficientPermissions();
+      }
+      if (!req.user?.employeeId) {
+        return res.json(createSuccessResponse([], 'Pending e-sign letters retrieved'));
+      }
+      essEmployeeId = req.user.employeeId;
+    }
+
+    const letters = await advancedHRService.listPendingESignLetters(companyId, {
+      ...(essEmployeeId ? { employeeId: essEmployeeId } : {}),
+    });
+    return res.json(createSuccessResponse(letters, 'Pending e-sign letters retrieved'));
   });
 
   // ════════════════════════════════════════════════════════════════

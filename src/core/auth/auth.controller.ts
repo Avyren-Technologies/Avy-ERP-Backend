@@ -110,21 +110,30 @@ export class AuthController {
     const user = req.user!;
     let roleName: string | null = null;
 
-    if (user.tenantId) {
-      const tenantUser = await platformPrisma.tenantUser.findUnique({
-        where: {
-          userId_tenantId: {
-            userId: user.id,
-            tenantId: user.tenantId,
-          },
-        },
-        select: {
-          role: {
-            select: { name: true },
-          },
-        },
-      });
-      roleName = tenantUser?.role?.name ?? null;
+    const [tenantUserRow, mfaRow] = await Promise.all([
+      user.tenantId
+        ? platformPrisma.tenantUser.findUnique({
+            where: {
+              userId_tenantId: {
+                userId: user.id,
+                tenantId: user.tenantId,
+              },
+            },
+            select: {
+              role: {
+                select: { name: true },
+              },
+            },
+          })
+        : Promise.resolve(null),
+      platformPrisma.user.findUnique({
+        where: { id: user.id },
+        select: { mfaEnabled: true },
+      }),
+    ]);
+
+    if (tenantUserRow) {
+      roleName = tenantUserRow.role?.name ?? null;
     }
 
     res.json(createSuccessResponse({
@@ -138,6 +147,7 @@ export class AuthController {
         permissions: user.permissions,
         tenantId: user.tenantId,
         companyId: user.companyId,
+        mfaEnabled: mfaRow?.mfaEnabled ?? false,
       },
     }));
   });
