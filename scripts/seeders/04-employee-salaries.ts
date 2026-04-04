@@ -1,5 +1,6 @@
 import type { SeederModule } from './types';
 import { log, vlog } from './types';
+import { ctcForGrade } from './utils';
 
 const MODULE = 'employee-salaries';
 
@@ -47,10 +48,16 @@ export const seeder: SeederModule = {
     const structureByCode = new Map(structures.map((s) => [s.code, s]));
 
     const getStructureForGrade = (gradeCode: string) => {
-      if (gradeCode === 'G1' || gradeCode === 'G2') return structureByCode.get('STD-JR');
-      if (gradeCode === 'G3') return structureByCode.get('STD-MID');
-      if (gradeCode === 'G4' || gradeCode === 'G5') return structureByCode.get('STD-SR');
-      // Fallback to first available
+      // Try grade-specific structures first, fall back to first available
+      if (gradeCode === 'G1' || gradeCode === 'G2') {
+        return structureByCode.get('STD-JR') || structures[0];
+      }
+      if (gradeCode === 'G3') {
+        return structureByCode.get('STD-MID') || structures[0];
+      }
+      if (gradeCode === 'G4' || gradeCode === 'G5') {
+        return structureByCode.get('STD-SR') || structures[0];
+      }
       return structures[0];
     };
 
@@ -66,7 +73,7 @@ export const seeder: SeederModule = {
       const structure = getStructureForGrade(emp.gradeCode);
       if (!structure) continue;
 
-      const annualCtc = emp.annualCtc;
+      const annualCtc = emp.annualCtc > 0 ? emp.annualCtc : ctcForGrade(emp.gradeCode);
       const structComponents = structure.components as Array<{
         componentId: string;
         calculationMethod: string;
