@@ -107,8 +107,12 @@ async function loadSeeders(only: string[] | null): Promise<SeederModule[]> {
 
   for (const file of files) {
     const mod = await import(path.join(seedersDir, file));
-    if (mod.default && typeof mod.default === 'object' && typeof mod.default.seed === 'function') {
-      const seeder = mod.default as SeederModule;
+    // Support both `export default { name, order, seed }` and `export const seeder = { ... }`
+    const seeder: SeederModule | undefined =
+      (mod.default && typeof mod.default.seed === 'function') ? mod.default :
+      (mod.seeder && typeof mod.seeder.seed === 'function') ? mod.seeder :
+      undefined;
+    if (seeder) {
       if (!only || only.includes(seeder.name)) {
         modules.push(seeder);
       }
@@ -133,24 +137,24 @@ async function buildSeedContext(
 
   // Fetch org structure from tenant DB (these use status: "Active", not isActive)
   const [departments, designations, grades, employeeTypes, costCentres] = await Promise.all([
-    tenantPrisma.department.findMany({ where: { companyId, status: 'Active' } }),
-    tenantPrisma.designation.findMany({ where: { companyId, status: 'Active' } }),
-    tenantPrisma.grade.findMany({ where: { companyId, status: 'Active' } }),
-    tenantPrisma.employeeType.findMany({ where: { companyId, status: 'Active' } }),
-    tenantPrisma.costCentre.findMany({ where: { companyId } }),
+    prisma.department.findMany({ where: { companyId, status: 'Active' } }),
+    prisma.designation.findMany({ where: { companyId, status: 'Active' } }),
+    prisma.grade.findMany({ where: { companyId, status: 'Active' } }),
+    prisma.employeeType.findMany({ where: { companyId, status: 'Active' } }),
+    prisma.costCentre.findMany({ where: { companyId } }),
   ]);
 
   // Fetch locations and shifts from tenant DB (company-admin models)
   const [locations, shifts] = await Promise.all([
-    tenantPrisma.location.findMany({ where: { companyId, status: 'Active' } }),
-    tenantPrisma.companyShift.findMany({ where: { companyId } }),
+    prisma.location.findMany({ where: { companyId, status: 'Active' } }),
+    prisma.companyShift.findMany({ where: { companyId } }),
   ]);
 
   // Fetch payroll config from tenant DB (these use isActive: Boolean)
   const [salaryComponents, salaryStructures, leaveTypes] = await Promise.all([
-    tenantPrisma.salaryComponent.findMany({ where: { companyId, isActive: true } }),
-    tenantPrisma.salaryStructure.findMany({ where: { companyId, isActive: true } }),
-    tenantPrisma.leaveType.findMany({ where: { companyId, isActive: true } }),
+    prisma.salaryComponent.findMany({ where: { companyId, isActive: true } }),
+    prisma.salaryStructure.findMany({ where: { companyId, isActive: true } }),
+    prisma.leaveType.findMany({ where: { companyId, isActive: true } }),
   ]);
 
   // Fetch roles from platform DB
@@ -166,7 +170,7 @@ async function buildSeedContext(
 
   // Fetch holidays for current year from tenant DB
   const currentYear = new Date().getFullYear();
-  const holidayRecords = await tenantPrisma.holidayCalendar.findMany({
+  const holidayRecords = await prisma.holidayCalendar.findMany({
     where: { companyId, year: currentYear },
   });
   const holidays = holidayRecords.map(h => ({
@@ -181,13 +185,13 @@ async function buildSeedContext(
   const weeklyOffs = (company.weeklyOffs as string[] | null) || ['Sunday'];
 
   // Fetch timezone from CompanySettings in tenant DB
-  const companySettings = await tenantPrisma.companySettings.findUnique({
+  const companySettings = await prisma.companySettings.findUnique({
     where: { companyId },
   });
   const timezone = companySettings?.timezone || 'Asia/Kolkata';
 
   // Fetch existing employees from tenant DB
-  const existingEmployees = await tenantPrisma.employee.findMany({
+  const existingEmployees = await prisma.employee.findMany({
     where: { companyId },
     include: { grade: true },
   });
