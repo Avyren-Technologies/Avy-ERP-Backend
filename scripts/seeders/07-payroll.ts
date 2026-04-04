@@ -104,28 +104,38 @@ const seed = async (ctx: SeedContext): Promise<void> => {
       runStatus = 'COMPUTED'; // most recent
     }
 
-    // Create PayrollRun
-    let payrollRun;
-    try {
-      payrollRun = await ctx.prisma.payrollRun.create({
-        data: {
-          month,
-          year,
-          status: runStatus as any,
-          employeeCount: activeEmployees.length,
-          totalGross: 0,
-          totalDeductions: 0,
-          totalNet: 0,
-          companyId: ctx.companyId,
-          computedAt: new Date(),
-          approvedAt: runStatus === 'APPROVED' || runStatus === 'DISBURSED' ? new Date() : undefined,
-          disbursedAt: runStatus === 'DISBURSED' ? new Date() : undefined,
-        },
-      });
-    } catch {
-      vlog(ctx, 'payroll', `PayrollRun ${year}-${month} already exists, skipping`);
-      continue;
+    // Check for existing PayrollRun
+    let payrollRun = await ctx.prisma.payrollRun.findUnique({
+      where: { companyId_month_year: { companyId: ctx.companyId, month, year } },
+      include: { _count: { select: { entries: true } } },
+    });
+
+    if (payrollRun) {
+      if (payrollRun._count.entries > 0) {
+        vlog(ctx, 'payroll', `PayrollRun ${year}-${String(month).padStart(2, '0')} already has ${payrollRun._count.entries} entries, skipping`);
+        continue;
+      }
+      // Empty run exists — delete it and recreate with data
+      vlog(ctx, 'payroll', `PayrollRun ${year}-${String(month).padStart(2, '0')} exists but empty — deleting and recreating`);
+      await ctx.prisma.payrollRun.delete({ where: { id: payrollRun.id } });
+      payrollRun = null;
     }
+
+    payrollRun = await ctx.prisma.payrollRun.create({
+      data: {
+        month,
+        year,
+        status: runStatus as any,
+        employeeCount: activeEmployees.length,
+        totalGross: 0,
+        totalDeductions: 0,
+        totalNet: 0,
+        companyId: ctx.companyId,
+        computedAt: new Date(),
+        approvedAt: runStatus === 'APPROVED' || runStatus === 'DISBURSED' ? new Date() : undefined,
+        disbursedAt: runStatus === 'DISBURSED' ? new Date() : undefined,
+      },
+    });
 
     totalRuns++;
 

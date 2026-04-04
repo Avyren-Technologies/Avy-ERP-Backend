@@ -18,12 +18,12 @@ export const seeder: SeederModule = {
   seed: async (ctx) => {
     const { prisma, companyId } = ctx;
 
-    // Check existing salaries
-    const existingCount = await prisma.employeeSalary.count({ where: { companyId } });
-    if (existingCount > 0) {
-      log(MODULE, `Skipping — ${existingCount} employee salaries already exist`);
-      return;
-    }
+    // Find employees who already have a current salary — we'll skip only those
+    const existingSalaries = await prisma.employeeSalary.findMany({
+      where: { companyId, isCurrent: true },
+      select: { employeeId: true },
+    });
+    const employeesWithSalary = new Set(existingSalaries.map((s) => s.employeeId));
 
     // Load salary structures with their grade associations
     const structures = await prisma.salaryStructure.findMany({
@@ -56,7 +56,13 @@ export const seeder: SeederModule = {
 
     let created = 0;
 
+    if (employeesWithSalary.size > 0) {
+      log(MODULE, `${employeesWithSalary.size} employees already have salaries — skipping those`);
+    }
+
     for (const [employeeId, emp] of ctx.employeeMap) {
+      if (employeesWithSalary.has(employeeId)) continue;
+
       const structure = getStructureForGrade(emp.gradeCode);
       if (!structure) continue;
 
