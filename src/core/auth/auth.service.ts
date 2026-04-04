@@ -37,7 +37,8 @@ const JWT_ALGORITHM: jwt.Algorithm = 'HS256';
 export class AuthService {
   // Login user
   async login(loginData: LoginRequest): Promise<LoginResult> {
-    const { email, password } = loginData;
+    const { email: rawEmail, password } = loginData;
+    const email = rawEmail.trim().toLowerCase();
 
     // Find user
     const user = await platformPrisma.user.findUnique({
@@ -396,16 +397,28 @@ export class AuthService {
         throw AuthError.invalidToken();
       }
 
-      // Generate new tokens
-      const tokens = await this.generateTokens({
-        userId: decoded.userId,
-        email: decoded.email,
-        tenantId: decoded.tenantId || undefined,
-        companyId: decoded.companyId || undefined,
-        employeeId: decoded.employeeId || undefined,
-        roleId: decoded.roleId,
-        permissions: decoded.permissions,
+      // Recompute permissions from DB (do not copy stale JWT claims — login used to cache empty perms)
+      const user = await platformPrisma.user.findUnique({
+        where: { id: decoded.userId },
+        include: { company: { include: { tenant: true } } },
       });
+      if (!user) {
+        throw AuthError.invalidToken();
+      }
+      const tid = user.company?.tenant?.id;
+      const permissions = await this.getExpandedPermissions(user.id, tid, user.companyId);
+
+      const tokens = await this.generateTokens({
+        userId: user.id,
+        email: user.email,
+        tenantId: tid ?? undefined,
+        companyId: user.companyId ?? undefined,
+        employeeId: user.employeeId ?? undefined,
+        roleId: user.role,
+        permissions,
+      });
+
+      await cacheRedis.del(createUserCacheKey(user.id, 'auth'));
 
       // Blacklist old refresh token for its full 7-day lifespan
       await cacheRedis.setex(createRefreshTokenBlacklistKey(refreshToken), 604800, 'true'); // 7 days
@@ -763,6 +776,10 @@ export class AuthService {
 
     // SUPER_ADMIN always gets wildcard — platform-level, not tenant-scoped
     if (user.role === 'SUPER_ADMIN') return ['*'];
+
+    // COMPANY_ADMIN: full tenant access (must match auth.middleware — do not rely only on
+    // TenantUser→Role, or login/cache can end up with empty perms when modules are unset or RBAC cache misses).
+    if (user.role === 'COMPANY_ADMIN') return ['*'];
 
     // Resolve tenantId if not provided
     const resolvedTenantId = tenantId || user.company?.tenant?.id;

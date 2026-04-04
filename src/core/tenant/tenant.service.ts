@@ -633,7 +633,7 @@ export class TenantService {
           const hashed = await hashPassword(u.password);
           const newUser = await tx.user.create({
             data: {
-              email: u.email,
+              email: u.email.trim().toLowerCase(),
               password: hashed,
               firstName,
               lastName,

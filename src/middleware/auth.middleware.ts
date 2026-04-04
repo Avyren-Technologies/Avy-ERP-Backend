@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { platformPrisma } from '../config/database';
+import { tenantConnectionManager } from '../config/tenant-connection-manager';
 import { cacheRedis } from '../config/redis';
 import { AuthError, ApiError } from '../shared/errors';
 import {
@@ -123,6 +124,11 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
 
       const user = JSON.parse(userData);
 
+      // Stale Redis cache from older login could store empty permissions for company admins.
+      if (user.roleId === 'SUPER_ADMIN' || user.roleId === 'COMPANY_ADMIN') {
+        user.permissions = ['*'];
+      }
+
       // Check if user is active
       if (!user.isActive) {
         throw AuthError.accountInactive();
@@ -132,17 +138,38 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       req.user = user;
 
       // If tenant not resolved yet (e.g., no X-Tenant-ID header, IP-based host),
-      // resolve from user context
+      // resolve from DB — never derive schemaName from tenant UUID (breaks tenant_* schemas).
       if (!req.tenant && user.tenantId) {
-        const { tenantMiddleware: _, ...tenantUtils } = await import('../middleware/tenant.middleware');
-        // Build tenant object from user context
-        req.tenant = {
-          id: user.tenantId,
-          schemaName: `tenant_${user.tenantId.replace(/-/g, '_')}`,
-          companyId: user.companyId || user.tenantId,
-          databaseUrl: env.DATABASE_URL_TEMPLATE?.replace('{schema}', `tenant_${user.tenantId.replace(/-/g, '_')}`) || '',
-          status: 'active',
-        } as any;
+        const dbTenant = await platformPrisma.tenant.findUnique({
+          where: { id: user.tenantId },
+          select: {
+            id: true,
+            schemaName: true,
+            slug: true,
+            companyId: true,
+            status: true,
+            dbStrategy: true,
+            databaseUrl: true,
+          },
+        });
+        if (dbTenant) {
+          const databaseUrl =
+            dbTenant.databaseUrl || env.DATABASE_URL_TEMPLATE.replace('{schema}', dbTenant.schemaName);
+          req.tenant = {
+            id: dbTenant.id,
+            schemaName: dbTenant.schemaName,
+            slug: dbTenant.slug,
+            companyId: dbTenant.companyId,
+            databaseUrl,
+            status: dbTenant.status.toLowerCase(),
+            dbStrategy: dbTenant.dbStrategy,
+          } as any;
+          req.prisma = tenantConnectionManager.getClient({
+            schemaName: dbTenant.schemaName,
+            dbStrategy: dbTenant.dbStrategy,
+            databaseUrl,
+          });
+        }
       }
 
       // Check tenant requirement
