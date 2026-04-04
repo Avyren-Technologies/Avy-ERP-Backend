@@ -331,18 +331,20 @@ class ChatbotService {
       if (!balances.length) {
         return {
           intent: 'LEAVE_BALANCE',
-          message: `No leave balances found for the current year (${currentYear}). Please contact HR if you believe this is an error.`,
+          message: `📋 **No Leave Balances Found**\n\nNo leave records are available for **${currentYear}**. This could mean:\n\n- Your leave entitlements haven't been configured yet\n- The current leave cycle hasn't started\n\n💡 *Please contact your HR department if you believe this is an error.*`,
         };
       }
 
       const lines = balances.map(
         (b: any) =>
-          `- ${b.leaveType.name} (${b.leaveType.code}): ${b.balance} remaining out of ${b.entitled} entitled (${b.taken} taken, ${b.adjustments} adjustments)`
+          `| ${b.leaveType.name} (${b.leaveType.code}) | **${b.balance}** remaining | ${b.entitled} entitled | ${b.taken} taken | ${b.adjustments} adj. |`
       );
+
+      const totalRemaining = balances.reduce((sum: number, b: any) => sum + Number(b.balance), 0);
 
       return {
         intent: 'LEAVE_BALANCE',
-        message: `Here are your leave balances for ${currentYear}:\n\n${lines.join('\n')}`,
+        message: `🏖️ **Leave Balance — ${currentYear}**\n\n| Leave Type | Remaining | Entitled | Taken | Adj. |\n|---|---|---|---|---|\n${lines.join('\n')}\n\n📊 **Total remaining across all types:** ${totalRemaining} day(s)\n\n💡 *To apply for leave, visit the Leave section in your ESS portal.*`,
         data: balances.map((b: any) => ({
           leaveType: b.leaveType.name,
           code: b.leaveType.code,
@@ -373,13 +375,13 @@ class ChatbotService {
       if (!latestPayslip) {
         return {
           intent: 'PAYSLIP',
-          message: 'No payslips found. Your payslips will be available here once payroll has been processed.',
+          message: `💰 **No Payslips Available**\n\nYour payslip records haven't been generated yet. This typically means:\n\n- Payroll processing is still in progress\n- You may be a new joiner and your first payroll cycle hasn't completed\n\n💡 *Payslips will appear here automatically once processed by the payroll team.*`,
         };
       }
 
       return {
         intent: 'PAYSLIP',
-        message: `Your latest payslip:\n\n- Period: ${latestPayslip.month}/${latestPayslip.year}\n- Gross: ${latestPayslip.grossEarnings}\n- Net: ${latestPayslip.netPay}\n\nYou can download the full payslip from the ESS portal under "My Payslips".`,
+        message: `💰 **Latest Payslip — ${latestPayslip.month}/${latestPayslip.year}**\n\n| Detail | Amount |\n|---|---|\n| **Gross Earnings** | ₹${Number(latestPayslip.grossEarnings).toLocaleString('en-IN')} |\n| **Net Pay** | ₹${Number(latestPayslip.netPay).toLocaleString('en-IN')} |\n\n📥 *You can download the full payslip from the ESS portal under **"My Payslips"**.*`,
         data: {
           month: latestPayslip.month,
           year: latestPayslip.year,
@@ -421,15 +423,16 @@ class ChatbotService {
       }
 
       const monthName = now.toFormat('MMMM yyyy');
+      const statusEmoji: Record<string, string> = { PRESENT: '✅', ABSENT: '❌', HALF_DAY: '🕐', LATE: '⏰', ON_LEAVE: '🏖️', WEEKEND: '📅', HOLIDAY: '🎉', WFH: '🏠' };
       const lines = Object.entries(statusCounts).map(
-        ([status, count]) => `- ${status}: ${count} day(s)`
+        ([status, count]) => `| ${statusEmoji[status] || '📌'} ${status.replace(/_/g, ' ')} | **${count}** day(s) |`
       );
 
       return {
         intent: 'ATTENDANCE',
         message: lines.length
-          ? `Your attendance summary for ${monthName}:\n\n${lines.join('\n')}\n\nTotal records: ${records.length}`
-          : `No attendance records found for ${monthName} yet.`,
+          ? `📋 **Attendance Summary — ${monthName}**\n\n| Status | Days |\n|---|---|\n${lines.join('\n')}\n\n📊 **Total records:** ${records.length} day(s)\n\n💡 *For detailed attendance logs, visit the **Attendance** section in your ESS portal.*`
+          : `📋 **Attendance — ${monthName}**\n\nNo attendance records have been logged for this month yet. If you've been marking attendance, the records may still be syncing.\n\n💡 *Contact HR if you believe this is an error.*`,
         data: { month: monthName, totalRecords: records.length, summary: statusCounts },
       };
     } catch {
@@ -457,18 +460,18 @@ class ChatbotService {
       if (!holidays.length) {
         return {
           intent: 'HOLIDAY',
-          message: 'No upcoming holidays found. Please check with HR for the latest holiday calendar.',
+          message: '🎉 **No Upcoming Holidays**\n\nThere are no holidays scheduled in the near future. The holiday calendar may not have been updated yet.\n\n💡 *Check with your HR team for the latest holiday schedule.*',
         };
       }
 
       const lines = holidays.map(
         (h: any) =>
-          `- ${new Date(h.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}: ${h.name}${h.optional ? ' (Optional)' : ''}`
+          `| ${h.optional ? '🔸' : '🎉'} ${new Date(h.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} | **${h.name}** | ${h.optional ? '_Optional_' : 'Mandatory'} |`
       );
 
       return {
         intent: 'HOLIDAY',
-        message: `Upcoming holidays:\n\n${lines.join('\n')}`,
+        message: `🎉 **Upcoming Holidays**\n\n| Date | Holiday | Type |\n|---|---|---|\n${lines.join('\n')}\n\n💡 *Optional holidays may require prior approval from your manager.*`,
         data: holidays.map((h: any) => ({
           date: h.date,
           name: h.name,
@@ -487,7 +490,7 @@ class ChatbotService {
     return {
       intent: 'HR_CONTACT',
       message:
-        'I can escalate this conversation to HR so a representative can assist you directly. Would you like me to escalate? You can also reply "escalate" to confirm.',
+        '🧑‍💼 **Connect with HR**\n\nI can escalate this conversation to your HR team so a representative can assist you directly.\n\n**How to proceed:**\n- Click the **"Escalate to HR"** button at the top\n- Or simply reply **"escalate"** to confirm\n\n⏱️ *Once escalated, an HR representative will typically respond within 24 hours.*',
     };
   }
 
@@ -495,7 +498,7 @@ class ChatbotService {
     return {
       intent: 'POLICY',
       message:
-        'You can find all company policies (leave, attendance, WFH, etc.) in the ESS portal under "Policy Documents". If you have a specific question about a policy, feel free to ask and I\'ll do my best to help!',
+        '📝 **Company Policies**\n\nYou can access all company policies through the ESS portal under **"Policy Documents"**. Common policies include:\n\n- 🏖️ **Leave Policy** — Entitlements, carry-forward rules, approval flow\n- 📋 **Attendance Policy** — Check-in/out rules, grace period, penalties\n- 🏠 **Work from Home** — Eligibility, request process, equipment policy\n- 📅 **Holiday Policy** — Mandatory vs optional holidays\n\n💡 *If you have a specific question about any policy, feel free to ask and I\'ll do my best to help!*',
     };
   }
 
@@ -503,21 +506,21 @@ class ChatbotService {
     return {
       intent: 'GREETING',
       message:
-        'Hello! I\'m your HR assistant. Here\'s what I can help you with:\n\n' +
-        '- Leave balance\n' +
-        '- Payslip details\n' +
-        '- Attendance summary\n' +
-        '- Upcoming holidays\n' +
-        '- Company policies\n' +
-        '- Connect with HR\n\n' +
-        'How can I help you today?',
+        '👋 **Hello! I\'m your HR Assistant.**\n\nI\'m here to help you with all your HR-related queries. Here\'s what I can do:\n\n' +
+        '- 🏖️ **Leave Balance** — Check your remaining leaves\n' +
+        '- 💰 **Payslip Details** — View your latest salary information\n' +
+        '- 📋 **Attendance Summary** — Review your monthly attendance\n' +
+        '- 🎉 **Upcoming Holidays** — See what\'s coming up\n' +
+        '- 📝 **Company Policies** — Browse leave, attendance & WFH policies\n' +
+        '- 🧑‍💼 **Connect with HR** — Escalate to a human representative\n\n' +
+        '💬 *Just type your question or tap a quick action below to get started!*',
     };
   }
 
   private handleThanks(): IntentResult {
     return {
       intent: 'THANKS',
-      message: 'You\'re welcome! If you need anything else, feel free to start a new conversation. Have a great day!',
+      message: '🙏 **You\'re welcome!**\n\nGlad I could help. If you need anything else in the future, feel free to start a new conversation anytime.\n\n✨ *Have a wonderful day!*',
     };
   }
 
@@ -525,14 +528,14 @@ class ChatbotService {
     return {
       intent: 'UNKNOWN',
       message:
-        'I\'m not sure I understand that. Here\'s what I can help with:\n\n' +
-        '- Leave balance\n' +
-        '- Payslip details\n' +
-        '- Attendance summary\n' +
-        '- Upcoming holidays\n' +
-        '- Company policies\n' +
-        '- Connect with HR\n\n' +
-        'Would you like me to escalate this to HR instead?',
+        '🤔 **I didn\'t quite catch that.**\n\nI\'m still learning! Here\'s what I can currently help you with:\n\n' +
+        '- 🏖️ **Leave Balance** — Check your remaining leaves\n' +
+        '- 💰 **Payslip Details** — View your latest salary info\n' +
+        '- 📋 **Attendance Summary** — Monthly attendance overview\n' +
+        '- 🎉 **Upcoming Holidays** — Holiday calendar\n' +
+        '- 📝 **Company Policies** — Browse policy documents\n' +
+        '- 🧑‍💼 **Connect with HR** — Talk to a real person\n\n' +
+        '💡 *Try rephrasing your question, or I can **escalate this to HR** for you.*',
     };
   }
 }
