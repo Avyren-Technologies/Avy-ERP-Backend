@@ -428,6 +428,21 @@ export class AdvancedHRController {
   });
 
   // ════════════════════════════════════════════════════════════════
+  // CERTIFICATES — Expiring
+  // ════════════════════════════════════════════════════════════════
+
+  getExpiringCertificates = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const days = req.query.days ? parseInt(req.query.days as string, 10) : 30;
+    if (isNaN(days) || days < 1) throw ApiError.badRequest('days must be a positive integer');
+
+    const certificates = await advancedHRService.getExpiringCertificates(companyId, days);
+    res.json(createSuccessResponse(certificates, 'Expiring certificates retrieved'));
+  });
+
+  // ════════════════════════════════════════════════════════════════
   // ASSETS — Categories
   // ════════════════════════════════════════════════════════════════
 

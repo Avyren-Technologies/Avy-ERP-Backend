@@ -7,6 +7,7 @@ import offerRoutes from './offer.routes';
 import { trainingAttendanceRoutes } from './training-attendance.routes';
 import { trainingEvaluationRoutes } from './training-evaluation.routes';
 import trainingSessionRoutes from './training-session.routes';
+import { trainerRoutes } from './trainer.routes';
 
 const router = Router();
 
@@ -210,6 +211,16 @@ router.delete('/production-incentives/configs/:id', requirePermissions(['hr:dele
 router.post('/production-incentives/configs/:id/compute', requirePermissions(['hr:create']), controller.computeIncentives);
 router.post('/production-incentives/configs/:id/merge', requirePermissions(['hr:update']), controller.mergeIncentivesToPayroll);
 router.get('/production-incentives/records', requirePermissions(['hr:read']), controller.listIncentiveRecords);
+
+// ═══════════════════════════════════════════════════════════════════
+// TRAINING — Trainers
+// ═══════════════════════════════════════════════════════════════════
+router.use('/trainers', trainerRoutes);
+
+// ═══════════════════════════════════════════════════════════════════
+// TRAINING — Certificates
+// ═══════════════════════════════════════════════════════════════════
+router.get('/training-certificates/expiring', requirePermissions(['hr:read']), controller.getExpiringCertificates);
 
 // ═══════════════════════════════════════════════════════════════════
 // TRAINING — Sessions

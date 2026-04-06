@@ -802,15 +802,35 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Cannot complete a cancelled nomination');
     }
 
+    // Build update data
+    const updateData: any = {
+      status: 'COMPLETED',
+      completionDate: data.completionDate ? new Date(data.completionDate) : new Date(),
+      score: n(data.score),
+      certificateUrl: n(data.certificateUrl),
+    };
+
+    // Auto-issue certificate if training has certificationName
+    const catalogue = nomination.training;
+    if (catalogue?.certificationName) {
+      const certNumber = await generateNextNumber(
+        platformPrisma, companyId, ['Training'], 'Certificate',
+      );
+      const issuedAt = new Date();
+      const expiryDate = catalogue.certificationValidity
+        ? new Date(issuedAt.getFullYear() + catalogue.certificationValidity, issuedAt.getMonth(), issuedAt.getDate())
+        : null;
+
+      updateData.certificateNumber = certNumber;
+      updateData.certificateIssuedAt = issuedAt;
+      updateData.certificateExpiryDate = expiryDate;
+      updateData.certificateStatus = 'EARNED';
+    }
+
     // Update nomination to COMPLETED
     const updated = await platformPrisma.trainingNomination.update({
       where: { id },
-      data: {
-        status: 'COMPLETED',
-        completionDate: data.completionDate ? new Date(data.completionDate) : new Date(),
-        score: n(data.score),
-        certificateUrl: n(data.certificateUrl),
-      },
+      data: updateData,
       include: {
         employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
         training: true,
@@ -3160,6 +3180,32 @@ export class AdvancedHRService {
     });
 
     return employee;
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // CERTIFICATES — Expiring
+  // ════════════════════════════════════════════════════════════════
+
+  async getExpiringCertificates(companyId: string, days: number = 30) {
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + days);
+
+    return platformPrisma.trainingNomination.findMany({
+      where: {
+        companyId,
+        certificateStatus: 'EARNED',
+        certificateExpiryDate: { lte: futureDate, gte: new Date() },
+      },
+      include: {
+        employee: {
+          select: { id: true, employeeId: true, firstName: true, lastName: true },
+        },
+        training: {
+          select: { id: true, name: true, certificationName: true, certificationValidity: true },
+        },
+      },
+      orderBy: { certificateExpiryDate: 'asc' },
+    });
   }
 }
 
