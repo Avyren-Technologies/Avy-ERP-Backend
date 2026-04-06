@@ -135,8 +135,10 @@ model Employee {
   successionPlans      SuccessionPlan[]
 
   // Recruitment, Training, Asset, Expense, Letters, Grievance & Discipline Relations
-  trainingNominations TrainingNomination[]
-  assetAssignments    AssetAssignment[]
+  trainingNominations   TrainingNomination[]
+  trainingAttendance    TrainingAttendance[]  @relation("TrainingAttendanceEmployee")
+  trainerProfile        Trainer[]             @relation("TrainerEmployee")
+  assetAssignments      AssetAssignment[]
   expenseClaims       ExpenseClaim[]
   hrLetters           HRLetter[]
   grievanceCases      GrievanceCase[]

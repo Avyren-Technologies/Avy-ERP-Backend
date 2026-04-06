@@ -180,8 +180,12 @@ model Company {
   candidateStageHistory CandidateStageHistory[]
 
   // Training Relations
-  trainingCatalogues  TrainingCatalogue[]
-  trainingNominations TrainingNomination[]
+  trainingCatalogues    TrainingCatalogue[]
+  trainingNominations   TrainingNomination[]
+  trainingSessions      TrainingSession[]
+  trainingAttendance    TrainingAttendance[]
+  trainingEvaluations   TrainingEvaluation[]
+  trainers              Trainer[]
 
   // Asset Management Relations
   assetCategories  AssetCategory[]

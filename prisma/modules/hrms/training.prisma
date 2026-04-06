@@ -23,6 +23,8 @@ model TrainingCatalogue {
   companyId             String
   company               Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   nominations           TrainingNomination[]
+  sessions              TrainingSession[]
+  evaluations           TrainingEvaluation[]
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
@@ -39,9 +41,17 @@ model TrainingNomination {
   status         TrainingNominationStatus @default(NOMINATED)
   completionDate DateTime?
   score          Decimal?                 @db.Decimal(5, 2)
-  certificateUrl String?
-  companyId      String
-  company        Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  certificateUrl        String?
+  certificateNumber     String?
+  certificateIssuedAt   DateTime?
+  certificateExpiryDate DateTime?
+  certificateStatus     CertificateStatus?
+  sessionId             String?
+  session               TrainingSession?     @relation(fields: [sessionId], references: [id])
+  evaluations           TrainingEvaluation[]
+  attendance            TrainingAttendance[]
+  companyId             String
+  company               Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
 
@@ -65,4 +75,141 @@ enum TrainingNominationStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+model TrainingSession {
+  id              String                @id @default(cuid())
+  sessionNumber   String?
+  trainingId      String
+  training        TrainingCatalogue     @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  batchName       String?
+  startDateTime   DateTime
+  endDateTime     DateTime
+  venue           String?
+  meetingLink     String?
+  maxParticipants Int?
+  trainerId       String?
+  trainer         Trainer?              @relation(fields: [trainerId], references: [id])
+  status          TrainingSessionStatus @default(SCHEDULED)
+  cancelledReason String?
+  notes           String?
+  companyId       String
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  attendees       TrainingAttendance[]
+  nominations     TrainingNomination[]
+  evaluations     TrainingEvaluation[]
+
+  @@index([companyId, status])
+  @@index([trainingId])
+  @@index([trainerId])
+  @@map("training_sessions")
+}
+
+enum TrainingSessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model TrainingAttendance {
+  id            String              @id @default(cuid())
+  sessionId     String
+  session       TrainingSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee            @relation("TrainingAttendanceEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  nominationId  String?
+  nomination    TrainingNomination? @relation(fields: [nominationId], references: [id])
+  status        TrainingAttendanceStatus @default(REGISTERED)
+  checkInTime   DateTime?
+  checkOutTime  DateTime?
+  hoursAttended Decimal?            @db.Decimal(4, 1)
+  remarks       String?
+  companyId     String
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([sessionId, employeeId])
+  @@index([sessionId])
+  @@index([employeeId])
+  @@map("training_attendance")
+}
+
+enum TrainingAttendanceStatus {
+  REGISTERED
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+model TrainingEvaluation {
+  id                     String              @id @default(cuid())
+  trainingId             String?
+  training               TrainingCatalogue?  @relation(fields: [trainingId], references: [id])
+  nominationId           String
+  nomination             TrainingNomination  @relation(fields: [nominationId], references: [id], onDelete: Cascade)
+  sessionId              String?
+  session                TrainingSession?    @relation(fields: [sessionId], references: [id])
+  type                   EvaluationType
+  contentRelevance       Int?
+  trainerEffectiveness   Int?
+  overallSatisfaction    Int?
+  knowledgeGain          Int?
+  practicalApplicability Int?
+  preAssessmentScore     Decimal?            @db.Decimal(5, 2)
+  postAssessmentScore    Decimal?            @db.Decimal(5, 2)
+  comments               String?
+  improvementSuggestions String?
+  submittedBy            String?
+  submittedAt            DateTime?
+  companyId              String
+  company                Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  @@index([nominationId])
+  @@index([sessionId])
+  @@map("training_evaluations")
+}
+
+enum EvaluationType {
+  PARTICIPANT_FEEDBACK
+  TRAINER_ASSESSMENT
+}
+
+enum CertificateStatus {
+  EARNED
+  EXPIRING_SOON
+  EXPIRED
+  RENEWED
+}
+
+model Trainer {
+  id              String    @id @default(cuid())
+  employeeId      String?
+  employee        Employee? @relation("TrainerEmployee", fields: [employeeId], references: [id])
+  externalName    String?
+  email           String
+  phone           String?
+  specializations Json?
+  qualifications  String?
+  experienceYears Int?
+  averageRating   Decimal?  @db.Decimal(3, 2)
+  totalSessions   Int       @default(0)
+  isInternal      Boolean   @default(true)
+  isActive        Boolean   @default(true)
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  sessions        TrainingSession[]
+
+  @@index([companyId, isActive])
+  @@map("trainers")
 }
