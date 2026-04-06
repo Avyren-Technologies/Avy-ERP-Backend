@@ -1,8 +1,16 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
 import { advancedHRController as controller } from './advanced.controller';
+import { candidateProfileRoutes } from './candidate-profile.routes';
+import { evaluationRoutes } from './evaluation.routes';
 
 const router = Router();
+
+// ── Candidate Profile (Education, Experience, Documents) ─────────
+router.use(candidateProfileRoutes);
+
+// ── Interview Evaluations ────────────────────────────────────────
+router.use(evaluationRoutes);
 
 // ═══════════════════════════════════════════════════════════════════
 // RECRUITMENT — Requisitions
