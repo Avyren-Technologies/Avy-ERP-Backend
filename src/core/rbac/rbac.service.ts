@@ -49,6 +49,7 @@ const NAV_TO_SYSTEM_MODULE: Record<string, string> = {
   'hr-training': 'trainingEnabled',
   'hr-nominations': 'trainingEnabled',
   'ess-training': 'trainingEnabled',
+  'hr-analytics-training': 'trainingEnabled',
 };
 
 export class RbacService {

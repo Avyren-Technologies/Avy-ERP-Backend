@@ -899,6 +899,33 @@ export class AdvancedHRService {
       });
     }
 
+    // Expiring certificates (within 30 days)
+    const expiringCerts = await platformPrisma.trainingNomination.count({
+      where: {
+        companyId,
+        certificateStatus: 'EARNED',
+        certificateExpiryDate: {
+          lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          gte: new Date(),
+        },
+      },
+    });
+
+    // Top trainers by rating
+    const topTrainers = await platformPrisma.trainer.findMany({
+      where: { companyId, isActive: true },
+      orderBy: { averageRating: 'desc' },
+      take: 5,
+      include: { employee: { select: { firstName: true, lastName: true } } },
+    });
+
+    // Session stats
+    const totalSessions = await platformPrisma.trainingSession.count({ where: { companyId } });
+    const completedSessions = await platformPrisma.trainingSession.count({ where: { companyId, status: 'COMPLETED' } });
+    const upcomingSessions = await platformPrisma.trainingSession.count({
+      where: { companyId, status: 'SCHEDULED', startDateTime: { gte: new Date() } },
+    });
+
     return {
       totalNominations,
       completed,
@@ -906,6 +933,11 @@ export class AdvancedHRService {
       cancelled,
       completionPercent,
       mandatoryCoverage,
+      expiringCerts,
+      topTrainers,
+      totalSessions,
+      completedSessions,
+      upcomingSessions,
     };
   }
 

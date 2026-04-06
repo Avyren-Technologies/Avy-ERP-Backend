@@ -92,8 +92,9 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-analytics-compliance', label: 'Compliance & Risk', icon: 'shield-check', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/compliance', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 456 },
   { id: 'hr-analytics-performance', label: 'Performance & Talent', icon: 'target', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/performance', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 457 },
   { id: 'hr-analytics-recruitment', label: 'Recruitment Intelligence', icon: 'user-plus', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/recruitment', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 458 },
-  { id: 'hr-analytics-attrition', label: 'Attrition & Retention', icon: 'user-minus', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/attrition', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 459 },
-  { id: 'hr-analytics-reports', label: 'Reports & Downloads', icon: 'file-spreadsheet', requiredPerm: 'hr:export', path: '/app/company/hr/analytics/reports', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 460 },
+  { id: 'hr-analytics-training', label: 'Training Intelligence', icon: 'graduation-cap', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/training', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 459 },
+  { id: 'hr-analytics-attrition', label: 'Attrition & Retention', icon: 'user-minus', requiredPerm: 'hr:read', path: '/app/company/hr/analytics/attrition', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 460 },
+  { id: 'hr-analytics-reports', label: 'Reports & Downloads', icon: 'file-spreadsheet', requiredPerm: 'hr:export', path: '/app/company/hr/analytics/reports', module: 'hr', group: 'HR Analytics', roleScope: 'company', sortOrder: 461 },
 
   // ═══════ HRMS ═══════
   { id: 'hr-departments', label: 'Departments', icon: 'building', requiredPerm: 'hr:read', path: '/app/company/hr/departments', module: 'hr', group: 'Org Structure', moduleSeparator: 'HRMS', roleScope: 'company', sortOrder: 500 },
