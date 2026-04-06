@@ -15,6 +15,12 @@ export const createRequisitionSchema = z.object({
   targetDate: z.string().optional(),
   sourceChannels: z.array(z.string()).optional(),
   approvedBy: z.string().optional(),
+  employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERNSHIP']).optional(),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
+  location: z.string().optional(),
+  requirements: z.string().optional(),
+  experienceMin: z.number().int().min(0).optional(),
+  experienceMax: z.number().int().min(0).optional(),
 });
 
 export const updateRequisitionSchema = createRequisitionSchema.partial();
@@ -43,7 +49,17 @@ export const advanceCandidateStageSchema = z.object({
     'APPLIED', 'SHORTLISTED', 'HR_ROUND', 'TECHNICAL', 'FINAL',
     'ASSESSMENT', 'OFFER_SENT', 'HIRED', 'REJECTED', 'ON_HOLD',
   ]),
-});
+  reason: z.string().optional(),
+  notes: z.string().optional(),
+}).refine(
+  (data) => {
+    if (data.stage === 'REJECTED' || data.stage === 'ON_HOLD') {
+      return !!data.reason;
+    }
+    return true;
+  },
+  { message: 'Reason is required when rejecting or putting on hold', path: ['reason'] },
+);
 
 export const createInterviewSchema = z.object({
   candidateId: z.string().min(1, 'Candidate ID is required'),
@@ -95,7 +111,7 @@ export const createTrainingNominationSchema = z.object({
 });
 
 export const updateTrainingNominationSchema = z.object({
-  status: z.enum(['NOMINATED', 'ENROLLED', 'COMPLETED', 'CANCELLED']).optional(),
+  status: z.enum(['NOMINATED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']).optional(),
   completionDate: z.string().optional(),
   score: z.number().min(0).max(100).optional(),
   certificateUrl: z.string().optional(),

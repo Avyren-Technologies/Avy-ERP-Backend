@@ -850,11 +850,11 @@ export class AdvancedHRService {
   // ── Training Dashboard ──────────────────────────────────────────
 
   async getTrainingDashboard(companyId: string) {
-    const [totalNominations, completed, cancelled, enrolled] = await Promise.all([
+    const [totalNominations, completed, cancelled, inProgress] = await Promise.all([
       platformPrisma.trainingNomination.count({ where: { companyId } }),
       platformPrisma.trainingNomination.count({ where: { companyId, status: 'COMPLETED' } }),
       platformPrisma.trainingNomination.count({ where: { companyId, status: 'CANCELLED' } }),
-      platformPrisma.trainingNomination.count({ where: { companyId, status: 'ENROLLED' } }),
+      platformPrisma.trainingNomination.count({ where: { companyId, status: 'IN_PROGRESS' } }),
     ]);
 
     const completionPercent = totalNominations > 0
@@ -886,7 +886,7 @@ export class AdvancedHRService {
     return {
       totalNominations,
       completed,
-      enrolled,
+      inProgress,
       cancelled,
       completionPercent,
       mandatoryCoverage,

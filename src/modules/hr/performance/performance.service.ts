@@ -1273,7 +1273,7 @@ export class PerformanceService {
       where: {
         employeeId,
         trainingId: matchingTraining.id,
-        status: { in: ['NOMINATED', 'ENROLLED'] },
+        status: { in: ['NOMINATED', 'APPROVED', 'IN_PROGRESS'] },
       },
     });
     if (existing) return null;
