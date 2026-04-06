@@ -575,11 +575,110 @@ export class AdvancedHRService {
       where: { companyId, status: 'SCHEDULED', scheduledAt: { gte: new Date() } },
     });
 
+    // Source effectiveness — candidates and hires per source
+    const sourceStats = await platformPrisma.candidate.groupBy({
+      by: ['source'],
+      where: { companyId },
+      _count: true,
+    });
+    const hiredBySource = await platformPrisma.candidate.groupBy({
+      by: ['source'],
+      where: { companyId, stage: 'HIRED' },
+      _count: true,
+    });
+    const hiredBySourceMap = new Map(hiredBySource.map(s => [s.source, s._count]));
+    const sourceEffectiveness = sourceStats.map(s => ({
+      source: s.source ?? 'Unknown',
+      total: s._count,
+      hired: hiredBySourceMap.get(s.source) ?? 0,
+      conversionRate: s._count > 0
+        ? Math.round(((hiredBySourceMap.get(s.source) ?? 0) / s._count) * 100)
+        : 0,
+    }));
+
+    // Funnel conversion rates — % of candidates reaching each stage
+    const totalCandidates = Object.values(stageCounts).reduce((sum, c) => sum + c, 0);
+    const funnelStages: Array<{ stage: string; count: number; conversionFromPrevious: number; conversionFromTotal: number }> = [];
+    const orderedStages = ['APPLIED', 'SHORTLISTED', 'HR_ROUND', 'TECHNICAL', 'FINAL', 'ASSESSMENT', 'OFFER_SENT', 'HIRED'];
+    // Cumulative: candidates who reached a stage = those in that stage + all later stages
+    const cumulativeCounts: Record<string, number> = {};
+    let cumulative = 0;
+    for (let i = orderedStages.length - 1; i >= 0; i--) {
+      const s = orderedStages[i]!;
+      cumulative += stageCounts[s] ?? 0;
+      cumulativeCounts[s] = cumulative;
+    }
+    for (let i = 0; i < orderedStages.length; i++) {
+      const stage = orderedStages[i]!;
+      const count = cumulativeCounts[stage] ?? 0;
+      const prevCount = i === 0 ? totalCandidates : (cumulativeCounts[orderedStages[i - 1]!] ?? 0);
+      funnelStages.push({
+        stage,
+        count,
+        conversionFromPrevious: prevCount > 0 ? Math.round((count / prevCount) * 100) : 0,
+        conversionFromTotal: totalCandidates > 0 ? Math.round((count / totalCandidates) * 100) : 0,
+      });
+    }
+
+    // Offer acceptance rate
+    const totalOffers = await platformPrisma.candidateOffer.count({
+      where: { companyId, status: { not: 'DRAFT' } },
+    });
+    const acceptedOffers = await platformPrisma.candidateOffer.count({
+      where: { companyId, status: 'ACCEPTED' },
+    });
+    const offerAcceptanceRate = totalOffers > 0 ? Math.round((acceptedOffers / totalOffers) * 100) : 0;
+
+    // Average time per stage from CandidateStageHistory
+    const stageHistories = await platformPrisma.candidateStageHistory.findMany({
+      where: { companyId },
+      select: { candidateId: true, fromStage: true, toStage: true, changedAt: true },
+      orderBy: [{ candidateId: 'asc' }, { changedAt: 'asc' }],
+    });
+    const stageDurations: Record<string, number[]> = {};
+    for (let i = 0; i < stageHistories.length - 1; i++) {
+      const current = stageHistories[i]!;
+      const next = stageHistories[i + 1]!;
+      if (current.candidateId === next.candidateId) {
+        const durationHours = (next.changedAt.getTime() - current.changedAt.getTime()) / (1000 * 60 * 60);
+        const stage = current.toStage;
+        if (!stageDurations[stage]) stageDurations[stage] = [];
+        stageDurations[stage]!.push(durationHours);
+      }
+    }
+    const avgTimePerStage = Object.entries(stageDurations).map(([stage, durations]) => ({
+      stage,
+      avgHours: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
+      avgDays: Math.round((durations.reduce((a, b) => a + b, 0) / durations.length) / 24 * 10) / 10,
+      count: durations.length,
+    }));
+
+    // Requisition aging — oldest open requisitions
+    const agingRequisitions = await platformPrisma.jobRequisition.findMany({
+      where: { companyId, status: { in: ['OPEN', 'INTERVIEWING'] } },
+      select: { id: true, title: true, createdAt: true, status: true },
+      orderBy: { createdAt: 'asc' },
+      take: 10,
+    });
+    const now = Date.now();
+    const requisitionAging = agingRequisitions.map(r => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      createdAt: r.createdAt,
+      daysOpen: Math.floor((now - r.createdAt.getTime()) / (1000 * 60 * 60 * 24)),
+    }));
+
     return {
       pipeline: stageCounts,
       requisitions: { total: totalRequisitions, open: openRequisitions, filled: filledRequisitions },
       avgTimeToHireDays: avgTimeToHire,
       upcomingInterviews,
+      sourceEffectiveness,
+      funnelConversion: funnelStages,
+      offerAcceptance: { total: totalOffers, accepted: acceptedOffers, rate: offerAcceptanceRate },
+      avgTimePerStage,
+      requisitionAging,
     };
   }
 
@@ -985,6 +1084,69 @@ export class AdvancedHRService {
       where: { companyId, status: 'SCHEDULED', startDateTime: { gte: new Date() } },
     });
 
+    // Training effectiveness — average pre vs post assessment scores
+    const effectiveness = await platformPrisma.trainingEvaluation.aggregate({
+      where: {
+        companyId,
+        preAssessmentScore: { not: null },
+        postAssessmentScore: { not: null },
+      },
+      _avg: { preAssessmentScore: true, postAssessmentScore: true },
+      _count: true,
+    });
+    const trainingEffectiveness = {
+      avgPreScore: effectiveness._avg.preAssessmentScore
+        ? Math.round(Number(effectiveness._avg.preAssessmentScore) * 10) / 10
+        : null,
+      avgPostScore: effectiveness._avg.postAssessmentScore
+        ? Math.round(Number(effectiveness._avg.postAssessmentScore) * 10) / 10
+        : null,
+      improvement: effectiveness._avg.preAssessmentScore && effectiveness._avg.postAssessmentScore
+        ? Math.round((Number(effectiveness._avg.postAssessmentScore) - Number(effectiveness._avg.preAssessmentScore)) * 10) / 10
+        : null,
+      evaluationCount: effectiveness._count,
+    };
+
+    // Budget utilization
+    const budgets = await platformPrisma.trainingBudget.findMany({ where: { companyId } });
+    const totalAllocated = budgets.reduce((sum, b) => sum + Number(b.allocatedAmount), 0);
+    const totalUsed = budgets.reduce((sum, b) => sum + Number(b.usedAmount), 0);
+    const budgetUtilization = {
+      totalAllocated: Math.round(totalAllocated * 100) / 100,
+      totalUsed: Math.round(totalUsed * 100) / 100,
+      utilizationPercent: totalAllocated > 0 ? Math.round((totalUsed / totalAllocated) * 100) : 0,
+      remaining: Math.round((totalAllocated - totalUsed) * 100) / 100,
+      budgetCount: budgets.length,
+    };
+
+    // Program completion rates
+    const [totalEnrollments, completedEnrollments, inProgressEnrollments] = await Promise.all([
+      platformPrisma.trainingProgramEnrollment.count({ where: { companyId } }),
+      platformPrisma.trainingProgramEnrollment.count({ where: { companyId, status: 'COMPLETED' } }),
+      platformPrisma.trainingProgramEnrollment.count({ where: { companyId, status: 'IN_PROGRESS' } }),
+    ]);
+    const programCompletion = {
+      totalEnrollments,
+      completedEnrollments,
+      inProgressEnrollments,
+      completionRate: totalEnrollments > 0 ? Math.round((completedEnrollments / totalEnrollments) * 100) : 0,
+    };
+
+    // Skill gap coverage — count of employees where currentLevel < requiredLevel
+    const totalSkillMappings = await platformPrisma.skillMapping.count({ where: { companyId } });
+    const skillGapsRaw = await platformPrisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(*)::bigint as count FROM skill_mappings
+      WHERE company_id = ${companyId} AND current_level < required_level
+    `;
+    const skillGapCount = Number(skillGapsRaw[0]?.count ?? 0);
+    const skillGapCoverage = {
+      totalMappings: totalSkillMappings,
+      gapsIdentified: skillGapCount,
+      coveragePercent: totalSkillMappings > 0
+        ? Math.round(((totalSkillMappings - skillGapCount) / totalSkillMappings) * 100)
+        : 0,
+    };
+
     return {
       totalNominations,
       completed,
@@ -997,6 +1159,10 @@ export class AdvancedHRService {
       totalSessions,
       completedSessions,
       upcomingSessions,
+      trainingEffectiveness,
+      budgetUtilization,
+      programCompletion,
+      skillGapCoverage,
     };
   }
 
