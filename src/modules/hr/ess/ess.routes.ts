@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
 import { requireModuleEnabled, requireESSFeature } from '../../../shared/middleware/config-enforcement.middleware';
 import { essController as controller } from './ess.controller';
+import { trainingEvaluationController } from '../advanced/training-evaluation.controller';
 
 const router = Router();
 
@@ -84,6 +85,7 @@ router.get('/ess/my-goals', requireESSFeature('performanceGoals'), requirePermis
 router.get('/ess/my-grievances', requireESSFeature('grievanceSubmission'), requirePermissions(['hr:read', 'ess:raise-grievance']), controller.getMyGrievances);
 router.post('/ess/file-grievance', requireESSFeature('grievanceSubmission'), requirePermissions(['hr:create', 'ess:raise-grievance']), controller.fileGrievance);
 router.get('/ess/my-training', requireESSFeature('trainingEnrollment'), requirePermissions(['hr:read', 'ess:enroll-training']), controller.getMyTraining);
+router.post('/ess/training/:nominationId/feedback', requireESSFeature('trainingEnrollment'), requirePermissions(['hr:create', 'ess:enroll-training']), trainingEvaluationController.submitEssFeedback);
 router.get('/ess/my-assets', requireESSFeature('assetView'), requirePermissions(['hr:read', 'ess:view-assets']), controller.getMyAssets);
 router.get('/ess/my-form16', requireESSFeature('downloadForm16'), requirePermissions(['hr:read', 'ess:download-form16']), controller.getMyForm16);
 
