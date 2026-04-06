@@ -20,12 +20,19 @@ model JobRequisition {
   sourceChannels Json? // string[]
   status         RequisitionStatus @default(DRAFT)
   approvedBy     String?
+  employmentType  EmploymentType?
+  priority        RequisitionPriority?
+  location        String?
+  requirements    String?
+  experienceMin   Int?
+  experienceMax   Int?
   companyId      String
   company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   candidates     Candidate[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
+  @@index([companyId, status])
   @@map("job_requisitions")
 }
 
@@ -49,6 +56,9 @@ model Candidate {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  @@index([companyId, stage])
+  @@index([requisitionId, stage])
+  @@index([email])
   @@map("candidates")
 }
 
@@ -69,6 +79,9 @@ model Interview {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
+  @@index([companyId, status])
+  @@index([candidateId, status])
+  @@index([scheduledAt])
   @@map("interviews")
 }
 
@@ -99,4 +112,18 @@ enum InterviewStatus {
   COMPLETED
   CANCELLED
   NO_SHOW
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+}
+
+enum RequisitionPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
 }

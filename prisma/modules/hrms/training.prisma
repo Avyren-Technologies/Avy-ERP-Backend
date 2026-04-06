@@ -26,6 +26,7 @@ model TrainingCatalogue {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
+  @@index([companyId, isActive])
   @@map("training_catalogues")
 }
 
@@ -44,6 +45,8 @@ model TrainingNomination {
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
 
+  @@index([companyId, status])
+  @@index([employeeId, status])
   @@map("training_nominations")
 }
 
@@ -58,7 +61,8 @@ enum TrainingMode {
 
 enum TrainingNominationStatus {
   NOMINATED
-  ENROLLED
+  APPROVED
+  IN_PROGRESS
   COMPLETED
   CANCELLED
 }
