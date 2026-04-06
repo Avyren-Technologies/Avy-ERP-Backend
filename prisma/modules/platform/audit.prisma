@@ -1,21 +1,21 @@
 // ==========================================
-// PLATFORM — Audit Logs
+// Platform — Audit Trail
 // ==========================================
 // Models: AuditLog
 
-// Audit Logs (Platform level)
 model AuditLog {
-  id         String   @id @default(cuid())
-  tenantId   String?
-  userId     String?
-  action     String
-  entityType String
-  entityId   String
-  oldValues  Json?
-  newValues  Json?
-  ipAddress  String?
-  userAgent  String?
-  timestamp  DateTime @default(now())
+  id            String    @id @default(cuid())
+  entityType    String
+  entityId      String
+  action        String    // CREATE, UPDATE, DELETE, STATUS_CHANGE
+  changes       Json?     // {field: {from, to}} diff for updates; full snapshot for create/delete
+  changedBy     String
+  changedAt     DateTime  @default(now())
+  retentionDate DateTime
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@index([companyId, entityType, entityId])
+  @@index([retentionDate])
   @@map("audit_logs")
 }

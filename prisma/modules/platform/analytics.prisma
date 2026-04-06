@@ -1,0 +1,17 @@
+// ==========================================
+// Platform — Analytics Snapshots
+// ==========================================
+// Models: AnalyticsSnapshot
+
+model AnalyticsSnapshot {
+  id            String    @id @default(cuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  snapshotType  String    // RECRUITMENT_FUNNEL, TRAINING_COMPLETION, BUDGET_UTILIZATION, etc.
+  snapshotDate  DateTime  @default(now())
+  data          Json
+  createdAt     DateTime  @default(now())
+
+  @@index([companyId, snapshotType])
+  @@map("analytics_snapshots")
+}

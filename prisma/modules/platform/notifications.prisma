@@ -1,0 +1,38 @@
+// ==========================================
+// Platform — Notifications
+// ==========================================
+// Models: Notification, UserDevice
+
+model Notification {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  body        String
+  type        String
+  entityType  String?
+  entityId    String?
+  data        Json?
+  isRead      Boolean   @default(false)
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, isRead])
+  @@index([companyId, createdAt])
+  @@map("notifications")
+}
+
+model UserDevice {
+  id           String    @id @default(cuid())
+  userId       String
+  platform     String    // MOBILE_IOS, MOBILE_ANDROID, WEB
+  fcmToken     String
+  deviceName   String?
+  lastActiveAt DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, fcmToken])
+  @@index([userId])
+  @@map("user_devices")
+}

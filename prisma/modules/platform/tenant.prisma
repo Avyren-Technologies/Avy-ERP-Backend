@@ -244,6 +244,11 @@ model Company {
   // Support Ticket Relations
   supportTickets SupportTicket[]
 
+  // Notification, Audit & Analytics Relations
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+  analyticsSnapshots    AnalyticsSnapshot[]
+
   // Analytics
   employeeAnalytics     EmployeeAnalyticsDaily[]
   attendanceAnalytics   AttendanceAnalyticsDaily[]
