@@ -5,6 +5,7 @@ import { candidateProfileRoutes } from './candidate-profile.routes';
 import { evaluationRoutes } from './evaluation.routes';
 import offerRoutes from './offer.routes';
 import { trainingAttendanceRoutes } from './training-attendance.routes';
+import { trainingEvaluationRoutes } from './training-evaluation.routes';
 import trainingSessionRoutes from './training-session.routes';
 
 const router = Router();
@@ -217,6 +218,9 @@ router.use('/training-sessions', trainingSessionRoutes);
 
 // ── Training Attendance ───────────────────────────────────────────
 router.use(trainingAttendanceRoutes);
+
+// ── Training Evaluations ─────────────────────────────────────────
+router.use(trainingEvaluationRoutes);
 
 // ═══════════════════════════════════════════════════════════════════
 // OFFERS
