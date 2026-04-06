@@ -43,6 +43,12 @@ const NAV_TO_ESS_CONFIG: Record<string, string> = {
 // When the module is disabled in SystemControls, hide ALL related nav items.
 const NAV_TO_SYSTEM_MODULE: Record<string, string> = {
   'ess-chatbot': 'aiChatbotEnabled',
+  'hr-requisitions': 'recruitmentEnabled',
+  'hr-candidates': 'recruitmentEnabled',
+  'hr-analytics-recruitment': 'recruitmentEnabled',
+  'hr-training': 'trainingEnabled',
+  'hr-nominations': 'trainingEnabled',
+  'ess-training': 'trainingEnabled',
 };
 
 export class RbacService {
