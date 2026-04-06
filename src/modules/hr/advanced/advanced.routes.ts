@@ -31,6 +31,7 @@ router.post('/candidates', requirePermissions(['hr:create']), controller.createC
 router.get('/candidates/:id', requirePermissions(['hr:read']), controller.getCandidate);
 router.patch('/candidates/:id', requirePermissions(['hr:update']), controller.updateCandidate);
 router.patch('/candidates/:id/stage', requirePermissions(['hr:update']), controller.advanceCandidateStage);
+router.post('/candidates/:id/convert-to-employee', requirePermissions(['hr:configure']), controller.convertCandidateToEmployee);
 router.delete('/candidates/:id', requirePermissions(['hr:delete']), controller.deleteCandidate);
 
 // ═══════════════════════════════════════════════════════════════════

@@ -3001,6 +3001,134 @@ export class AdvancedHRService {
 
     return records;
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // RECRUITMENT — Candidate-to-Employee Conversion
+  // ════════════════════════════════════════════════════════════════
+
+  async convertCandidateToEmployee(companyId: string, candidateId: string, userId: string) {
+    // 1. Get candidate, validate stage = HIRED
+    const candidate = await platformPrisma.candidate.findFirst({
+      where: { id: candidateId, companyId },
+      include: {
+        requisition: {
+          select: { designationId: true, departmentId: true },
+        },
+      },
+    });
+
+    if (!candidate) throw ApiError.notFound('Candidate not found');
+    if (candidate.stage !== 'HIRED') {
+      throw ApiError.badRequest('Only candidates with HIRED stage can be converted to employees');
+    }
+    if (candidate.employeeId) {
+      throw ApiError.badRequest('Candidate has already been converted to an employee');
+    }
+
+    // 2. Get accepted offer (if any) for CTC/designation/department/joiningDate
+    const acceptedOffer = await platformPrisma.candidateOffer.findFirst({
+      where: { candidateId, companyId, status: 'ACCEPTED' },
+      orderBy: { acceptedAt: 'desc' },
+    });
+
+    // 3. Resolve designation and department from offer, fallback to requisition
+    const designationId = acceptedOffer?.designationId ?? candidate.requisition.designationId;
+    const departmentId = acceptedOffer?.departmentId ?? candidate.requisition.departmentId;
+
+    if (!designationId || !departmentId) {
+      throw ApiError.badRequest(
+        'Cannot convert candidate: designation and department are required. Ensure the offer or requisition has them set.',
+      );
+    }
+
+    // 4. Resolve employee type (get the first active one)
+    const defaultEmployeeType = await platformPrisma.employeeType.findFirst({
+      where: { companyId, status: 'Active' },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!defaultEmployeeType) {
+      throw ApiError.badRequest('Cannot convert candidate: no active employee type configured. Please create one first.');
+    }
+
+    // 5. Auto-generate employeeNumber via number series
+    const employeeNumber = await generateNextNumber(
+      platformPrisma, companyId, ['Employee'], 'Employee',
+    );
+
+    // 6. Split candidate name into firstName/lastName
+    const nameParts = candidate.name.trim().split(/\s+/);
+    const firstName = nameParts[0] ?? candidate.name;
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '-';
+
+    // 7. Resolve joining date from offer or default to today
+    const joiningDate = acceptedOffer?.joiningDate ?? new Date();
+
+    // 8. Create Employee record
+    const employee = await platformPrisma.employee.create({
+      data: {
+        companyId,
+        employeeId: employeeNumber,
+
+        // Personal (from candidate)
+        firstName,
+        lastName,
+        dateOfBirth: new Date('2000-01-01'), // Placeholder — to be updated
+        gender: 'PREFER_NOT_TO_SAY',
+
+        // Contact (from candidate)
+        personalMobile: candidate.phone ?? 'To be updated',
+        personalEmail: candidate.email,
+        emergencyContactName: 'To be updated',
+        emergencyContactRelation: 'To be updated',
+        emergencyContactMobile: 'To be updated',
+
+        // Professional (from offer / requisition)
+        joiningDate,
+        employeeTypeId: defaultEmployeeType.id,
+        departmentId,
+        designationId,
+        annualCtc: acceptedOffer?.offeredCtc ?? null,
+
+        // Status
+        status: 'PROBATION',
+      },
+    });
+
+    // 9. Link: update candidate.employeeId = newEmployee.id
+    await platformPrisma.candidate.update({
+      where: { id: candidateId },
+      data: { employeeId: employee.id },
+    });
+
+    // 10. Auto-assign mandatory trainings
+    const mandatoryTrainings = await platformPrisma.trainingCatalogue.findMany({
+      where: { companyId, mandatory: true, isActive: true },
+    });
+
+    if (mandatoryTrainings.length > 0) {
+      await platformPrisma.trainingNomination.createMany({
+        data: mandatoryTrainings.map((t) => ({
+          employeeId: employee.id,
+          trainingId: t.id,
+          status: 'NOMINATED' as const,
+          companyId,
+        })),
+      });
+    }
+
+    // 11. Add timeline entry
+    await platformPrisma.employeeTimeline.create({
+      data: {
+        employeeId: employee.id,
+        eventType: 'JOINED',
+        title: 'Employee record created from recruitment',
+        description: `Converted from candidate: ${candidate.name}`,
+        performedBy: userId,
+      },
+    });
+
+    return employee;
+  }
 }
 
 function round2(n: number): number {

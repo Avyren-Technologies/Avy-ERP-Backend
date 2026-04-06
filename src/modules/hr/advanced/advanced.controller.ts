@@ -1332,6 +1332,20 @@ export class AdvancedHRController {
     const records = await advancedHRService.listIncentiveRecords(companyId, opts);
     res.json(createSuccessResponse(records, 'Production incentive records retrieved'));
   });
+
+  // ════════════════════════════════════════════════════════════════
+  // RECRUITMENT — Candidate-to-Employee Conversion
+  // ════════════════════════════════════════════════════════════════
+
+  convertCandidateToEmployee = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const result = await advancedHRService.convertCandidateToEmployee(companyId, req.params.id!, userId);
+    res.json(createSuccessResponse(result, 'Candidate converted to employee'));
+  });
 }
 
 export const advancedHRController = new AdvancedHRController();
