@@ -62,7 +62,8 @@ class OfferController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const offer = await offerService.updateOfferStatus(companyId, req.params.id!, parsed.data);
+    const userId = req.user?.id;
+    const offer = await offerService.updateOfferStatus(companyId, req.params.id!, parsed.data, userId);
     res.json(createSuccessResponse(offer, 'Offer status updated'));
   });
 

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
+import { auditLog } from '../../../shared/utils/audit';
 import { essService } from '../ess/ess.service';
 import { trainingProgramService } from './training-program.service';
 import {
@@ -227,18 +228,31 @@ export class AdvancedHRService {
     });
   }
 
-  async updateRequisitionStatus(companyId: string, id: string, status: string) {
+  async updateRequisitionStatus(companyId: string, id: string, status: string, userId?: string) {
     const req = await platformPrisma.jobRequisition.findUnique({ where: { id } });
     if (!req || req.companyId !== companyId) {
       throw ApiError.notFound('Job requisition not found');
     }
 
-    validateTransition(req.status, status, REQUISITION_TRANSITIONS, 'requisition status');
+    const oldStatus = req.status;
+    validateTransition(oldStatus, status, REQUISITION_TRANSITIONS, 'requisition status');
 
-    return platformPrisma.jobRequisition.update({
+    const updated = await platformPrisma.jobRequisition.update({
       where: { id },
       data: { status: status as any },
     });
+
+    await auditLog({
+      entityType: 'JobRequisition',
+      entityId: id,
+      action: 'STATUS_CHANGE',
+      before: { status: oldStatus },
+      after: { status },
+      changedBy: userId || 'system',
+      companyId,
+    });
+
+    return updated;
   }
 
   async deleteRequisition(companyId: string, id: string) {
@@ -390,6 +404,16 @@ export class AdvancedHRService {
       },
     });
 
+    await auditLog({
+      entityType: 'Candidate',
+      entityId: id,
+      action: 'STATUS_CHANGE',
+      before: { stage: oldStage },
+      after: { stage: data.stage },
+      changedBy: userId,
+      companyId,
+    });
+
     return updated;
   }
 
@@ -493,14 +517,15 @@ export class AdvancedHRService {
     });
   }
 
-  async completeInterview(companyId: string, id: string, data: any) {
+  async completeInterview(companyId: string, id: string, data: any, userId?: string) {
     const interview = await platformPrisma.interview.findUnique({ where: { id } });
     if (!interview || interview.companyId !== companyId) {
       throw ApiError.notFound('Interview not found');
     }
-    validateTransition(interview.status, 'COMPLETED', INTERVIEW_TRANSITIONS, 'interview status');
+    const oldStatus = interview.status;
+    validateTransition(oldStatus, 'COMPLETED', INTERVIEW_TRANSITIONS, 'interview status');
 
-    return platformPrisma.interview.update({
+    const updated = await platformPrisma.interview.update({
       where: { id },
       data: {
         feedbackRating: data.feedbackRating,
@@ -508,19 +533,44 @@ export class AdvancedHRService {
         status: 'COMPLETED',
       },
     });
+
+    await auditLog({
+      entityType: 'Interview',
+      entityId: id,
+      action: 'STATUS_CHANGE',
+      before: { status: oldStatus },
+      after: { status: 'COMPLETED' },
+      changedBy: userId || 'system',
+      companyId,
+    });
+
+    return updated;
   }
 
-  async cancelInterview(companyId: string, id: string) {
+  async cancelInterview(companyId: string, id: string, userId?: string) {
     const interview = await platformPrisma.interview.findUnique({ where: { id } });
     if (!interview || interview.companyId !== companyId) {
       throw ApiError.notFound('Interview not found');
     }
-    validateTransition(interview.status, 'CANCELLED', INTERVIEW_TRANSITIONS, 'interview status');
+    const oldStatus = interview.status;
+    validateTransition(oldStatus, 'CANCELLED', INTERVIEW_TRANSITIONS, 'interview status');
 
-    return platformPrisma.interview.update({
+    const updated = await platformPrisma.interview.update({
       where: { id },
       data: { status: 'CANCELLED' },
     });
+
+    await auditLog({
+      entityType: 'Interview',
+      entityId: id,
+      action: 'STATUS_CHANGE',
+      before: { status: oldStatus },
+      after: { status: 'CANCELLED' },
+      changedBy: userId || 'system',
+      companyId,
+    });
+
+    return updated;
   }
 
   async deleteInterview(companyId: string, id: string) {
@@ -890,7 +940,7 @@ export class AdvancedHRService {
     });
   }
 
-  async completeTrainingNomination(companyId: string, id: string, data: any) {
+  async completeTrainingNomination(companyId: string, id: string, data: any, userId?: string) {
     const nomination = await platformPrisma.trainingNomination.findUnique({
       where: { id },
       include: { training: true },
@@ -1007,6 +1057,16 @@ export class AdvancedHRService {
         await trainingProgramService.recalculateProgress(companyId, enrollment.id);
       }
     }
+
+    await auditLog({
+      entityType: 'TrainingNomination',
+      entityId: id,
+      action: 'STATUS_CHANGE',
+      before: { status: nomination.status },
+      after: { status: 'COMPLETED' },
+      changedBy: userId || 'system',
+      companyId,
+    });
 
     return updated;
   }

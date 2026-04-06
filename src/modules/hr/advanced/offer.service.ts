@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
+import { auditLog } from '../../../shared/utils/audit';
 import {
   validateTransition,
   OFFER_TRANSITIONS,
@@ -181,13 +182,14 @@ class OfferService {
   // UPDATE STATUS
   // ════════════════════════════════════════════════════════════════
 
-  async updateOfferStatus(companyId: string, id: string, statusData: { status: string; rejectionReason?: string | undefined }) {
+  async updateOfferStatus(companyId: string, id: string, statusData: { status: string; rejectionReason?: string | undefined }, userId?: string) {
     const offer = await platformPrisma.candidateOffer.findUnique({ where: { id } });
     if (!offer || offer.companyId !== companyId) {
       throw ApiError.notFound('Offer not found');
     }
 
-    validateTransition(offer.status, statusData.status, OFFER_TRANSITIONS, 'offer status');
+    const oldStatus = offer.status;
+    validateTransition(oldStatus, statusData.status, OFFER_TRANSITIONS, 'offer status');
 
     const updateData: any = { status: statusData.status };
 
@@ -230,6 +232,16 @@ class OfferService {
         }
       }
     }
+
+    await auditLog({
+      entityType: 'CandidateOffer',
+      entityId: id,
+      action: 'STATUS_CHANGE',
+      before: { status: oldStatus },
+      after: { status: statusData.status },
+      changedBy: userId || 'system',
+      companyId,
+    });
 
     return updated;
   }

@@ -4,6 +4,7 @@ import { createSuccessResponse, createPaginatedResponse, getPaginationParams } f
 import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError, AuthError } from '../../../shared/errors';
 import { hasPermission } from '../../../shared/constants/permissions';
+import { queryAuditLog } from '../../../shared/utils/audit';
 import {
   createRequisitionSchema,
   updateRequisitionSchema,
@@ -112,7 +113,8 @@ export class AdvancedHRController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const requisition = await advancedHRService.updateRequisitionStatus(companyId, req.params.id!, parsed.data.status);
+    const userId = req.user?.id;
+    const requisition = await advancedHRService.updateRequisitionStatus(companyId, req.params.id!, parsed.data.status, userId);
     res.json(createSuccessResponse(requisition, 'Requisition status updated'));
   });
 
@@ -259,7 +261,8 @@ export class AdvancedHRController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const interview = await advancedHRService.completeInterview(companyId, req.params.id!, parsed.data);
+    const userId = req.user?.id;
+    const interview = await advancedHRService.completeInterview(companyId, req.params.id!, parsed.data, userId);
     res.json(createSuccessResponse(interview, 'Interview completed'));
   });
 
@@ -267,7 +270,8 @@ export class AdvancedHRController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const interview = await advancedHRService.cancelInterview(companyId, req.params.id!);
+    const userId = req.user?.id;
+    const interview = await advancedHRService.cancelInterview(companyId, req.params.id!, userId);
     res.json(createSuccessResponse(interview, 'Interview cancelled'));
   });
 
@@ -407,7 +411,8 @@ export class AdvancedHRController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const nomination = await advancedHRService.completeTrainingNomination(companyId, req.params.id!, parsed.data);
+    const userId = req.user?.id;
+    const nomination = await advancedHRService.completeTrainingNomination(companyId, req.params.id!, parsed.data, userId);
     res.json(createSuccessResponse(nomination, 'Training nomination completed'));
   });
 
@@ -1360,6 +1365,25 @@ export class AdvancedHRController {
 
     const result = await advancedHRService.convertCandidateToEmployee(companyId, req.params.id!, userId);
     res.json(createSuccessResponse(result, 'Candidate converted to employee'));
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // AUDIT LOG
+  // ════════════════════════════════════════════════════════════════
+
+  getAuditLog = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { entityType, entityId, page, limit } = req.query;
+    const opts: { entityType?: string; entityId?: string; page?: number; limit?: number } = {};
+    if (entityType) opts.entityType = entityType as string;
+    if (entityId) opts.entityId = entityId as string;
+    if (page) opts.page = Number(page);
+    if (limit) opts.limit = Number(limit);
+    const result = await queryAuditLog(companyId, opts);
+
+    res.json(createPaginatedResponse(result.logs, result.page, result.limit, result.total, 'Audit log retrieved'));
   });
 }
 
