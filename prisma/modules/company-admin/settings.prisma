@@ -50,8 +50,8 @@ model SystemControls {
   payrollEnabled     Boolean @default(true)
   essEnabled         Boolean @default(true)
   performanceEnabled Boolean @default(false)
-  recruitmentEnabled Boolean @default(false)
-  trainingEnabled    Boolean @default(false)
+  recruitmentEnabled Boolean @default(true)
+  trainingEnabled    Boolean @default(true)
   mobileAppEnabled   Boolean @default(true)
   aiChatbotEnabled   Boolean @default(false)
 
