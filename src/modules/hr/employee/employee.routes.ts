@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
 import { employeeController } from './employee.controller';
+import { bulkImportController, bulkUploadMiddleware } from './bulk-import.controller';
 
 const router = Router();
 
@@ -13,6 +14,11 @@ router.get('/employees/probation-due', requirePermissions(['hr:read']), employee
 
 // ── Org Chart (ORA-10) — MUST be before /:id catch-all ───────────────
 router.get('/employees/org-chart', requirePermissions(['hr:read', 'ess:view-org-chart']), employeeController.getOrgChart);
+
+// ── Bulk Import — MUST be before /:id catch-all ───────────────────────
+router.get('/employees/bulk/template', requirePermissions(['hr:create']), bulkImportController.downloadTemplate);
+router.post('/employees/bulk/validate', requirePermissions(['hr:create']), bulkUploadMiddleware, bulkImportController.validateUpload);
+router.post('/employees/bulk/import', requirePermissions(['hr:create']), bulkImportController.confirmImport);
 
 router.get('/employees/:id', requirePermissions(['hr:read', 'ess:view-profile']), employeeController.getEmployee);
 router.patch('/employees/:id', requirePermissions(['hr:update']), employeeController.updateEmployee);
