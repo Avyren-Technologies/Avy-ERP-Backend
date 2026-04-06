@@ -3,6 +3,7 @@ import { requirePermissions } from '../../../middleware/auth.middleware';
 import { advancedHRController as controller } from './advanced.controller';
 import { candidateProfileRoutes } from './candidate-profile.routes';
 import { evaluationRoutes } from './evaluation.routes';
+import offerRoutes from './offer.routes';
 
 const router = Router();
 
@@ -205,5 +206,10 @@ router.delete('/production-incentives/configs/:id', requirePermissions(['hr:dele
 router.post('/production-incentives/configs/:id/compute', requirePermissions(['hr:create']), controller.computeIncentives);
 router.post('/production-incentives/configs/:id/merge', requirePermissions(['hr:update']), controller.mergeIncentivesToPayroll);
 router.get('/production-incentives/records', requirePermissions(['hr:read']), controller.listIncentiveRecords);
+
+// ═══════════════════════════════════════════════════════════════════
+// OFFERS
+// ═══════════════════════════════════════════════════════════════════
+router.use('/offers', offerRoutes);
 
 export { router as advancedRoutes };
