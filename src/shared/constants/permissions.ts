@@ -72,6 +72,10 @@ export function expandPermissionsWithInheritance(permissions: string[]): string[
  * System modules (user, role, company, reports, audit, platform) are never suppressed.
  */
 export function suppressByModules(permissions: string[], activeModuleIds: string[]): string[] {
+  // If no modules are configured at all, skip suppression to avoid locking out users
+  // (callers should resolve modules from locations as fallback before reaching here)
+  if (activeModuleIds.length === 0) return permissions;
+
   const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform']);
 
   // Build set of allowed permission modules from active subscriptions

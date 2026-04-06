@@ -97,6 +97,20 @@ export class RbacController {
             ? JSON.parse(company.selectedModuleIds)
             : [];
       }
+
+      // Fallback: if company-level modules are empty, aggregate from locations
+      if (activeModuleIds.length === 0) {
+        const locations = await platformPrisma.location.findMany({
+          where: { companyId },
+          select: { moduleIds: true },
+        });
+        const locModules = locations.flatMap(l =>
+          l.moduleIds
+            ? (Array.isArray(l.moduleIds) ? l.moduleIds as string[] : JSON.parse(l.moduleIds as string))
+            : [],
+        );
+        activeModuleIds = Array.from(new Set(locModules));
+      }
     }
 
     const manifestParams: Parameters<typeof rbacService.getNavigationManifest>[0] = {

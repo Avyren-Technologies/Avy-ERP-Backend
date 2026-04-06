@@ -329,8 +329,8 @@ export class AuthService {
       return { user, tenant, company };
     });
 
-    // Fetch permissions dynamically from the new TenantUser→Role
-    const permissions = await this.getUserPermissions(result.user.id, result.tenant.id);
+    // Fetch permissions dynamically from the new TenantUser→Role, then expand + suppress
+    const permissions = await this.getExpandedPermissions(result.user.id, result.tenant.id, result.company.id);
 
     // Generate tokens
     const tokens = await this.generateTokens({
@@ -805,11 +805,26 @@ export class AuthService {
         where: { id: companyId },
         select: { selectedModuleIds: true },
       });
-      const activeModuleIds: string[] = company?.selectedModuleIds
+      let activeModuleIds: string[] = company?.selectedModuleIds
         ? (Array.isArray(company.selectedModuleIds)
           ? company.selectedModuleIds as string[]
           : JSON.parse(company.selectedModuleIds as string))
         : [];
+
+      // Fallback: if company-level modules are empty, aggregate from locations
+      if (activeModuleIds.length === 0) {
+        const locations = await platformPrisma.location.findMany({
+          where: { companyId },
+          select: { moduleIds: true },
+        });
+        const locModules = locations.flatMap(l =>
+          l.moduleIds
+            ? (Array.isArray(l.moduleIds) ? l.moduleIds as string[] : JSON.parse(l.moduleIds as string))
+            : [],
+        );
+        activeModuleIds = Array.from(new Set(locModules));
+      }
+
       return suppressByModules(expanded, activeModuleIds);
     }
 

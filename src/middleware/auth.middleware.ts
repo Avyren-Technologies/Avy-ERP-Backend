@@ -91,11 +91,26 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
               where: { id: dbUser.companyId },
               select: { selectedModuleIds: true },
             });
-            const activeModuleIds: string[] = companyForModules?.selectedModuleIds
+            let activeModuleIds: string[] = companyForModules?.selectedModuleIds
               ? (Array.isArray(companyForModules.selectedModuleIds)
                 ? companyForModules.selectedModuleIds as string[]
                 : JSON.parse(companyForModules.selectedModuleIds as string))
               : [];
+
+            // Fallback: if company-level modules are empty, aggregate from locations
+            if (activeModuleIds.length === 0) {
+              const locations = await platformPrisma.location.findMany({
+                where: { companyId: dbUser.companyId },
+                select: { moduleIds: true },
+              });
+              const locModules = locations.flatMap(l =>
+                l.moduleIds
+                  ? (Array.isArray(l.moduleIds) ? l.moduleIds as string[] : JSON.parse(l.moduleIds as string))
+                  : [],
+              );
+              activeModuleIds = Array.from(new Set(locModules));
+            }
+
             permissions = suppressByModules(expanded, activeModuleIds);
           } else {
             permissions = expanded;

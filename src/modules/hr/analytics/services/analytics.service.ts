@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { RequisitionStatus } from '@prisma/client';
 import { platformPrisma } from '../../../../config/database';
 import { logger } from '../../../../config/logger';
 import type { DashboardFilters, DataScope, TrendSeries, Distribution } from '../analytics.types';
@@ -559,7 +560,7 @@ class AnalyticsService {
       const openPositions = await tenantDb.jobRequisition.count({
         where: {
           companyId: scope.companyId,
-          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          status: { in: [RequisitionStatus.OPEN, RequisitionStatus.INTERVIEWING] },
         },
       });
 

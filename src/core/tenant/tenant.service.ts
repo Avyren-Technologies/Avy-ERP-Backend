@@ -269,10 +269,15 @@ export class TenantService {
           // Step 7 – Strategy
           multiLocationMode: strategy.multiLocationMode,
           locationConfig: strategy.locationConfig,
-          // Company-level commercial (common mode)
+          // Company-level modules: in per-location mode use aggregated location modules,
+          // in common mode use commercial config with location fallback
           selectedModuleIds: strategy.locationConfig === 'per-location'
             ? dedupedPerLocationModuleIds as any
-            : commercial?.selectedModuleIds as any ?? Prisma.JsonNull,
+            : (commercial?.selectedModuleIds?.length
+                ? commercial.selectedModuleIds as any
+                : dedupedPerLocationModuleIds.length
+                  ? dedupedPerLocationModuleIds as any
+                  : Prisma.JsonNull),
           customModulePricing: strategy.locationConfig === 'per-location'
             ? Prisma.JsonNull
             : commercial?.customModulePricing as any ?? Prisma.JsonNull,
@@ -373,7 +378,9 @@ export class TenantService {
       // ── 8. Subscription (default TRIAL) ────────────────────────
       const moduleIds = strategy.locationConfig === 'per-location'
         ? dedupedPerLocationModuleIds
-        : (commercial?.selectedModuleIds ?? []);
+        : (commercial?.selectedModuleIds?.length
+            ? commercial.selectedModuleIds
+            : dedupedPerLocationModuleIds);
       const modulesJson: Record<string, boolean> = {};
       moduleIds.forEach((m) => { modulesJson[m] = true; });
 
