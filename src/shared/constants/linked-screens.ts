@@ -83,6 +83,15 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
     defaultPrefix: 'TRN-',
   },
 
+  // ── HR / Training Program ──────────────────────────────────────────
+  {
+    value: 'Training Program',
+    label: 'Training Program',
+    module: 'HR',
+    description: 'Reference numbers for training programs',
+    defaultPrefix: 'PRG-',
+  },
+
   // ── HR / Training Session ──────────────────────────────────────────
   {
     value: 'Training Session',

@@ -186,6 +186,11 @@ model Company {
   trainingAttendance    TrainingAttendance[]
   trainingEvaluations   TrainingEvaluation[]
   trainers              Trainer[]
+  trainingPrograms           TrainingProgram[]
+  trainingProgramCourses     TrainingProgramCourse[]
+  trainingProgramEnrollments TrainingProgramEnrollment[]
+  trainingBudgets            TrainingBudget[]
+  trainingMaterials          TrainingMaterial[]
 
   // Asset Management Relations
   assetCategories  AssetCategory[]

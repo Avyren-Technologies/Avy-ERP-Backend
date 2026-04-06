@@ -138,6 +138,7 @@ model Employee {
   trainingNominations   TrainingNomination[]
   trainingAttendance    TrainingAttendance[]  @relation("TrainingAttendanceEmployee")
   trainerProfile        Trainer[]             @relation("TrainerEmployee")
+  programEnrollments    TrainingProgramEnrollment[] @relation("ProgramEnrollmentEmployee")
   assetAssignments      AssetAssignment[]
   expenseClaims       ExpenseClaim[]
   hrLetters           HRLetter[]

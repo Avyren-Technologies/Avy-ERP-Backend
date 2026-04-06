@@ -28,6 +28,7 @@ model Department {
   transfersTo                EmployeeTransfer[]          @relation("TransferToDept")
   productionIncentiveConfigs ProductionIncentiveConfig[]
   offers                     CandidateOffer[]            @relation("OfferDepartment")
+  trainingBudgets            TrainingBudget[]            @relation("TrainingBudgetDepartment")
 
   @@unique([companyId, code])
   @@map("departments")
