@@ -169,9 +169,15 @@ model Company {
   successionPlans  SuccessionPlan[]
 
   // Recruitment Relations
-  jobRequisitions JobRequisition[]
-  candidates      Candidate[]
-  interviews      Interview[]
+  jobRequisitions      JobRequisition[]
+  candidates           Candidate[]
+  interviews           Interview[]
+  candidateOffers      CandidateOffer[]
+  candidateEducation   CandidateEducation[]
+  candidateExperience  CandidateExperience[]
+  candidateDocuments   CandidateDocument[]
+  interviewEvaluations InterviewEvaluation[]
+  candidateStageHistory CandidateStageHistory[]
 
   // Training Relations
   trainingCatalogues  TrainingCatalogue[]

@@ -27,6 +27,7 @@ model Department {
   transfersFrom              EmployeeTransfer[]          @relation("TransferFromDept")
   transfersTo                EmployeeTransfer[]          @relation("TransferToDept")
   productionIncentiveConfigs ProductionIncentiveConfig[]
+  offers                     CandidateOffer[]            @relation("OfferDepartment")
 
   @@unique([companyId, code])
   @@map("departments")
@@ -58,6 +59,7 @@ model Designation {
   promotionsFrom        EmployeePromotion[]     @relation("PromotionFromDesig")
   promotionsTo          EmployeePromotion[]     @relation("PromotionToDesig")
   expenseCategoryLimits ExpenseCategoryLimit[]
+  offers                CandidateOffer[]        @relation("OfferDesignation")
 
   @@unique([companyId, code])
   @@map("designations")

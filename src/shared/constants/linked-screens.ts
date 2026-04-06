@@ -83,6 +83,15 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
     defaultPrefix: 'TRN-',
   },
 
+  // ── HR / Offer Management ────────────────────────────────────────────
+  {
+    value: 'Offer Management',
+    label: 'Offer Management',
+    module: 'HR',
+    description: 'Reference numbers for job offers',
+    defaultPrefix: 'OFF-',
+  },
+
   // ── HR / Performance ───────────────────────────────────────────────
   {
     value: 'Performance',
