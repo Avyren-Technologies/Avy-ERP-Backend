@@ -4,6 +4,8 @@ import { advancedHRController as controller } from './advanced.controller';
 import { candidateProfileRoutes } from './candidate-profile.routes';
 import { evaluationRoutes } from './evaluation.routes';
 import offerRoutes from './offer.routes';
+import { trainingAttendanceRoutes } from './training-attendance.routes';
+import trainingSessionRoutes from './training-session.routes';
 
 const router = Router();
 
@@ -207,6 +209,14 @@ router.delete('/production-incentives/configs/:id', requirePermissions(['hr:dele
 router.post('/production-incentives/configs/:id/compute', requirePermissions(['hr:create']), controller.computeIncentives);
 router.post('/production-incentives/configs/:id/merge', requirePermissions(['hr:update']), controller.mergeIncentivesToPayroll);
 router.get('/production-incentives/records', requirePermissions(['hr:read']), controller.listIncentiveRecords);
+
+// ═══════════════════════════════════════════════════════════════════
+// TRAINING — Sessions
+// ═══════════════════════════════════════════════════════════════════
+router.use('/training-sessions', trainingSessionRoutes);
+
+// ── Training Attendance ───────────────────────────────────────────
+router.use(trainingAttendanceRoutes);
 
 // ═══════════════════════════════════════════════════════════════════
 // OFFERS
