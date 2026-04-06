@@ -3,6 +3,7 @@ import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { essService } from '../ess/ess.service';
+import { trainingProgramService } from './training-program.service';
 import {
   validateTransition,
   REQUISITION_TRANSITIONS,
@@ -752,6 +753,9 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Training not found in this company');
     }
 
+    // Validate prerequisites if training is part of a program
+    await trainingProgramService.validatePrerequisites(companyId, data.employeeId, data.trainingId);
+
     return platformPrisma.trainingNomination.create({
       data: {
         companyId,
@@ -867,6 +871,41 @@ export class AdvancedHRService {
             },
           });
         }
+      }
+    }
+
+    // Auto-increment budget usage
+    const employee = await platformPrisma.employee.findUnique({
+      where: { id: nomination.employeeId },
+      select: { departmentId: true },
+    });
+    const training = await platformPrisma.trainingCatalogue.findUnique({
+      where: { id: nomination.trainingId },
+      select: { costPerHead: true },
+    });
+
+    if (training?.costPerHead && employee?.departmentId) {
+      const now = new Date();
+      const fy = now.getMonth() >= 3
+        ? `${now.getFullYear()}-${(now.getFullYear() + 1).toString().slice(2)}`
+        : `${now.getFullYear() - 1}-${now.getFullYear().toString().slice(2)}`;
+
+      await platformPrisma.trainingBudget.updateMany({
+        where: { companyId, fiscalYear: fy, departmentId: employee.departmentId },
+        data: { usedAmount: { increment: training.costPerHead } },
+      });
+    }
+
+    // Recalculate program enrollment progress if this training is part of any program
+    const programCourses = await platformPrisma.trainingProgramCourse.findMany({
+      where: { trainingId: nomination.trainingId, companyId },
+    });
+    for (const pc of programCourses) {
+      const enrollment = await platformPrisma.trainingProgramEnrollment.findUnique({
+        where: { programId_employeeId: { programId: pc.programId, employeeId: nomination.employeeId } },
+      });
+      if (enrollment) {
+        await trainingProgramService.recalculateProgress(companyId, enrollment.id);
       }
     }
 
