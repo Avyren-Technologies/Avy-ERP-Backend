@@ -11,4 +11,4 @@ router.patch('/:id', requirePermissions(['training:update', 'hr:update']), train
 router.patch('/:id/status', requirePermissions(['training:update', 'hr:update']), trainingSessionController.updateSessionStatus);
 router.delete('/:id', requirePermissions(['training:delete', 'hr:delete']), trainingSessionController.deleteSession);
 
-export default router;
+export { router as trainingSessionRoutes };

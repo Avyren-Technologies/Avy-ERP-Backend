@@ -99,7 +99,7 @@ class OfferService {
   // CREATE
   // ════════════════════════════════════════════════════════════════
 
-  async createOffer(companyId: string, data: any, userId?: string) {
+  async createOffer(companyId: string, data: any, userId: string) {
     // Validate candidate exists and belongs to company
     const candidate = await platformPrisma.candidate.findUnique({
       where: { id: data.candidateId },
@@ -134,6 +134,15 @@ class OfferService {
       },
     });
 
+    await auditLog({
+      entityType: 'CandidateOffer',
+      entityId: offer.id,
+      action: 'CREATE',
+      after: offer,
+      changedBy: userId,
+      companyId,
+    });
+
     return offer;
   }
 
@@ -141,7 +150,7 @@ class OfferService {
   // UPDATE
   // ════════════════════════════════════════════════════════════════
 
-  async updateOffer(companyId: string, id: string, data: any) {
+  async updateOffer(companyId: string, id: string, data: any, userId: string) {
     const offer = await platformPrisma.candidateOffer.findUnique({ where: { id } });
     if (!offer || offer.companyId !== companyId) {
       throw ApiError.notFound('Offer not found');
@@ -151,7 +160,7 @@ class OfferService {
       throw ApiError.badRequest('Only DRAFT offers can be updated');
     }
 
-    return platformPrisma.candidateOffer.update({
+    const updated = await platformPrisma.candidateOffer.update({
       where: { id },
       data: {
         ...(data.designationId !== undefined && { designationId: n(data.designationId) }),
@@ -169,6 +178,18 @@ class OfferService {
         department: { select: { id: true, name: true } },
       },
     });
+
+    await auditLog({
+      entityType: 'CandidateOffer',
+      entityId: id,
+      action: 'UPDATE',
+      before: offer,
+      after: updated,
+      changedBy: userId,
+      companyId,
+    });
+
+    return updated;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -253,7 +274,7 @@ class OfferService {
   // DELETE
   // ════════════════════════════════════════════════════════════════
 
-  async deleteOffer(companyId: string, id: string) {
+  async deleteOffer(companyId: string, id: string, userId: string) {
     const offer = await platformPrisma.candidateOffer.findUnique({ where: { id } });
     if (!offer || offer.companyId !== companyId) {
       throw ApiError.notFound('Offer not found');
@@ -264,6 +285,16 @@ class OfferService {
     }
 
     await platformPrisma.candidateOffer.delete({ where: { id } });
+
+    await auditLog({
+      entityType: 'CandidateOffer',
+      entityId: id,
+      action: 'DELETE',
+      before: offer,
+      changedBy: userId,
+      companyId,
+    });
+
     return { message: 'Offer deleted' };
   }
 }

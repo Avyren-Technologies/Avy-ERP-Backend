@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const createSessionSchema = z.object({
+const createSessionBaseSchema = z.object({
   trainingId: z.string().min(1, 'Training ID is required'),
   batchName: z.string().optional(),
   startDateTime: z.string().min(1, 'Start date/time is required'),
@@ -12,7 +12,12 @@ export const createSessionSchema = z.object({
   notes: z.string().optional(),
 });
 
-export const updateSessionSchema = createSessionSchema.partial().omit({ trainingId: true });
+export const createSessionSchema = createSessionBaseSchema.refine(
+  (data) => new Date(data.endDateTime) > new Date(data.startDateTime),
+  { message: 'End date/time must be after start date/time', path: ['endDateTime'] },
+);
+
+export const updateSessionSchema = createSessionBaseSchema.partial().omit({ trainingId: true });
 
 export const updateSessionStatusSchema = z.object({
   status: z.enum(['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']),

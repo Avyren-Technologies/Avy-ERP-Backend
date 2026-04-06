@@ -2,6 +2,11 @@ import { EventEmitter } from 'events';
 import { logger } from '../../config/logger';
 
 class TypedEventBus extends EventEmitter {
+  constructor() {
+    super();
+    this.setMaxListeners(50);
+  }
+
   emitEvent<T>(event: string, payload: T): void {
     logger.debug(`Event emitted: ${event}`);
     this.emit(event, payload);

@@ -14,4 +14,4 @@ router.delete('/:id/courses/:courseId', requirePermissions(['training:delete', '
 router.post('/:id/enroll', requirePermissions(['training:create', 'hr:create']), trainingProgramController.enrollEmployees);
 router.get('/:id/enrollments', requirePermissions(['training:read', 'hr:read']), trainingProgramController.listEnrollments);
 
-export default router;
+export { router as trainingProgramRoutes };

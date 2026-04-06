@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../config/database';
 import { logger } from '../../config/logger';
 
@@ -89,7 +90,7 @@ export async function queryAuditLog(
   options: { entityType?: string; entityId?: string; page?: number; limit?: number },
 ) {
   const { entityType, entityId, page = 1, limit = 20 } = options;
-  const where: any = { companyId };
+  const where: Prisma.AuditLogWhereInput = { companyId };
   if (entityType) where.entityType = entityType;
   if (entityId) where.entityId = entityId;
 

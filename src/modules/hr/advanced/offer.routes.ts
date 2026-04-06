@@ -11,4 +11,4 @@ router.patch('/:id', requirePermissions(['recruitment-offer:update', 'hr:update'
 router.patch('/:id/status', requirePermissions(['recruitment-offer:approve', 'hr:update']), offerController.updateOfferStatus);
 router.delete('/:id', requirePermissions(['recruitment-offer:delete', 'hr:delete']), offerController.deleteOffer);
 
-export default router;
+export { router as offerRoutes };

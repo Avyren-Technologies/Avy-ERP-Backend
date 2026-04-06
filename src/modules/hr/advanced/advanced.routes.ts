@@ -3,13 +3,13 @@ import { requirePermissions } from '../../../middleware/auth.middleware';
 import { advancedHRController as controller } from './advanced.controller';
 import { candidateProfileRoutes } from './candidate-profile.routes';
 import { evaluationRoutes } from './evaluation.routes';
-import offerRoutes from './offer.routes';
+import { offerRoutes } from './offer.routes';
 import { trainingAttendanceRoutes } from './training-attendance.routes';
 import { trainingBudgetRoutes } from './training-budget.routes';
 import { trainingEvaluationRoutes } from './training-evaluation.routes';
 import { trainingMaterialRoutes } from './training-material.routes';
-import trainingProgramRoutes from './training-program.routes';
-import trainingSessionRoutes from './training-session.routes';
+import { trainingProgramRoutes } from './training-program.routes';
+import { trainingSessionRoutes } from './training-session.routes';
 import { trainerRoutes } from './trainer.routes';
 
 const router = Router();

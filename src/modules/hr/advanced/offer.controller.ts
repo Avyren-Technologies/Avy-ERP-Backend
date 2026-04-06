@@ -36,7 +36,7 @@ class OfferController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const offer = await offerService.createOffer(companyId, parsed.data, req.user?.id);
+    const offer = await offerService.createOffer(companyId, parsed.data, req.user!.id);
     res.status(201).json(createSuccessResponse(offer, 'Offer created'));
   });
 
@@ -49,7 +49,7 @@ class OfferController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const offer = await offerService.updateOffer(companyId, req.params.id!, parsed.data);
+    const offer = await offerService.updateOffer(companyId, req.params.id!, parsed.data, req.user!.id);
     res.json(createSuccessResponse(offer, 'Offer updated'));
   });
 
@@ -71,7 +71,7 @@ class OfferController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const result = await offerService.deleteOffer(companyId, req.params.id!);
+    const result = await offerService.deleteOffer(companyId, req.params.id!, req.user!.id);
     res.json(createSuccessResponse(result, 'Offer deleted'));
   });
 }
