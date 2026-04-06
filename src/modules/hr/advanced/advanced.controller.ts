@@ -184,7 +184,10 @@ export class AdvancedHRController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const candidate = await advancedHRService.advanceCandidateStage(companyId, req.params.id!, parsed.data.stage);
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const candidate = await advancedHRService.advanceCandidateStage(companyId, req.params.id!, parsed.data, userId);
     res.json(createSuccessResponse(candidate, 'Candidate stage updated'));
   });
 

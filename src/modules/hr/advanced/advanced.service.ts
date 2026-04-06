@@ -291,6 +291,9 @@ export class AdvancedHRService {
         interviews: {
           orderBy: { scheduledAt: 'asc' },
         },
+        stageHistory: {
+          orderBy: { changedAt: 'desc' },
+        },
       },
     });
 
@@ -354,18 +357,39 @@ export class AdvancedHRService {
     });
   }
 
-  async advanceCandidateStage(companyId: string, id: string, stage: string) {
+  async advanceCandidateStage(
+    companyId: string,
+    id: string,
+    data: { stage: string; reason?: string | undefined; notes?: string | undefined },
+    userId: string,
+  ) {
     const candidate = await platformPrisma.candidate.findUnique({ where: { id } });
     if (!candidate || candidate.companyId !== companyId) {
       throw ApiError.notFound('Candidate not found');
     }
 
-    validateTransition(candidate.stage, stage, CANDIDATE_STAGE_TRANSITIONS, 'candidate stage');
+    const oldStage = candidate.stage;
+    validateTransition(oldStage, data.stage, CANDIDATE_STAGE_TRANSITIONS, 'candidate stage');
 
-    return platformPrisma.candidate.update({
+    const updated = await platformPrisma.candidate.update({
       where: { id },
-      data: { stage: stage as any },
+      data: { stage: data.stage as any },
     });
+
+    // Create stage history record
+    await platformPrisma.candidateStageHistory.create({
+      data: {
+        candidateId: id,
+        fromStage: oldStage,
+        toStage: data.stage as any,
+        reason: data.reason ?? null,
+        notes: data.notes ?? null,
+        changedBy: userId,
+        companyId,
+      },
+    });
+
+    return updated;
   }
 
   async deleteCandidate(companyId: string, id: string) {
