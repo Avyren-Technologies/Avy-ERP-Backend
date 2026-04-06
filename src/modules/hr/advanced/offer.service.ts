@@ -8,6 +8,8 @@ import {
   OFFER_TRANSITIONS,
   CANDIDATE_STAGE_TRANSITIONS,
 } from '../../../shared/utils/state-machine';
+import { eventBus } from '../../../shared/events/event-bus';
+import { HR_EVENTS } from '../../../shared/events/hr-events';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -242,6 +244,16 @@ class OfferService {
       changedBy: userId || 'system',
       companyId,
     });
+
+    if (statusData.status === 'SENT') {
+      eventBus.emitEvent(HR_EVENTS.OFFER_SENT, { offerId: id, candidateId: offer.candidateId, companyId });
+    }
+    if (statusData.status === 'ACCEPTED') {
+      eventBus.emitEvent(HR_EVENTS.OFFER_ACCEPTED, { offerId: id, candidateId: offer.candidateId, companyId });
+    }
+    if (statusData.status === 'REJECTED') {
+      eventBus.emitEvent(HR_EVENTS.OFFER_REJECTED, { offerId: id, candidateId: offer.candidateId, companyId });
+    }
 
     return updated;
   }

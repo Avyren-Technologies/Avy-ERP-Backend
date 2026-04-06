@@ -12,6 +12,8 @@ import {
   INTERVIEW_TRANSITIONS,
   NOMINATION_TRANSITIONS,
 } from '../../../shared/utils/state-machine';
+import { eventBus } from '../../../shared/events/event-bus';
+import { HR_EVENTS } from '../../../shared/events/hr-events';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -414,6 +416,13 @@ export class AdvancedHRService {
       companyId,
     });
 
+    eventBus.emitEvent(HR_EVENTS.CANDIDATE_STAGE_CHANGED, {
+      candidateId: id, fromStage: oldStage, toStage: data.stage, changedBy: userId, companyId,
+    });
+    if (data.stage === 'HIRED') {
+      eventBus.emitEvent(HR_EVENTS.CANDIDATE_HIRED, { candidateId: id, companyId });
+    }
+
     return updated;
   }
 
@@ -479,7 +488,7 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Candidate not found in this company');
     }
 
-    return platformPrisma.interview.create({
+    const interview = await platformPrisma.interview.create({
       data: {
         companyId,
         candidateId: data.candidateId,
@@ -494,6 +503,13 @@ export class AdvancedHRService {
         candidate: { select: { id: true, name: true, email: true } },
       },
     });
+
+    const panelistIds = Array.isArray(data.panelists) ? data.panelists : [];
+    eventBus.emitEvent(HR_EVENTS.INTERVIEW_SCHEDULED, {
+      interviewId: interview.id, panelistIds, companyId,
+    });
+
+    return interview;
   }
 
   async updateInterview(companyId: string, id: string, data: any) {
@@ -542,6 +558,10 @@ export class AdvancedHRService {
       after: { status: 'COMPLETED' },
       changedBy: userId || 'system',
       companyId,
+    });
+
+    eventBus.emitEvent(HR_EVENTS.INTERVIEW_COMPLETED, {
+      interviewId: id, candidateId: interview.candidateId, companyId,
     });
 
     return updated;
@@ -905,7 +925,7 @@ export class AdvancedHRService {
     // Validate prerequisites if training is part of a program
     await trainingProgramService.validatePrerequisites(companyId, data.employeeId, data.trainingId);
 
-    return platformPrisma.trainingNomination.create({
+    const nomination = await platformPrisma.trainingNomination.create({
       data: {
         companyId,
         employeeId: data.employeeId,
@@ -917,6 +937,12 @@ export class AdvancedHRService {
         training: { select: { id: true, name: true, type: true } },
       },
     });
+
+    eventBus.emitEvent(HR_EVENTS.TRAINING_NOMINATION_CREATED, {
+      nominationId: nomination.id, employeeId: data.employeeId, companyId,
+    });
+
+    return nomination;
   }
 
   async updateTrainingNomination(companyId: string, id: string, data: any) {
@@ -1066,6 +1092,10 @@ export class AdvancedHRService {
       after: { status: 'COMPLETED' },
       changedBy: userId || 'system',
       companyId,
+    });
+
+    eventBus.emitEvent(HR_EVENTS.TRAINING_COMPLETED, {
+      nominationId: id, employeeId: nomination.employeeId, trainingName: catalogue?.name || '', companyId,
     });
 
     return updated;

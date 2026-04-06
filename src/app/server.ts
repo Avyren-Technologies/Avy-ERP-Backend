@@ -9,6 +9,7 @@ import { initSocket } from '../lib/socket';
 import { analyticsCronService } from '../modules/hr/analytics/services/analytics-cron.service';
 import { startDemoResetCron } from '../workers/demo-reset-cron';
 import { notificationService } from '../core/notifications/notification.service';
+import { registerHRListeners } from '../shared/events/listeners/hr-listeners';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -51,6 +52,9 @@ async function startServer(): Promise<void> {
 
       // Initialize Firebase Admin for push notifications
       notificationService.initFirebase();
+
+      // Register event listeners
+      registerHRListeners();
     });
 
     // Handle server errors
