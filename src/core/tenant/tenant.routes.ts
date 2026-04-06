@@ -1,11 +1,17 @@
 import { Router } from 'express';
 import { tenantController } from './tenant.controller';
+import { bulkOnboardController, bulkOnboardUploadMiddleware } from './bulk-onboard.controller';
 import { requirePermissions } from '../../middleware/auth.middleware';
 
 const router = Router();
 
 // All tenant routes require super-admin permissions
 router.use(requirePermissions(['platform:admin']));
+
+// ── Bulk Onboarding ──────────────────────────────────────────────────
+router.get('/bulk/template', bulkOnboardController.downloadTemplate);
+router.post('/bulk/validate', bulkOnboardUploadMiddleware, bulkOnboardController.validateUpload);
+router.post('/bulk/import', bulkOnboardController.confirmImport);
 
 // ── Onboarding ────────────────────────────────────────────────────────
 router.post('/onboard', tenantController.onboardTenant);
