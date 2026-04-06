@@ -37,6 +37,10 @@ model User {
   employeeId String?   @unique
   employee   Employee? @relation("UserEmployee", fields: [employeeId], references: [id])
 
+  // Notifications & devices
+  notifications Notification[] @relation("NotificationUser")
+  devices       UserDevice[]   @relation("UserDeviceUser")
+
   @@map("users")
 }
 

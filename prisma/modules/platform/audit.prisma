@@ -16,6 +16,7 @@ model AuditLog {
   company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, entityType, entityId])
+  @@index([changedBy])
   @@index([retentionDate])
   @@map("audit_logs")
 }

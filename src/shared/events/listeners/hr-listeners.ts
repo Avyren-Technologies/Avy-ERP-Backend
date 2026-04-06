@@ -1,29 +1,31 @@
 import { eventBus } from '../event-bus';
-import { HR_EVENTS } from '../hr-events';
+import { HR_EVENTS, HREvent } from '../hr-events';
 import { notificationService } from '../../../core/notifications/notification.service';
 import { logger } from '../../../config/logger';
 
+type EventPayload<T extends HREvent['type']> = Extract<HREvent, { type: T }>;
+
 export function registerHRListeners() {
   // Offer sent → notify hiring manager
-  eventBus.onEvent(HR_EVENTS.OFFER_SENT, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'offer.sent'>>(HR_EVENTS.OFFER_SENT, async (payload) => {
     // We'd need to look up the hiring manager for the requisition
     // For now, just log — the notification infrastructure is ready
     logger.info(`Offer ${payload.offerId} sent for candidate ${payload.candidateId}`);
   });
 
   // Offer accepted → notify hiring manager + HR
-  eventBus.onEvent(HR_EVENTS.OFFER_ACCEPTED, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'offer.accepted'>>(HR_EVENTS.OFFER_ACCEPTED, async (payload) => {
     logger.info(`Offer ${payload.offerId} accepted by candidate ${payload.candidateId}`);
     // notificationService.send() can be called here when we know recipient IDs
   });
 
   // Offer rejected → notify hiring manager
-  eventBus.onEvent(HR_EVENTS.OFFER_REJECTED, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'offer.rejected'>>(HR_EVENTS.OFFER_REJECTED, async (payload) => {
     logger.info(`Offer ${payload.offerId} rejected by candidate ${payload.candidateId}`);
   });
 
   // Interview scheduled → notify panelists
-  eventBus.onEvent(HR_EVENTS.INTERVIEW_SCHEDULED, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'interview.scheduled'>>(HR_EVENTS.INTERVIEW_SCHEDULED, async (payload) => {
     if (payload.panelistIds?.length > 0) {
       await notificationService.send({
         recipientIds: payload.panelistIds,
@@ -39,12 +41,12 @@ export function registerHRListeners() {
   });
 
   // Interview completed → notify (optional, log for now)
-  eventBus.onEvent(HR_EVENTS.INTERVIEW_COMPLETED, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'interview.completed'>>(HR_EVENTS.INTERVIEW_COMPLETED, async (payload) => {
     logger.info(`Interview ${payload.interviewId} completed`);
   });
 
   // Training nomination created → notify employee
-  eventBus.onEvent(HR_EVENTS.TRAINING_NOMINATION_CREATED, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'training.nomination.created'>>(HR_EVENTS.TRAINING_NOMINATION_CREATED, async (payload) => {
     await notificationService.send({
       recipientIds: [payload.employeeId],
       title: 'Training Nomination',
@@ -58,7 +60,7 @@ export function registerHRListeners() {
   });
 
   // Training completed → notify employee
-  eventBus.onEvent(HR_EVENTS.TRAINING_COMPLETED, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'training.completed'>>(HR_EVENTS.TRAINING_COMPLETED, async (payload) => {
     await notificationService.send({
       recipientIds: [payload.employeeId],
       title: 'Training Completed',
@@ -72,7 +74,7 @@ export function registerHRListeners() {
   });
 
   // Certificate expiring → notify employee
-  eventBus.onEvent(HR_EVENTS.CERTIFICATE_EXPIRING, async (payload: any) => {
+  eventBus.onEvent<EventPayload<'certificate.expiring'>>(HR_EVENTS.CERTIFICATE_EXPIRING, async (payload) => {
     await notificationService.send({
       recipientIds: [payload.employeeId],
       title: 'Certificate Expiring Soon',

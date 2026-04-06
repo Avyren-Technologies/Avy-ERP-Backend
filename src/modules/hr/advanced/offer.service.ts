@@ -35,6 +35,16 @@ class OfferService {
     const { page = 1, limit = 25, candidateId, status } = options;
     const offset = (page - 1) * limit;
 
+    // Bulk expire all SENT offers past validUntil before querying
+    await platformPrisma.candidateOffer.updateMany({
+      where: {
+        companyId,
+        status: 'SENT',
+        validUntil: { lt: new Date() },
+      },
+      data: { status: 'EXPIRED' },
+    });
+
     const where: any = { companyId };
     if (candidateId) where.candidateId = candidateId;
     if (status) where.status = status.toUpperCase();
@@ -54,18 +64,6 @@ class OfferService {
       platformPrisma.candidateOffer.count({ where }),
     ]);
 
-    // Lazy expiry: auto-expire SENT offers past validUntil
-    const now = new Date();
-    for (const offer of offers) {
-      if (offer.status === 'SENT' && offer.validUntil && new Date(offer.validUntil) < now) {
-        await platformPrisma.candidateOffer.update({
-          where: { id: offer.id },
-          data: { status: 'EXPIRED' },
-        });
-        (offer as any).status = 'EXPIRED';
-      }
-    }
-
     return { offers, total, page, limit };
   }
 
@@ -74,6 +72,17 @@ class OfferService {
   // ════════════════════════════════════════════════════════════════
 
   async getOffer(companyId: string, id: string) {
+    // Expire this offer if it's SENT and past validUntil (single bulk update, no extra read)
+    await platformPrisma.candidateOffer.updateMany({
+      where: {
+        id,
+        companyId,
+        status: 'SENT',
+        validUntil: { lt: new Date() },
+      },
+      data: { status: 'EXPIRED' },
+    });
+
     const offer = await platformPrisma.candidateOffer.findUnique({
       where: { id },
       include: {
@@ -85,20 +94,6 @@ class OfferService {
 
     if (!offer || offer.companyId !== companyId) {
       throw ApiError.notFound('Offer not found');
-    }
-
-    // Lazy expiry
-    if (offer.status === 'SENT' && offer.validUntil && new Date(offer.validUntil) < new Date()) {
-      const updated = await platformPrisma.candidateOffer.update({
-        where: { id },
-        data: { status: 'EXPIRED' },
-        include: {
-          candidate: { select: { id: true, name: true, email: true, stage: true } },
-          designation: { select: { id: true, name: true } },
-          department: { select: { id: true, name: true } },
-        },
-      });
-      return updated;
     }
 
     return offer;
