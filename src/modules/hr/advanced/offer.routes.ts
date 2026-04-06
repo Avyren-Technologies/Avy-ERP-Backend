@@ -4,11 +4,11 @@ import { offerController } from './offer.controller';
 
 const router = Router();
 
-router.get('/', requirePermissions(['hr:read']), offerController.listOffers);
-router.post('/', requirePermissions(['hr:create']), offerController.createOffer);
-router.get('/:id', requirePermissions(['hr:read']), offerController.getOffer);
-router.patch('/:id', requirePermissions(['hr:update']), offerController.updateOffer);
-router.patch('/:id/status', requirePermissions(['hr:update']), offerController.updateOfferStatus);
-router.delete('/:id', requirePermissions(['hr:delete']), offerController.deleteOffer);
+router.get('/', requirePermissions(['recruitment-offer:read', 'hr:read']), offerController.listOffers);
+router.post('/', requirePermissions(['recruitment-offer:create', 'hr:create']), offerController.createOffer);
+router.get('/:id', requirePermissions(['recruitment-offer:read', 'hr:read']), offerController.getOffer);
+router.patch('/:id', requirePermissions(['recruitment-offer:update', 'hr:update']), offerController.updateOffer);
+router.patch('/:id/status', requirePermissions(['recruitment-offer:approve', 'hr:update']), offerController.updateOfferStatus);
+router.delete('/:id', requirePermissions(['recruitment-offer:update', 'hr:delete']), offerController.deleteOffer);
 
 export default router;

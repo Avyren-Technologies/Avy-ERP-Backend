@@ -7,9 +7,9 @@ const router = Router();
 // ═══════════════════════════════════════════════════════════════════
 // TRAINING ATTENDANCE
 // ═══════════════════════════════════════════════════════════════════
-router.get('/training-sessions/:sessionId/attendance', requirePermissions(['hr:read']), controller.listAttendees);
-router.post('/training-sessions/:sessionId/attendance', requirePermissions(['hr:create']), controller.registerAttendees);
-router.patch('/training-attendance/:id', requirePermissions(['hr:update']), controller.markAttendance);
-router.patch('/training-sessions/:sessionId/attendance/bulk', requirePermissions(['hr:update']), controller.bulkMarkAttendance);
+router.get('/training-sessions/:sessionId/attendance', requirePermissions(['training:read', 'hr:read']), controller.listAttendees);
+router.post('/training-sessions/:sessionId/attendance', requirePermissions(['training:create', 'hr:create']), controller.registerAttendees);
+router.patch('/training-attendance/:id', requirePermissions(['training:update', 'hr:update']), controller.markAttendance);
+router.patch('/training-sessions/:sessionId/attendance/bulk', requirePermissions(['training:update', 'hr:update']), controller.bulkMarkAttendance);
 
 export { router as trainingAttendanceRoutes };

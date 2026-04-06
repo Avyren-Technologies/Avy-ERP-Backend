@@ -23,59 +23,59 @@ router.use(evaluationRoutes);
 // ═══════════════════════════════════════════════════════════════════
 // RECRUITMENT — Requisitions
 // ═══════════════════════════════════════════════════════════════════
-router.get('/requisitions', requirePermissions(['hr:read']), controller.listRequisitions);
-router.post('/requisitions', requirePermissions(['hr:create']), controller.createRequisition);
-router.get('/requisitions/:id', requirePermissions(['hr:read']), controller.getRequisition);
-router.patch('/requisitions/:id', requirePermissions(['hr:update']), controller.updateRequisition);
-router.patch('/requisitions/:id/status', requirePermissions(['hr:update']), controller.updateRequisitionStatus);
-router.delete('/requisitions/:id', requirePermissions(['hr:delete']), controller.deleteRequisition);
+router.get('/requisitions', requirePermissions(['recruitment:read', 'hr:read']), controller.listRequisitions);
+router.post('/requisitions', requirePermissions(['recruitment:create', 'hr:create']), controller.createRequisition);
+router.get('/requisitions/:id', requirePermissions(['recruitment:read', 'hr:read']), controller.getRequisition);
+router.patch('/requisitions/:id', requirePermissions(['recruitment:update', 'hr:update']), controller.updateRequisition);
+router.patch('/requisitions/:id/status', requirePermissions(['recruitment:update', 'hr:update']), controller.updateRequisitionStatus);
+router.delete('/requisitions/:id', requirePermissions(['recruitment:delete', 'hr:delete']), controller.deleteRequisition);
 
 // ═══════════════════════════════════════════════════════════════════
 // RECRUITMENT — Candidates
 // ═══════════════════════════════════════════════════════════════════
-router.get('/candidates', requirePermissions(['hr:read']), controller.listCandidates);
-router.post('/candidates', requirePermissions(['hr:create']), controller.createCandidate);
-router.get('/candidates/:id', requirePermissions(['hr:read']), controller.getCandidate);
-router.patch('/candidates/:id', requirePermissions(['hr:update']), controller.updateCandidate);
-router.patch('/candidates/:id/stage', requirePermissions(['hr:update']), controller.advanceCandidateStage);
-router.post('/candidates/:id/convert-to-employee', requirePermissions(['hr:configure']), controller.convertCandidateToEmployee);
-router.delete('/candidates/:id', requirePermissions(['hr:delete']), controller.deleteCandidate);
+router.get('/candidates', requirePermissions(['recruitment:read', 'hr:read']), controller.listCandidates);
+router.post('/candidates', requirePermissions(['recruitment:create', 'hr:create']), controller.createCandidate);
+router.get('/candidates/:id', requirePermissions(['recruitment:read', 'hr:read']), controller.getCandidate);
+router.patch('/candidates/:id', requirePermissions(['recruitment:update', 'hr:update']), controller.updateCandidate);
+router.patch('/candidates/:id/stage', requirePermissions(['recruitment:update', 'hr:update']), controller.advanceCandidateStage);
+router.post('/candidates/:id/convert-to-employee', requirePermissions(['recruitment:configure', 'hr:configure']), controller.convertCandidateToEmployee);
+router.delete('/candidates/:id', requirePermissions(['recruitment:delete', 'hr:delete']), controller.deleteCandidate);
 
 // ═══════════════════════════════════════════════════════════════════
 // RECRUITMENT — Interviews
 // ═══════════════════════════════════════════════════════════════════
-router.get('/interviews', requirePermissions(['hr:read']), controller.listInterviews);
-router.post('/interviews', requirePermissions(['hr:create']), controller.createInterview);
-router.get('/interviews/:id', requirePermissions(['hr:read']), controller.getInterview);
-router.patch('/interviews/:id', requirePermissions(['hr:update']), controller.updateInterview);
-router.patch('/interviews/:id/complete', requirePermissions(['hr:update']), controller.completeInterview);
-router.patch('/interviews/:id/cancel', requirePermissions(['hr:update']), controller.cancelInterview);
-router.delete('/interviews/:id', requirePermissions(['hr:delete']), controller.deleteInterview);
+router.get('/interviews', requirePermissions(['recruitment:read', 'hr:read']), controller.listInterviews);
+router.post('/interviews', requirePermissions(['recruitment:create', 'hr:create']), controller.createInterview);
+router.get('/interviews/:id', requirePermissions(['recruitment:read', 'hr:read']), controller.getInterview);
+router.patch('/interviews/:id', requirePermissions(['recruitment:update', 'hr:update']), controller.updateInterview);
+router.patch('/interviews/:id/complete', requirePermissions(['recruitment:update', 'hr:update']), controller.completeInterview);
+router.patch('/interviews/:id/cancel', requirePermissions(['recruitment:update', 'hr:update']), controller.cancelInterview);
+router.delete('/interviews/:id', requirePermissions(['recruitment:delete', 'hr:delete']), controller.deleteInterview);
 
 // ── Recruitment Dashboard ────────────────────────────────────────
-router.get('/recruitment-dashboard', requirePermissions(['hr:read']), controller.getRecruitmentDashboard);
+router.get('/recruitment-dashboard', requirePermissions(['recruitment:read', 'hr:read']), controller.getRecruitmentDashboard);
 
 // ═══════════════════════════════════════════════════════════════════
 // TRAINING — Catalogue
 // ═══════════════════════════════════════════════════════════════════
-router.get('/training-catalogues', requirePermissions(['hr:read']), controller.listTrainingCatalogues);
-router.post('/training-catalogues', requirePermissions(['hr:create']), controller.createTrainingCatalogue);
-router.get('/training-catalogues/:id', requirePermissions(['hr:read']), controller.getTrainingCatalogue);
-router.patch('/training-catalogues/:id', requirePermissions(['hr:update']), controller.updateTrainingCatalogue);
-router.delete('/training-catalogues/:id', requirePermissions(['hr:delete']), controller.deleteTrainingCatalogue);
+router.get('/training-catalogues', requirePermissions(['training:read', 'hr:read']), controller.listTrainingCatalogues);
+router.post('/training-catalogues', requirePermissions(['training:create', 'hr:create']), controller.createTrainingCatalogue);
+router.get('/training-catalogues/:id', requirePermissions(['training:read', 'hr:read']), controller.getTrainingCatalogue);
+router.patch('/training-catalogues/:id', requirePermissions(['training:update', 'hr:update']), controller.updateTrainingCatalogue);
+router.delete('/training-catalogues/:id', requirePermissions(['training:delete', 'hr:delete']), controller.deleteTrainingCatalogue);
 
 // ═══════════════════════════════════════════════════════════════════
 // TRAINING — Nominations
 // ═══════════════════════════════════════════════════════════════════
-router.get('/training-nominations', requirePermissions(['hr:read']), controller.listTrainingNominations);
-router.post('/training-nominations', requirePermissions(['hr:create']), controller.createTrainingNomination);
-router.get('/training-nominations/:id', requirePermissions(['hr:read']), controller.getTrainingNomination);
-router.patch('/training-nominations/:id', requirePermissions(['hr:update']), controller.updateTrainingNomination);
-router.patch('/training-nominations/:id/complete', requirePermissions(['hr:update']), controller.completeTrainingNomination);
-router.delete('/training-nominations/:id', requirePermissions(['hr:delete']), controller.deleteTrainingNomination);
+router.get('/training-nominations', requirePermissions(['training:read', 'hr:read']), controller.listTrainingNominations);
+router.post('/training-nominations', requirePermissions(['training:create', 'hr:create']), controller.createTrainingNomination);
+router.get('/training-nominations/:id', requirePermissions(['training:read', 'hr:read']), controller.getTrainingNomination);
+router.patch('/training-nominations/:id', requirePermissions(['training:update', 'hr:update']), controller.updateTrainingNomination);
+router.patch('/training-nominations/:id/complete', requirePermissions(['training:update', 'hr:update']), controller.completeTrainingNomination);
+router.delete('/training-nominations/:id', requirePermissions(['training:delete', 'hr:delete']), controller.deleteTrainingNomination);
 
 // ── Training Dashboard ──────────────────────────────────────────
-router.get('/training-dashboard', requirePermissions(['hr:read']), controller.getTrainingDashboard);
+router.get('/training-dashboard', requirePermissions(['training:read', 'hr:read']), controller.getTrainingDashboard);
 
 // ═══════════════════════════════════════════════════════════════════
 // ASSETS — Categories
@@ -223,7 +223,7 @@ router.use('/trainers', trainerRoutes);
 // ═══════════════════════════════════════════════════════════════════
 // TRAINING — Certificates
 // ═══════════════════════════════════════════════════════════════════
-router.get('/training-certificates/expiring', requirePermissions(['hr:read']), controller.getExpiringCertificates);
+router.get('/training-certificates/expiring', requirePermissions(['training:read', 'hr:read']), controller.getExpiringCertificates);
 
 // ═══════════════════════════════════════════════════════════════════
 // TRAINING — Sessions
@@ -253,5 +253,10 @@ router.use('/training-budgets', trainingBudgetRoutes);
 // OFFERS
 // ═══════════════════════════════════════════════════════════════════
 router.use('/offers', offerRoutes);
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════════════════════════════════════
+router.get('/audit-log', requirePermissions(['hr:read']), controller.getAuditLog);
 
 export { router as advancedRoutes };

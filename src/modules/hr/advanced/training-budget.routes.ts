@@ -5,10 +5,10 @@ import { trainingBudgetController as controller } from './training-budget.contro
 const router = Router();
 
 // Utilization must come before :id to avoid "utilization" being captured as an ID
-router.get('/utilization', requirePermissions(['hr:read']), controller.getUtilization);
+router.get('/utilization', requirePermissions(['training:read', 'hr:read']), controller.getUtilization);
 
-router.get('/', requirePermissions(['hr:read']), controller.listBudgets);
-router.post('/', requirePermissions(['hr:create']), controller.createBudget);
-router.patch('/:id', requirePermissions(['hr:update']), controller.updateBudget);
+router.get('/', requirePermissions(['training:read', 'hr:read']), controller.listBudgets);
+router.post('/', requirePermissions(['training:configure', 'hr:create']), controller.createBudget);
+router.patch('/:id', requirePermissions(['training:configure', 'hr:update']), controller.updateBudget);
 
 export { router as trainingBudgetRoutes };

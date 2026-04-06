@@ -4,10 +4,10 @@ import { trainerController } from './trainer.controller';
 
 const router = Router();
 
-router.get('/', requirePermissions(['hr:read']), trainerController.listTrainers);
-router.post('/', requirePermissions(['hr:create']), trainerController.createTrainer);
-router.get('/:id', requirePermissions(['hr:read']), trainerController.getTrainer);
-router.patch('/:id', requirePermissions(['hr:update']), trainerController.updateTrainer);
-router.delete('/:id', requirePermissions(['hr:delete']), trainerController.deleteTrainer);
+router.get('/', requirePermissions(['training:read', 'hr:read']), trainerController.listTrainers);
+router.post('/', requirePermissions(['training:create', 'hr:create']), trainerController.createTrainer);
+router.get('/:id', requirePermissions(['training:read', 'hr:read']), trainerController.getTrainer);
+router.patch('/:id', requirePermissions(['training:update', 'hr:update']), trainerController.updateTrainer);
+router.delete('/:id', requirePermissions(['training:delete', 'hr:delete']), trainerController.deleteTrainer);
 
 export { router as trainerRoutes };

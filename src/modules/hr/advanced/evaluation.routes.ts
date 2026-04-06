@@ -7,7 +7,7 @@ const router = Router();
 // ═══════════════════════════════════════════════════════════════════
 // INTERVIEW EVALUATIONS
 // ═══════════════════════════════════════════════════════════════════
-router.post('/interviews/:id/evaluations', requirePermissions(['hr:create']), controller.submitEvaluations);
-router.get('/interviews/:id/evaluations', requirePermissions(['hr:read']), controller.listEvaluations);
+router.post('/interviews/:id/evaluations', requirePermissions(['recruitment:create', 'hr:create']), controller.submitEvaluations);
+router.get('/interviews/:id/evaluations', requirePermissions(['recruitment:read', 'hr:read']), controller.listEvaluations);
 
 export { router as evaluationRoutes };

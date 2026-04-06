@@ -28,7 +28,7 @@ export const PERMISSION_INHERITANCE: Record<string, string[]> = {
  * When a company doesn't subscribe to a module, all permissions for that module are suppressed.
  */
 export const MODULE_TO_PERMISSION_MAP: Record<string, string[]> = {
-  'hr': ['hr', 'ess'],
+  'hr': ['hr', 'ess', 'recruitment', 'recruitment-offer', 'training', 'training-evaluation'],
   'security': ['security'],
   'production': ['production'],
   'machine-maintenance': ['maintenance'],
@@ -155,6 +155,22 @@ export const PERMISSION_MODULES = {
   audit: {
     label: 'Audit Logs',
     actions: ['read', 'export'],
+  },
+  recruitment: {
+    label: 'Recruitment',
+    actions: ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'],
+  },
+  'recruitment-offer': {
+    label: 'Recruitment Offers',
+    actions: ['read', 'create', 'update', 'approve'],
+  },
+  training: {
+    label: 'Training',
+    actions: ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'],
+  },
+  'training-evaluation': {
+    label: 'Training Evaluation',
+    actions: ['read', 'create'],
   },
   ess: {
     label: 'Employee Self-Service',
