@@ -3,6 +3,13 @@ import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { essService } from '../ess/ess.service';
+import {
+  validateTransition,
+  REQUISITION_TRANSITIONS,
+  CANDIDATE_STAGE_TRANSITIONS,
+  INTERVIEW_TRANSITIONS,
+  NOMINATION_TRANSITIONS,
+} from '../../../shared/utils/state-machine';
 
 /** Convert undefined to null for Prisma nullable fields. */
 function n<T>(value: T | undefined): T | null {
@@ -82,20 +89,6 @@ interface DisciplinaryListOptions extends ListOptions {
 // VALID STATUS TRANSITIONS
 // ═══════════════════════════════════════════════════════════════════
 
-const REQUISITION_TRANSITIONS: Record<string, string[]> = {
-  DRAFT: ['OPEN', 'CANCELLED'],
-  OPEN: ['INTERVIEWING', 'CANCELLED'],
-  INTERVIEWING: ['OFFERED', 'CANCELLED'],
-  OFFERED: ['FILLED', 'INTERVIEWING', 'CANCELLED'],
-  FILLED: [],
-  CANCELLED: [],
-};
-
-const CANDIDATE_STAGE_ORDER = [
-  'APPLIED', 'SHORTLISTED', 'HR_ROUND', 'TECHNICAL', 'FINAL',
-  'ASSESSMENT', 'OFFER_SENT', 'HIRED',
-];
-
 const GRIEVANCE_TRANSITIONS: Record<string, string[]> = {
   OPEN: ['INVESTIGATING', 'RESOLVED', 'ESCALATED', 'CLOSED'],
   INVESTIGATING: ['RESOLVED', 'ESCALATED', 'CLOSED'],
@@ -171,6 +164,12 @@ export class AdvancedHRService {
         targetDate: data.targetDate ? new Date(data.targetDate) : null,
         sourceChannels: data.sourceChannels ?? Prisma.JsonNull,
         approvedBy: n(data.approvedBy),
+        employmentType: n(data.employmentType),
+        priority: n(data.priority),
+        location: n(data.location),
+        requirements: n(data.requirements),
+        experienceMin: n(data.experienceMin),
+        experienceMax: n(data.experienceMax),
         status: 'DRAFT',
       },
       include: {
@@ -212,6 +211,12 @@ export class AdvancedHRService {
         ...(data.targetDate !== undefined && { targetDate: data.targetDate ? new Date(data.targetDate) : null }),
         ...(data.sourceChannels !== undefined && { sourceChannels: data.sourceChannels ?? Prisma.JsonNull }),
         ...(data.approvedBy !== undefined && { approvedBy: n(data.approvedBy) }),
+        ...(data.employmentType !== undefined && { employmentType: n(data.employmentType) }),
+        ...(data.priority !== undefined && { priority: n(data.priority) }),
+        ...(data.location !== undefined && { location: n(data.location) }),
+        ...(data.requirements !== undefined && { requirements: n(data.requirements) }),
+        ...(data.experienceMin !== undefined && { experienceMin: n(data.experienceMin) }),
+        ...(data.experienceMax !== undefined && { experienceMax: n(data.experienceMax) }),
       },
       include: {
         designation: { select: { id: true, name: true } },
@@ -227,10 +232,7 @@ export class AdvancedHRService {
       throw ApiError.notFound('Job requisition not found');
     }
 
-    const allowed = REQUISITION_TRANSITIONS[req.status] ?? [];
-    if (!allowed.includes(status)) {
-      throw ApiError.badRequest(`Cannot transition from ${req.status} to ${status}`);
-    }
+    validateTransition(req.status, status, REQUISITION_TRANSITIONS, 'requisition status');
 
     return platformPrisma.jobRequisition.update({
       where: { id },
@@ -358,17 +360,7 @@ export class AdvancedHRService {
       throw ApiError.notFound('Candidate not found');
     }
 
-    // Allow explicit REJECTED / ON_HOLD from any stage
-    if (stage !== 'REJECTED' && stage !== 'ON_HOLD') {
-      const currentIdx = CANDIDATE_STAGE_ORDER.indexOf(candidate.stage);
-      const targetIdx = CANDIDATE_STAGE_ORDER.indexOf(stage);
-      if (targetIdx < 0) {
-        throw ApiError.badRequest(`Invalid stage: ${stage}`);
-      }
-      if (targetIdx <= currentIdx) {
-        throw ApiError.badRequest(`Cannot move from ${candidate.stage} to ${stage}; stages only advance forward`);
-      }
-    }
+    validateTransition(candidate.stage, stage, CANDIDATE_STAGE_TRANSITIONS, 'candidate stage');
 
     return platformPrisma.candidate.update({
       where: { id },
@@ -481,9 +473,7 @@ export class AdvancedHRService {
     if (!interview || interview.companyId !== companyId) {
       throw ApiError.notFound('Interview not found');
     }
-    if (interview.status !== 'SCHEDULED') {
-      throw ApiError.badRequest('Only SCHEDULED interviews can be completed');
-    }
+    validateTransition(interview.status, 'COMPLETED', INTERVIEW_TRANSITIONS, 'interview status');
 
     return platformPrisma.interview.update({
       where: { id },
@@ -500,9 +490,7 @@ export class AdvancedHRService {
     if (!interview || interview.companyId !== companyId) {
       throw ApiError.notFound('Interview not found');
     }
-    if (interview.status !== 'SCHEDULED') {
-      throw ApiError.badRequest('Only SCHEDULED interviews can be cancelled');
-    }
+    validateTransition(interview.status, 'CANCELLED', INTERVIEW_TRANSITIONS, 'interview status');
 
     return platformPrisma.interview.update({
       where: { id },
@@ -758,6 +746,10 @@ export class AdvancedHRService {
     const nomination = await platformPrisma.trainingNomination.findUnique({ where: { id } });
     if (!nomination || nomination.companyId !== companyId) {
       throw ApiError.notFound('Training nomination not found');
+    }
+
+    if (data.status) {
+      validateTransition(nomination.status, data.status, NOMINATION_TRANSITIONS, 'nomination status');
     }
 
     return platformPrisma.trainingNomination.update({
