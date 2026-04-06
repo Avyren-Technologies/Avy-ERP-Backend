@@ -48,7 +48,7 @@ describe('AuditService', () => {
         newValues: { name: 'Test' },
         ipAddress: '127.0.0.1',
         userAgent: 'jest',
-        timestamp: new Date('2026-01-15T10:00:00Z'),
+        changedAt: new Date('2026-01-15T10:00:00Z'),
       },
       {
         id: 'log-2',
@@ -61,7 +61,7 @@ describe('AuditService', () => {
         newValues: { name: 'New' },
         ipAddress: '127.0.0.1',
         userAgent: 'jest',
-        timestamp: new Date('2026-01-14T10:00:00Z'),
+        changedAt: new Date('2026-01-14T10:00:00Z'),
       },
     ];
 
@@ -83,7 +83,7 @@ describe('AuditService', () => {
         where: {},
         skip: 0,
         take: 25,
-        orderBy: { timestamp: 'desc' },
+        orderBy: { changedAt: 'desc' },
       });
       expect(mockAuditLog.count).toHaveBeenCalledWith({ where: {} });
     });
@@ -115,15 +115,15 @@ describe('AuditService', () => {
       );
     });
 
-    it('should apply userId and tenantId filters', async () => {
+    it('should apply changedBy and companyId filters', async () => {
       mockAuditLog.findMany.mockResolvedValue([]);
       mockAuditLog.count.mockResolvedValue(0);
 
-      await service.listAuditLogs({ userId: 'user-1', tenantId: 'tenant-1' });
+      await service.listAuditLogs({ changedBy: 'user-1', companyId: 'company-1' });
 
       expect(mockAuditLog.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId: 'user-1', tenantId: 'tenant-1' },
+          where: { changedBy: 'user-1', companyId: 'company-1' },
         }),
       );
     });
@@ -140,7 +140,7 @@ describe('AuditService', () => {
       expect(mockAuditLog.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            timestamp: {
+            changedAt: {
               gte: new Date(dateFrom),
               lte: new Date(dateTo),
             },
@@ -199,7 +199,7 @@ describe('AuditService', () => {
       expect(mockAuditLog.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            timestamp: {
+            changedAt: {
               gte: new Date('2026-01-01'),
             },
           },
@@ -212,7 +212,7 @@ describe('AuditService', () => {
 
   describe('getAuditLogById', () => {
     it('should return an audit log when found', async () => {
-      const log = { id: 'log-1', action: 'CREATE', entityType: 'Tenant', entityId: 'e-1', timestamp: new Date() };
+      const log = { id: 'log-1', action: 'CREATE', entityType: 'Tenant', entityId: 'e-1', changedAt: new Date() };
       mockAuditLog.findUnique.mockResolvedValue(log);
 
       const result = await service.getAuditLogById('log-1');
@@ -244,7 +244,7 @@ describe('AuditService', () => {
       expect(mockAuditLog.findMany).toHaveBeenCalledWith({
         where: { entityType: 'Tenant', entityId: 'tenant-1' },
         take: 50,
-        orderBy: { timestamp: 'desc' },
+        orderBy: { changedAt: 'desc' },
       });
     });
 
@@ -256,7 +256,7 @@ describe('AuditService', () => {
       expect(mockAuditLog.findMany).toHaveBeenCalledWith({
         where: { entityType: 'Company', entityId: 'comp-1' },
         take: 10,
-        orderBy: { timestamp: 'desc' },
+        orderBy: { changedAt: 'desc' },
       });
     });
   });

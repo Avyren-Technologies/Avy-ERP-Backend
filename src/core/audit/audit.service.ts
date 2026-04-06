@@ -10,13 +10,13 @@ export class AuditService {
     limit?: number;
     action?: string;
     entityType?: string;
-    userId?: string;
-    tenantId?: string;
+    changedBy?: string;
+    companyId?: string;
     dateFrom?: string;
     dateTo?: string;
     search?: string;
   } = {}) {
-    const { page = 1, limit = 25, action, entityType, userId, tenantId, dateFrom, dateTo, search } = options;
+    const { page = 1, limit = 25, action, entityType, changedBy, companyId, dateFrom, dateTo, search } = options;
     const offset = (page - 1) * limit;
 
     const where: any = {};
@@ -29,21 +29,21 @@ export class AuditService {
       where.entityType = entityType;
     }
 
-    if (userId) {
-      where.userId = userId;
+    if (changedBy) {
+      where.changedBy = changedBy;
     }
 
-    if (tenantId) {
-      where.tenantId = tenantId;
+    if (companyId) {
+      where.companyId = companyId;
     }
 
     if (dateFrom || dateTo) {
-      where.timestamp = {};
+      where.changedAt = {};
       if (dateFrom) {
-        where.timestamp.gte = new Date(dateFrom);
+        where.changedAt.gte = new Date(dateFrom);
       }
       if (dateTo) {
-        where.timestamp.lte = new Date(dateTo);
+        where.changedAt.lte = new Date(dateTo);
       }
     }
 
@@ -60,7 +60,7 @@ export class AuditService {
         where,
         skip: offset,
         take: limit,
-        orderBy: { timestamp: 'desc' },
+        orderBy: { changedAt: 'desc' },
       }),
       platformPrisma.auditLog.count({ where }),
     ]);
@@ -93,7 +93,7 @@ export class AuditService {
         entityId,
       },
       take: limit,
-      orderBy: { timestamp: 'desc' },
+      orderBy: { changedAt: 'desc' },
     });
   }
 

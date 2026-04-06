@@ -524,23 +524,23 @@ export class CompanyAdminController {
   // ── Audit Logs ──────────────────────────────────────────────────────
 
   listAuditLogs = asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) throw ApiError.badRequest('Tenant context is required');
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company context is required');
 
     const { page, limit } = getPaginationParams(req.query);
     const opts: { page: number; limit: number; action?: string; entityType?: string } = { page, limit };
     if (req.query.action) opts.action = req.query.action as string;
     if (req.query.entityType) opts.entityType = req.query.entityType as string;
 
-    const result = await companyAdminService.listAuditLogs(tenantId, opts);
+    const result = await companyAdminService.listAuditLogs(companyId, opts);
     res.json(createPaginatedResponse(result.logs, result.page, result.limit, result.total, 'Audit logs retrieved'));
   });
 
   getAuditFilterOptions = asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) throw ApiError.badRequest('Tenant context is required');
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company context is required');
 
-    const filters = await companyAdminService.getAuditFilterOptions(tenantId);
+    const filters = await companyAdminService.getAuditFilterOptions(companyId);
     res.json(createSuccessResponse(filters, 'Filter options retrieved successfully'));
   });
 

@@ -7,15 +7,15 @@ export class AuditController {
   // ── List Audit Logs (paginated, filterable) ────────────────────────
   listAuditLogs = asyncHandler(async (req: Request, res: Response) => {
     const { page, limit } = getPaginationParams(req.query);
-    const { action, entityType, userId, tenantId, dateFrom, dateTo, search } = req.query;
+    const { action, entityType, changedBy, companyId, dateFrom, dateTo, search } = req.query;
 
     const result = await auditService.listAuditLogs({
       page,
       limit,
       action: action as string,
       entityType: entityType as string,
-      userId: userId as string,
-      tenantId: tenantId as string,
+      changedBy: changedBy as string,
+      companyId: companyId as string,
       dateFrom: dateFrom as string,
       dateTo: dateTo as string,
       search: search as string,

@@ -1215,14 +1215,14 @@ export class CompanyAdminService {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // Audit Logs (read-only, filtered by tenantId)
+  // Audit Logs (read-only, filtered by companyId)
   // ────────────────────────────────────────────────────────────────────
 
-  async listAuditLogs(tenantId: string, options: { page?: number; limit?: number; action?: string; entityType?: string } = {}) {
+  async listAuditLogs(companyId: string, options: { page?: number; limit?: number; action?: string; entityType?: string } = {}) {
     const { page = 1, limit = 25, action, entityType } = options;
     const offset = (page - 1) * limit;
 
-    const where: any = { tenantId };
+    const where: any = { companyId };
 
     if (action) {
       where.action = { contains: action, mode: 'insensitive' };
@@ -1237,7 +1237,7 @@ export class CompanyAdminService {
         where,
         skip: offset,
         take: limit,
-        orderBy: { timestamp: 'desc' },
+        orderBy: { changedAt: 'desc' },
       }),
       platformPrisma.auditLog.count({ where }),
     ]);
@@ -1245,8 +1245,8 @@ export class CompanyAdminService {
     return { logs, total, page, limit };
   }
 
-  async getAuditFilterOptions(tenantId: string) {
-    const where = { tenantId };
+  async getAuditFilterOptions(companyId: string) {
+    const where = { companyId };
 
     const [actionResults, entityTypeResults] = await Promise.all([
       platformPrisma.auditLog.findMany({

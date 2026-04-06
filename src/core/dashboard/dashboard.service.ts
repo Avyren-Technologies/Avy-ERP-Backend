@@ -87,7 +87,7 @@ export class DashboardService {
   // ────────────────────────────────────────────────────────────────────
   async getRecentActivity(limit = 10) {
     const activities = await platformPrisma.auditLog.findMany({
-      orderBy: { timestamp: 'desc' },
+      orderBy: { changedAt: 'desc' },
       take: limit,
     });
 
@@ -198,19 +198,9 @@ export class DashboardService {
   // Company Admin recent activity (tenant-scoped audit logs)
   // ────────────────────────────────────────────────────────────────────
   async getCompanyAdminActivity(companyId: string, limit = 10) {
-    // Resolve tenantId from companyId
-    const tenant = await platformPrisma.tenant.findUnique({
-      where: { companyId },
-      select: { id: true },
-    });
-
-    if (!tenant) {
-      return [];
-    }
-
     const activities = await platformPrisma.auditLog.findMany({
-      where: { tenantId: tenant.id },
-      orderBy: { timestamp: 'desc' },
+      where: { companyId },
+      orderBy: { changedAt: 'desc' },
       take: limit,
     });
 
