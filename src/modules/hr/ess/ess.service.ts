@@ -6,11 +6,7 @@ import { logger } from '../../../config/logger';
 import { invalidateESSConfig, getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 /** ESS my-profile JSON: never expose full bank account — last 4 digits only (digits after stripping non-numeric). */
 function bankAccountLast4Only(raw: string | null | undefined): string | null {

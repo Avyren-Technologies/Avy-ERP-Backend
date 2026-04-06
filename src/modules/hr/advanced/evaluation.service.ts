@@ -58,7 +58,7 @@ export class EvaluationService {
 
     // Group by evaluatorId
     const grouped = evaluations.reduce<Record<string, typeof evaluations>>((acc, ev) => {
-      if (!acc[ev.evaluatorId]!) {
+      if (!acc[ev.evaluatorId]) {
         acc[ev.evaluatorId] = [];
       }
       acc[ev.evaluatorId]!.push(ev);

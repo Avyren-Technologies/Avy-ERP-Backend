@@ -10,5 +10,6 @@ router.get('/utilization', requirePermissions(['training:read', 'hr:read']), con
 router.get('/', requirePermissions(['training:read', 'hr:read']), controller.listBudgets);
 router.post('/', requirePermissions(['training:configure', 'hr:create']), controller.createBudget);
 router.patch('/:id', requirePermissions(['training:configure', 'hr:update']), controller.updateBudget);
+router.delete('/:id', requirePermissions(['training:configure', 'hr:delete']), controller.deleteBudget);
 
 export { router as trainingBudgetRoutes };

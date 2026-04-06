@@ -5,11 +5,7 @@ import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { essService } from '../ess/ess.service';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 /** Round to 2 decimal places. */
 function round(v: number): number {

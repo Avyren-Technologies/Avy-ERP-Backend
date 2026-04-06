@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
 import { requireModuleEnabled, requireESSFeature } from '../../../shared/middleware/config-enforcement.middleware';
 import { essController as controller } from './ess.controller';
+// NOTE: Cross-module import for training evaluation ESS endpoint.
+// Ideally this would be proxied through ESS controller/service.
 import { trainingEvaluationController } from '../advanced/training-evaluation.controller';
 
 const router = Router();

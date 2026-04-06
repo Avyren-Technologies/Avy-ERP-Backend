@@ -2,11 +2,7 @@ import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import type { CreateTrainingEvaluationInput, SubmitEssFeedbackInput } from './training-evaluation.validators';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 class TrainingEvaluationService {
   // ════════════════════════════════════════════════════════════════

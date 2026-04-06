@@ -162,7 +162,7 @@ export const PERMISSION_MODULES = {
   },
   'recruitment-offer': {
     label: 'Recruitment Offers',
-    actions: ['read', 'create', 'update', 'approve'],
+    actions: ['read', 'create', 'update', 'delete', 'approve'],
   },
   training: {
     label: 'Training',

@@ -1,11 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 interface BudgetListOptions {
   page?: number;
@@ -136,6 +132,19 @@ class TrainingBudgetService {
       usedAmount: used,
       remaining: allocated - used,
     };
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // DELETE
+  // ════════════════════════════════════════════════════════════════
+
+  async deleteBudget(companyId: string, id: string) {
+    const budget = await platformPrisma.trainingBudget.findFirst({ where: { id, companyId } });
+    if (!budget) throw ApiError.notFound('Training budget not found');
+    if (Number(budget.usedAmount) > 0) {
+      throw ApiError.badRequest('Cannot delete a budget that has been used');
+    }
+    await platformPrisma.trainingBudget.delete({ where: { id } });
   }
 
   // ════════════════════════════════════════════════════════════════

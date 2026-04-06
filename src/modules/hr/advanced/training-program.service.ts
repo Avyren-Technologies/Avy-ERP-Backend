@@ -5,11 +5,7 @@ import {
   validateTransition,
   PROGRAM_ENROLLMENT_TRANSITIONS,
 } from '../../../shared/utils/state-machine';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 interface ListOptions {
   page?: number;

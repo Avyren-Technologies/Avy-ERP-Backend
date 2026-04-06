@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../config/database';
 import { ApiError } from '../../shared/errors';
 import { hashPassword } from '../../shared/utils';
+import { n } from '../../shared/utils/prisma-helpers';
 import { logger } from '../../config/logger';
 import { MODULE_CATALOGUE, USER_TIERS, pricingService } from '../billing/pricing.service';
 import {
@@ -73,10 +74,6 @@ function getDependents(moduleId: string): string[] {
     .map(([id]) => id);
 }
 
-/** Convert undefined → null so Prisma nullable fields are happy. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
 
 export class CompanyAdminService {
   // ────────────────────────────────────────────────────────────────────

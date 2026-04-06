@@ -14,11 +14,7 @@ import {
 } from '../../../shared/utils/state-machine';
 import { eventBus } from '../../../shared/events/event-bus';
 import { HR_EVENTS } from '../../../shared/events/hr-events';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 interface ListOptions {
   page?: number;
@@ -3419,15 +3415,17 @@ export class AdvancedHRService {
         // Personal (from candidate)
         firstName,
         lastName,
-        dateOfBirth: new Date('2000-01-01'), // Placeholder — to be updated
+        // Required Employee fields not available from candidate data.
+        // Admin must update these after conversion via employee edit screen.
+        dateOfBirth: new Date('2000-01-01'),
         gender: 'PREFER_NOT_TO_SAY',
 
         // Contact (from candidate)
-        personalMobile: candidate.phone ?? 'To be updated',
+        personalMobile: candidate.phone ?? '',
         personalEmail: candidate.email,
-        emergencyContactName: 'To be updated',
-        emergencyContactRelation: 'To be updated',
-        emergencyContactMobile: 'To be updated',
+        emergencyContactName: '',
+        emergencyContactRelation: '',
+        emergencyContactMobile: '',
 
         // Professional (from offer / requisition)
         joiningDate,

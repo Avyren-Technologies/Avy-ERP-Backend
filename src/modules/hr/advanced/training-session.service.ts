@@ -2,11 +2,7 @@ import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { validateTransition, SESSION_TRANSITIONS } from '../../../shared/utils/state-machine';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 interface ListOptions {
   page?: number;
@@ -265,87 +261,87 @@ class TrainingSessionService {
     const endMs = new Date(session.endDateTime).getTime();
     const sessionHours = Math.round(((endMs - startMs) / (1000 * 60 * 60)) * 10) / 10; // 1 decimal
 
-    // 2. Auto-calculate hoursAttended for attendees with PRESENT or LATE status
-    const attendees = await platformPrisma.trainingAttendance.findMany({
-      where: { sessionId: session.id, status: { in: ['PRESENT', 'LATE'] } },
-    });
-
-    for (const attendee of attendees) {
-      let hours = sessionHours;
-
-      // If check-in and check-out times are recorded, use those instead
-      if (attendee.checkInTime && attendee.checkOutTime) {
-        const inMs = new Date(attendee.checkInTime).getTime();
-        const outMs = new Date(attendee.checkOutTime).getTime();
-        hours = Math.round(((outMs - inMs) / (1000 * 60 * 60)) * 10) / 10;
-      }
-
-      await platformPrisma.trainingAttendance.update({
-        where: { id: attendee.id },
-        data: { hoursAttended: hours },
-      });
-    }
-
-    // 3. Advance linked nominations to COMPLETED for attendees with sufficient hours
-    // Consider >= 50% of session hours as "sufficient"
-    const minimumHours = sessionHours * 0.5;
-    const eligibleEmployeeIds = attendees
-      .filter(() => true) // All PRESENT/LATE attendees
-      .map((a: any) => a.employeeId);
-
-    if (eligibleEmployeeIds.length > 0) {
-      // Find nominations linked to this session that are IN_PROGRESS
-      const nominations = await platformPrisma.trainingNomination.findMany({
-        where: {
-          sessionId: session.id,
-          status: 'IN_PROGRESS',
-          employeeId: { in: eligibleEmployeeIds },
-        },
+    await platformPrisma.$transaction(async (tx) => {
+      // 2. Auto-calculate hoursAttended for attendees with PRESENT or LATE status
+      const attendees = await tx.trainingAttendance.findMany({
+        where: { sessionId: session.id, status: { in: ['PRESENT', 'LATE'] } },
       });
 
-      for (const nomination of nominations) {
-        // Check this employee's actual hours
-        const att = attendees.find((a: any) => a.employeeId === nomination.employeeId);
-        let empHours = sessionHours;
-        if (att?.checkInTime && att?.checkOutTime) {
-          const inMs = new Date(att.checkInTime).getTime();
-          const outMs = new Date(att.checkOutTime).getTime();
-          empHours = Math.round(((outMs - inMs) / (1000 * 60 * 60)) * 10) / 10;
+      for (const attendee of attendees) {
+        let hours = sessionHours;
+
+        // If check-in and check-out times are recorded, use those instead
+        if (attendee.checkInTime && attendee.checkOutTime) {
+          const inMs = new Date(attendee.checkInTime).getTime();
+          const outMs = new Date(attendee.checkOutTime).getTime();
+          hours = Math.round(((outMs - inMs) / (1000 * 60 * 60)) * 10) / 10;
         }
 
-        if (empHours >= minimumHours) {
-          const updateData: any = {
-            status: 'COMPLETED',
-            completionDate: new Date(),
-          };
+        await tx.trainingAttendance.update({
+          where: { id: attendee.id },
+          data: { hoursAttended: hours },
+        });
+      }
 
-          // Auto-set certificate fields if training has certification
-          if (session.training?.certificationName) {
-            updateData.certificateIssuedAt = new Date();
-            updateData.certificateStatus = 'EARNED';
+      // 3. Advance linked nominations to COMPLETED for attendees with sufficient hours
+      // Consider >= 50% of session hours as "sufficient"
+      const minimumHours = sessionHours * 0.5;
+      const eligibleEmployeeIds = attendees.map((a: any) => a.employeeId);
 
-            if (session.training.certificationValidity) {
-              const expiryDate = new Date();
-              expiryDate.setFullYear(expiryDate.getFullYear() + session.training.certificationValidity);
-              updateData.certificateExpiryDate = expiryDate;
-            }
+      if (eligibleEmployeeIds.length > 0) {
+        // Find nominations linked to this session that are IN_PROGRESS
+        const nominations = await tx.trainingNomination.findMany({
+          where: {
+            sessionId: session.id,
+            status: 'IN_PROGRESS',
+            employeeId: { in: eligibleEmployeeIds },
+          },
+        });
+
+        for (const nomination of nominations) {
+          // Check this employee's actual hours
+          const att = attendees.find((a: any) => a.employeeId === nomination.employeeId);
+          let empHours = sessionHours;
+          if (att?.checkInTime && att?.checkOutTime) {
+            const inMs = new Date(att.checkInTime).getTime();
+            const outMs = new Date(att.checkOutTime).getTime();
+            empHours = Math.round(((outMs - inMs) / (1000 * 60 * 60)) * 10) / 10;
           }
 
-          await platformPrisma.trainingNomination.update({
-            where: { id: nomination.id },
-            data: updateData,
-          });
+          if (empHours >= minimumHours) {
+            const updateData: any = {
+              status: 'COMPLETED',
+              completionDate: new Date(),
+            };
+
+            // Auto-set certificate fields if training has certification
+            if (session.training?.certificationName) {
+              updateData.certificateIssuedAt = new Date();
+              updateData.certificateStatus = 'EARNED';
+
+              if (session.training.certificationValidity) {
+                const expiryDate = new Date();
+                expiryDate.setFullYear(expiryDate.getFullYear() + session.training.certificationValidity);
+                updateData.certificateExpiryDate = expiryDate;
+              }
+            }
+
+            await tx.trainingNomination.update({
+              where: { id: nomination.id },
+              data: updateData,
+            });
+          }
         }
       }
-    }
 
-    // 4. Increment trainer's totalSessions
-    if (session.trainerId) {
-      await platformPrisma.trainer.update({
-        where: { id: session.trainerId },
-        data: { totalSessions: { increment: 1 } },
-      });
-    }
+      // 4. Increment trainer's totalSessions
+      if (session.trainerId) {
+        await tx.trainer.update({
+          where: { id: session.trainerId },
+          data: { totalSessions: { increment: 1 } },
+        });
+      }
+    });
   }
 }
 

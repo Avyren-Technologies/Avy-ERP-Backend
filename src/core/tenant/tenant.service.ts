@@ -10,6 +10,7 @@ import { platformPrisma } from '../../config/database';
 import { cacheRedis, scanAndDelete } from '../../config/redis';
 import { ApiError } from '../../shared/errors';
 import { createRedisPattern, createTenantCacheKey, hashPassword } from '../../shared/utils';
+import { n } from '../../shared/utils/prisma-helpers';
 import { logger } from '../../config/logger';
 import { seedCompanyConfigs } from '../../shared/services/config-seeder.service';
 import type {
@@ -35,11 +36,6 @@ export interface UpdateTenantData {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-/** Convert undefined → null so Prisma nullable fields are happy with exactOptionalPropertyTypes. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
 
 /** Map frontend employeeCount string to a Prisma CompanySize enum value. */
 function mapCompanySize(employeeCount?: string): CompanySize {

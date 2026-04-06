@@ -9,6 +9,6 @@ router.post('/', requirePermissions(['recruitment-offer:create', 'hr:create']), 
 router.get('/:id', requirePermissions(['recruitment-offer:read', 'hr:read']), offerController.getOffer);
 router.patch('/:id', requirePermissions(['recruitment-offer:update', 'hr:update']), offerController.updateOffer);
 router.patch('/:id/status', requirePermissions(['recruitment-offer:approve', 'hr:update']), offerController.updateOfferStatus);
-router.delete('/:id', requirePermissions(['recruitment-offer:update', 'hr:delete']), offerController.deleteOffer);
+router.delete('/:id', requirePermissions(['recruitment-offer:delete', 'hr:delete']), offerController.deleteOffer);
 
 export default router;

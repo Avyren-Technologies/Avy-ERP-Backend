@@ -14,11 +14,7 @@ import { resolveAttendanceStatus, type ShiftInfo, type AttendanceRulesInput } fr
 import { validateLocationConstraints } from '../../../shared/services/location-validator.service';
 import { DateTime } from 'luxon';
 import { parseInCompanyTimezone } from '../../../shared/utils/timezone';
-
-/** Convert undefined to null for Prisma nullable fields. */
-function n<T>(value: T | undefined): T | null {
-  return value === undefined ? null : value;
-}
+import { n } from '../../../shared/utils/prisma-helpers';
 
 interface ListOptions {
   page?: number;

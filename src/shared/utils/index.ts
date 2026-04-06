@@ -419,5 +419,8 @@ export function createRootRedisPattern(): string {
   return `${env.REDIS_KEY_PREFIX}:*`;
 }
 
+// Prisma helpers
+export { n } from './prisma-helpers';
+
 // Number series
 export { generateNextNumber } from './number-series';

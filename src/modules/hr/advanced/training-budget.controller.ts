@@ -44,6 +44,14 @@ class TrainingBudgetController {
     res.json(createSuccessResponse(budget, 'Training budget updated'));
   });
 
+  deleteBudget = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    await trainingBudgetService.deleteBudget(companyId, req.params.id!);
+    res.json(createSuccessResponse(null, 'Training budget deleted'));
+  });
+
   getUtilization = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
