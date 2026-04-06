@@ -17,6 +17,7 @@ import { auditRoutes } from '../core/audit/audit.routes';
 import { companyAdminRoutes } from '../core/company-admin/company-admin.routes';
 import { supportCompanyRoutes, supportPlatformRoutes } from '../core/support/support.routes';
 import { registrationPublicRoutes, registrationPlatformRoutes } from '../core/registration/registration.routes';
+import { notificationRoutes } from '../core/notifications/notification.routes';
 
 // Import business module routes
 import { hrRoutes } from '../modules/hr/routes';
@@ -119,6 +120,9 @@ router.get(
   authMiddleware({ requireTenant: false }),
   rbacController.getNavigationManifest
 );
+
+// Notification routes (platform-level, auth required but no tenant context)
+router.use('/notifications', authMiddleware({ requireTenant: false }), notificationRoutes);
 
 // Apply authentication and tenant validation to business routes
 router.use(
