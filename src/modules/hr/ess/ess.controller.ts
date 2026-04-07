@@ -1047,7 +1047,9 @@ export class ESSController {
       shift: {
         include: { breaks: { select: { id: true, name: true, startTime: true, duration: true, type: true, isPaid: true } } },
       },
-      location: true,
+      location: {
+        include: { geofences: { where: { isActive: true } } },
+      },
     } as const;
 
     let record = await platformPrisma.attendanceRecord.findUnique({
@@ -1070,19 +1072,52 @@ export class ESSController {
     }
 
     if (!record || !record.punchIn) {
-      // Also return the employee's current shift info even when not checked in
+      // Return the employee's current shift info + resolved policy + location/geofences
       const employee = await platformPrisma.employee.findUnique({
         where: { id: employeeId },
-        select: { shiftId: true },
+        select: { shiftId: true, locationId: true },
       });
       let currentShift = null;
+      let resolvedPolicy = null;
+      let employeeLocation = null;
+
       if (employee?.shiftId) {
         currentShift = await platformPrisma.companyShift.findUnique({
           where: { id: employee.shiftId },
           include: { breaks: { select: { id: true, name: true, startTime: true, duration: true, type: true, isPaid: true } } },
         });
       }
-      res.json(createSuccessResponse({ status: 'NOT_CHECKED_IN', record: null, currentShift }, 'Not checked in today'));
+
+      // Resolve effective policy: shift overrides → attendance rules → system defaults
+      try {
+        const policyResult = await resolvePolicy(companyId, {
+          employeeId,
+          shiftId: employee?.shiftId ?? null,
+          locationId: employee?.locationId ?? null,
+          date: today,
+          isHoliday: false,
+          isWeekOff: false,
+        });
+        resolvedPolicy = policyResult.policy;
+      } catch {
+        // Non-fatal — frontend can still work without resolved policy
+      }
+
+      // Include employee's location with active geofences
+      if (employee?.locationId) {
+        employeeLocation = await platformPrisma.location.findUnique({
+          where: { id: employee.locationId },
+          include: { geofences: { where: { isActive: true } } },
+        });
+      }
+
+      res.json(createSuccessResponse({
+        status: 'NOT_CHECKED_IN',
+        record: null,
+        currentShift,
+        resolvedPolicy,
+        location: employeeLocation,
+      }, 'Not checked in today'));
       return;
     }
 
@@ -1091,8 +1126,24 @@ export class ESSController {
       elapsedSeconds = Math.floor((Date.now() - new Date(record.punchIn).getTime()) / 1000);
     }
 
+    // Resolve effective policy for the checked-in/out state too
+    let resolvedPolicy = null;
+    try {
+      const policyResult = await resolvePolicy(companyId, {
+        employeeId,
+        shiftId: record.shiftId ?? null,
+        locationId: record.locationId ?? null,
+        date: today,
+        isHoliday: false,
+        isWeekOff: false,
+      });
+      resolvedPolicy = policyResult.policy;
+    } catch {
+      // Non-fatal
+    }
+
     const status = record.punchOut ? 'CHECKED_OUT' : 'CHECKED_IN';
-    res.json(createSuccessResponse({ status, record, elapsedSeconds }, `Attendance status: ${status}`));
+    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy }, `Attendance status: ${status}`));
   });
 
   checkIn = asyncHandler(async (req: Request, res: Response) => {
