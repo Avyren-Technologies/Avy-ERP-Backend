@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requirePermissions } from '../../middleware/auth.middleware';
 import { companyAdminController as controller } from './company-admin.controller';
+import { geofenceController } from './geofence.controller';
 
 const router = Router();
 
@@ -15,7 +16,13 @@ router.post('/locations', requirePermissions(['location:write']), controller.cre
 router.patch('/locations/:id', requirePermissions(['company:update']), controller.updateLocation);
 router.delete('/locations/:id', requirePermissions(['company:delete']), controller.deleteLocation);
 
-
+// ── Geofences ─────────────────────────────────────────────────────────
+router.get('/geofences', requirePermissions(['company:read']), geofenceController.listForDropdown);
+router.get('/locations/:locationId/geofences', requirePermissions(['company:read']), geofenceController.listGeofences);
+router.post('/locations/:locationId/geofences', requirePermissions(['company:configure']), geofenceController.createGeofence);
+router.patch('/locations/:locationId/geofences/:id', requirePermissions(['company:configure']), geofenceController.updateGeofence);
+router.delete('/locations/:locationId/geofences/:id', requirePermissions(['company:configure']), geofenceController.deleteGeofence);
+router.patch('/locations/:locationId/geofences/:id/default', requirePermissions(['company:configure']), geofenceController.setDefault);
 
 // ── Shifts ──────────────────────────────────────────────────────────
 // ESS employees need shift list for shift swap requests

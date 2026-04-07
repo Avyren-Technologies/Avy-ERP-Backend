@@ -41,9 +41,9 @@ class GeofenceService {
       name: string;
       lat: number;
       lng: number;
-      radius?: number;
-      address?: string;
-      isDefault?: boolean;
+      radius?: number | undefined;
+      address?: string | undefined;
+      isDefault?: boolean | undefined;
     },
   ) {
     // Verify location belongs to company
@@ -98,12 +98,12 @@ class GeofenceService {
     companyId: string,
     id: string,
     data: Partial<{
-      name: string;
-      lat: number;
-      lng: number;
-      radius: number;
-      address: string;
-      isDefault: boolean;
+      name: string | undefined;
+      lat: number | undefined;
+      lng: number | undefined;
+      radius: number | undefined;
+      address: string | undefined;
+      isDefault: boolean | undefined;
     }>,
   ) {
     const existing = await platformPrisma.geofence.findUnique({ where: { id } });
@@ -119,10 +119,15 @@ class GeofenceService {
       });
     }
 
+    // Strip undefined values for exactOptionalPropertyTypes compatibility
+    const updateData = Object.fromEntries(
+      Object.entries(data).filter(([, v]) => v !== undefined),
+    );
+
     try {
       return await platformPrisma.geofence.update({
         where: { id },
-        data,
+        data: updateData,
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
