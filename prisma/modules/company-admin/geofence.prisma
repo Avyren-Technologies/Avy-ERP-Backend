@@ -1,0 +1,33 @@
+// ==========================================
+// COMPANY ADMIN — Geofences
+// ==========================================
+// Multiple named geofence zones per Location.
+// Each location can have many geofences; one is marked as default.
+// Employees can be assigned to a specific geofence for attendance check-in.
+
+model Geofence {
+  id         String   @id @default(cuid())
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name       String
+  lat        Float
+  lng        Float
+  radius     Int      @default(100)
+  address    String?
+
+  isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employees  Employee[]
+
+  @@unique([locationId, name])
+  @@index([companyId])
+  @@index([locationId])
+  @@map("geofences")
+}

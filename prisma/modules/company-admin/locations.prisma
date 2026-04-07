@@ -68,6 +68,9 @@ model Location {
   transfersFrom EmployeeTransfer[] @relation("TransferFromLoc")
   transfersTo   EmployeeTransfer[] @relation("TransferToLoc")
 
+  // Geofences
+  geofences   Geofence[]
+
   @@unique([companyId, code])
   @@map("locations")
 }

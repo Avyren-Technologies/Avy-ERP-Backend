@@ -58,6 +58,8 @@ model Employee {
   costCentre          CostCentre?   @relation(fields: [costCentreId], references: [id])
   locationId          String?
   location            Location?     @relation(fields: [locationId], references: [id])
+  geofenceId          String?
+  geofence            Geofence?     @relation(fields: [geofenceId], references: [id])
   noticePeriodDays    Int?
   probationEndDate    DateTime?
   confirmationDate    DateTime?

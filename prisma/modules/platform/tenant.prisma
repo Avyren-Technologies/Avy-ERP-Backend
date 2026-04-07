@@ -241,6 +241,9 @@ model Company {
   wfhRequests       WfhRequest[]
   policyDocuments   PolicyDocument[]
 
+  // Geofence Relations
+  geofences          Geofence[]
+
   // Support Ticket Relations
   supportTickets SupportTicket[]
 
