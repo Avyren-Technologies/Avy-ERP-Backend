@@ -85,8 +85,8 @@ const EXAMPLE: Record<string, Record<string, string>> = {
   },
   'Fiscal': {
     displayName: 'Apex Manufacturing', fyType: 'apr-mar', fyCustomStartMonth: '',
-    fyCustomEndMonth: '', payrollFreq: 'Monthly', cutoffDay: '25',
-    disbursementDay: '1', weekStart: 'Monday', timezone: 'IST UTC+5:30',
+    fyCustomEndMonth: '', payrollFreq: 'Monthly', cutoffDay: '25th',
+    disbursementDay: '1st', weekStart: 'Monday', timezone: 'IST UTC+5:30',
     workingDays: 'Monday,Tuesday,Wednesday,Thursday,Friday',
   },
   'Preferences': {
@@ -166,12 +166,15 @@ const SHEET_DROPDOWNS: DropdownMap = {
   },
   'Fiscal': {
     fyType: C.FY_TYPES,
+    payrollFreq: C.PAYROLL_FREQUENCIES,
     weekStart: C.WEEK_STARTS,
     timezone: C.TIMEZONES,
     cutoffDay: C.CUTOFF_DAYS,
     disbursementDay: C.DISBURSEMENT_DAYS,
   },
   'Preferences': {
+    currency: C.CURRENCIES,
+    language: C.LANGUAGES,
     indiaCompliance: ['Yes', 'No'],
     mobileApp: ['Yes', 'No'],
     webApp: ['Yes', 'No'],
@@ -891,7 +894,7 @@ class BulkOnboardService {
             workingDays,
           }),
           preferences: {
-            currency: v(prefs, 'currency') || 'INR — \u20B9',
+            currency: v(prefs, 'currency') || 'INR — ₹',
             language: v(prefs, 'language') || 'English',
             dateFormat: v(prefs, 'dateFormat') || 'DD/MM/YYYY',
             indiaCompliance: parseYesNo(v(prefs, 'indiaCompliance')),

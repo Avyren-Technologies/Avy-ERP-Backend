@@ -34,7 +34,7 @@ import { generateComplianceSummaryReport } from './exports/reports/compliance-re
 // ─── Valid Dashboard Names ───
 const VALID_DASHBOARDS: DashboardName[] = [
   'executive', 'workforce', 'attendance', 'leave', 'payroll',
-  'compliance', 'performance', 'recruitment', 'attrition',
+  'compliance', 'performance', 'recruitment', 'attrition', 'training',
 ];
 
 // ─── Report Type → Generator Map ───
@@ -192,39 +192,35 @@ class AnalyticsController {
       throw ApiError.badRequest(`No generator found for report type: ${reportType}`);
     }
 
-    let tenantDb;
-    try {
-      tenantDb = tenantConnectionManager.getClient({ schemaName: tenant.schemaName });
-      const buffer = await generator(tenantDb, companyName, filters, scope);
+    // Reports query employees, attendance, payroll etc. which are in the platform DB (public schema)
+    // Pass platformPrisma as the DB client since all HR tables are in the public schema
+    const buffer = await generator(platformPrisma, companyName, filters, scope);
 
-      // Set response headers for xlsx download
-      const filename = `${reportType}-${filters.dateFrom}-to-${filters.dateTo}.xlsx`;
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // Set response headers for xlsx download
+    const filename = `${reportType}-${filters.dateFrom}-to-${filters.dateTo}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-      // Fire-and-forget audit log
-      analyticsAuditService.logExport(userId, companyId, reportType, exportFormat).catch(() => {});
+    // Fire-and-forget audit log
+    analyticsAuditService.logExport(userId, companyId, reportType, exportFormat).catch(() => {});
 
-      // Fire-and-forget report history record
-      platformPrisma.reportHistory.create({
-        data: {
-          companyId,
-          userId,
-          userName: req.user?.firstName ? `${req.user.firstName}${req.user.lastName ? ` ${req.user.lastName}` : ''}` : 'Unknown',
-          reportType,
-          reportTitle: REPORT_DEFINITIONS[reportType]?.title || reportType,
-          category: REPORT_DEFINITIONS[reportType]?.category || 'unknown',
-          filters: parsed.data as any,
-          format: exportFormat,
-          status: 'COMPLETED',
-          fileSize: buffer.length,
-        },
-      }).catch((err) => logger.error('report_history_save_failed', { error: (err as Error).message, reportType }));
+    // Fire-and-forget report history record
+    platformPrisma.reportHistory.create({
+      data: {
+        companyId,
+        userId,
+        userName: req.user?.firstName ? `${req.user.firstName}${req.user.lastName ? ` ${req.user.lastName}` : ''}` : 'Unknown',
+        reportType,
+        reportTitle: REPORT_DEFINITIONS[reportType]?.title || reportType,
+        category: REPORT_DEFINITIONS[reportType]?.category || 'unknown',
+        filters: parsed.data as any,
+        format: exportFormat,
+        status: 'COMPLETED',
+        fileSize: buffer.length,
+      },
+    }).catch((err) => logger.error('report_history_save_failed', { error: (err as Error).message, reportType }));
 
-      res.send(buffer);
-    } finally {
-      if (tenantDb) tenantDb.$disconnect().catch(() => {});
-    }
+    res.send(buffer);
   });
 
   // ── GET /analytics/alerts ─────────────────────────────────────────────

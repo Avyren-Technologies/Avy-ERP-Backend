@@ -66,28 +66,16 @@ export const DISBURSEMENT_DAYS: string[] = [
 
 // ============ TIMEZONES ============
 
+// Matches frontend tenant-onboarding/constants.ts TIMEZONES exactly
+// (these are the values shown in the wizard and stored in company records)
 export const TIMEZONES: string[] = [
-  'UTC UTC+0:00',
-  'GMT UTC+0:00',
-  'WET UTC+0:00',
-  'CET UTC+1:00',
-  'EET UTC+2:00',
-  'MSK UTC+3:00',
-  'GST UTC+4:00',
-  'PKT UTC+5:00',
   'IST UTC+5:30',
-  'BST UTC+6:00',
-  'ICT UTC+7:00',
-  'CST UTC+8:00',
-  'JST UTC+9:00',
-  'AEST UTC+10:00',
-  'NZST UTC+12:00',
-  'EST UTC-5:00',
-  'CST UTC-6:00',
-  'MST UTC-7:00',
-  'PST UTC-8:00',
-  'AKST UTC-9:00',
-  'HST UTC-10:00',
+  'UTC+0',
+  'EST UTC-5',
+  'PST UTC-8',
+  'GST UTC+4',
+  'SGT UTC+8',
+  'AEST UTC+10',
 ];
 
 // ============ PREFERENCES ============

@@ -10,6 +10,15 @@ import {
   LocationAccuracy,
 } from '@prisma/client';
 
+const coerceOptionalInt = () => z.coerce.number().int().min(0).optional();
+const coerceOptionalNumberInRange = (min: number, max: number) =>
+  z.coerce.number().min(min).max(max).optional();
+const coerceOptionalNullableNumber = (min = 0) =>
+  z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : v),
+    z.coerce.number().min(min).nullable().optional(),
+  );
+
 // ── Attendance Records ────────────────────────────────────────────────
 
 export const createAttendanceSchema = z.object({
@@ -33,23 +42,23 @@ export const attendanceRulesSchema = z.object({
   dayBoundaryTime: z.string().optional(),
 
   // Grace & Tolerance
-  gracePeriodMinutes: z.number().int().min(0).optional(),
-  earlyExitToleranceMinutes: z.number().int().min(0).optional(),
-  maxLateCheckInMinutes: z.number().int().min(0).optional(),
+  gracePeriodMinutes: coerceOptionalInt(),
+  earlyExitToleranceMinutes: coerceOptionalInt(),
+  maxLateCheckInMinutes: coerceOptionalInt(),
 
   // Day Classification Thresholds
-  halfDayThresholdHours: z.number().min(0).max(24).optional(),
-  fullDayThresholdHours: z.number().min(0).max(24).optional(),
+  halfDayThresholdHours: coerceOptionalNumberInRange(0, 24),
+  fullDayThresholdHours: coerceOptionalNumberInRange(0, 24),
 
   // Late Tracking
-  lateArrivalsAllowedPerMonth: z.number().int().min(0).optional(),
+  lateArrivalsAllowedPerMonth: coerceOptionalInt(),
 
   // Deduction Rules
   lopAutoDeduct: z.boolean().optional(),
   lateDeductionType: z.nativeEnum(DeductionType).optional(),
-  lateDeductionValue: z.number().min(0).nullable().optional(),
+  lateDeductionValue: coerceOptionalNullableNumber(0),
   earlyExitDeductionType: z.nativeEnum(DeductionType).optional(),
-  earlyExitDeductionValue: z.number().min(0).nullable().optional(),
+  earlyExitDeductionValue: coerceOptionalNullableNumber(0),
 
   // Punch Interpretation
   punchMode: z.nativeEnum(PunchMode).optional(),
@@ -57,8 +66,8 @@ export const attendanceRulesSchema = z.object({
   // Auto-Processing
   autoMarkAbsentIfNoPunch: z.boolean().optional(),
   autoHalfDayEnabled: z.boolean().optional(),
-  autoAbsentAfterDays: z.number().int().min(0).optional(),
-  regularizationWindowDays: z.number().int().min(0).optional(),
+  autoAbsentAfterDays: coerceOptionalInt(),
+  regularizationWindowDays: coerceOptionalInt(),
 
   // Rounding Rules
   workingHoursRounding: z.nativeEnum(RoundingStrategy).optional(),

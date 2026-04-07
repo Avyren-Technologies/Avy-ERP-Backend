@@ -31,6 +31,7 @@ const DASHBOARD_RULES: Record<DashboardName, InsightRule[]> = {
   performance: [...performanceRules],
   recruitment: [...recruitmentRules],
   attrition: [...attritionRules],
+  training: [],
 };
 
 class InsightsEngineService {

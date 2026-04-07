@@ -119,7 +119,7 @@ export interface DashboardResponse {
   meta: DashboardMeta;
 }
 
-export type DashboardName = 'executive' | 'workforce' | 'attendance' | 'leave' | 'payroll' | 'compliance' | 'performance' | 'recruitment' | 'attrition';
+export type DashboardName = 'executive' | 'workforce' | 'attendance' | 'leave' | 'payroll' | 'compliance' | 'performance' | 'recruitment' | 'attrition' | 'training';
 
 // ─── Intelligence Types ───
 export interface InsightRule {

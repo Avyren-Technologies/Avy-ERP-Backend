@@ -3053,21 +3053,59 @@ export class AdvancedHRService {
     return letter;
   }
 
-  async listPendingESignLetters(companyId: string, options?: { employeeId?: string }) {
+  async listESignLetters(companyId: string, options?: { employeeId?: string; status?: string }) {
     const letters = await platformPrisma.hRLetter.findMany({
       where: {
         companyId,
-        eSignStatus: 'PENDING',
+        eSignStatus: { not: null },
+        ...(options?.status ? { eSignStatus: options.status } : {}),
         ...(options?.employeeId ? { employeeId: options.employeeId } : {}),
       },
       include: {
         employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
         template: { select: { id: true, type: true, name: true } },
       },
-      orderBy: { eSignDispatchedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
 
-    return letters;
+    // Compute stats from the full (unfiltered) set
+    const allLetters = options?.status
+      ? await platformPrisma.hRLetter.findMany({
+          where: {
+            companyId,
+            eSignStatus: { not: null },
+            ...(options?.employeeId ? { employeeId: options.employeeId } : {}),
+          },
+          select: { eSignStatus: true, eSignedAt: true },
+        })
+      : letters;
+
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const stats = {
+      pending: allLetters.filter((l: any) => l.eSignStatus === 'PENDING').length,
+      signedThisMonth: allLetters.filter(
+        (l: any) => l.eSignStatus === 'SIGNED' && l.eSignedAt && new Date(l.eSignedAt) >= monthStart,
+      ).length,
+      declined: allLetters.filter((l: any) => l.eSignStatus === 'DECLINED').length,
+    };
+
+    // Flatten nested relations for frontend consumption
+    const data = letters.map((l) => ({
+      id: l.id,
+      letterNumber: l.letterNumber,
+      letterType: l.template?.name ?? l.template?.type ?? 'HR Letter',
+      employeeId: l.employee?.id,
+      employeeCode: l.employee?.employeeId,
+      employeeName: `${l.employee?.firstName ?? ''} ${l.employee?.lastName ?? ''}`.trim() || 'Unknown',
+      dispatchedAt: l.eSignDispatchedAt,
+      signedAt: l.eSignedAt,
+      status: l.eSignStatus ?? 'PENDING',
+      pdfUrl: l.pdfUrl,
+      createdAt: l.createdAt,
+    }));
+
+    return { data, stats };
   }
 
   // ════════════════════════════════════════════════════════════════

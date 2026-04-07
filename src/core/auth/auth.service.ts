@@ -312,6 +312,7 @@ export class AuthService {
             'company:*', 'hr:*', 'ess:*', 'production:*', 'inventory:*', 'sales:*',
             'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
             'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
+            'billing:*', 'analytics:*',
           ],
           isSystem: true,
         },

@@ -1245,15 +1245,17 @@ export class AdvancedHRController {
         throw AuthError.insufficientPermissions();
       }
       if (!req.user?.employeeId) {
-        return res.json(createSuccessResponse([], 'Pending e-sign letters retrieved'));
+        return res.json(createSuccessResponse({ data: [], stats: { pending: 0, signedThisMonth: 0, declined: 0 } }, 'E-sign letters retrieved'));
       }
       essEmployeeId = req.user.employeeId;
     }
 
-    const letters = await advancedHRService.listPendingESignLetters(companyId, {
+    const status = req.query.status as string | undefined;
+    const result = await advancedHRService.listESignLetters(companyId, {
       ...(essEmployeeId ? { employeeId: essEmployeeId } : {}),
+      ...(status ? { status: status.toUpperCase() } : {}),
     });
-    return res.json(createSuccessResponse(letters, 'Pending e-sign letters retrieved'));
+    return res.json(createSuccessResponse(result, 'E-sign letters retrieved'));
   });
 
   // ════════════════════════════════════════════════════════════════

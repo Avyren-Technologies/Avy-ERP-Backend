@@ -444,6 +444,14 @@ export class BulkImportService {
           val = ((val as any).richText as Array<{ text: string }>).map((t) => t.text).join('');
         }
 
+        // Handle Excel hyperlink objects: { text, hyperlink }
+        if (val && typeof val === 'object' && 'text' in (val as any)) {
+          const textVal = (val as any).text;
+          if (typeof textVal === 'string') {
+            val = textVal;
+          }
+        }
+
         // Convert Date objects to YYYY-MM-DD
         if (val instanceof Date) {
           const y = val.getFullYear();
@@ -478,10 +486,13 @@ export class BulkImportService {
         raw.annualCtc = isNaN(ctcNum) ? raw.annualCtc : ctcNum;
       }
 
-      // Ensure string types for mobile numbers
+      // Ensure string types for fields frequently auto-coerced by Excel
       if (raw.personalMobile !== undefined) raw.personalMobile = String(raw.personalMobile);
       if (raw.emergencyContactMobile !== undefined) raw.emergencyContactMobile = String(raw.emergencyContactMobile);
       if (raw.aadhaarNumber !== undefined) raw.aadhaarNumber = String(raw.aadhaarNumber);
+      if (raw.personalEmail !== undefined) raw.personalEmail = String(raw.personalEmail).trim();
+      if (raw.officialEmail !== undefined) raw.officialEmail = String(raw.officialEmail).trim();
+      if (raw.bankAccountNumber !== undefined) raw.bankAccountNumber = String(raw.bankAccountNumber).trim();
 
       // Validate with Zod schema
       const parsed = bulkEmployeeRowSchema.safeParse(raw);

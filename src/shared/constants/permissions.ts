@@ -28,7 +28,7 @@ export const PERMISSION_INHERITANCE: Record<string, string[]> = {
  * When a company doesn't subscribe to a module, all permissions for that module are suppressed.
  */
 export const MODULE_TO_PERMISSION_MAP: Record<string, string[]> = {
-  'hr': ['hr', 'ess', 'recruitment', 'recruitment-offer', 'training', 'training-evaluation'],
+  'hr': ['hr', 'ess', 'recruitment', 'recruitment-offer', 'training', 'training-evaluation', 'analytics'],
   'security': ['security'],
   'production': ['production'],
   'machine-maintenance': ['maintenance'],
@@ -76,7 +76,7 @@ export function suppressByModules(permissions: string[], activeModuleIds: string
   // (callers should resolve modules from locations as fallback before reaching here)
   if (activeModuleIds.length === 0) return permissions;
 
-  const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform']);
+  const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform', 'billing']);
 
   // Build set of allowed permission modules from active subscriptions
   const allowedPermModules = new Set(SYSTEM_PERMISSION_MODULES);
@@ -147,6 +147,14 @@ export const PERMISSION_MODULES = {
   company: {
     label: 'Company Settings',
     actions: ['read', 'create', 'update', 'delete', 'configure'],
+  },
+  billing: {
+    label: 'Billing & Subscriptions',
+    actions: ['read', 'update', 'export'],
+  },
+  analytics: {
+    label: 'Analytics Dashboard',
+    actions: ['read', 'export'],
   },
   reports: {
     label: 'Reports',

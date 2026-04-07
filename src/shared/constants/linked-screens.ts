@@ -107,7 +107,7 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
     label: 'Offer Management',
     module: 'HR',
     description: 'Reference numbers for job offers',
-    defaultPrefix: 'OFF-',
+    defaultPrefix: 'OFR-',
   },
 
   // ── HR / Performance ───────────────────────────────────────────────
@@ -161,7 +161,7 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
     label: 'Offboarding',
     module: 'HR',
     description: 'Reference numbers for offboarding and F&F processes',
-    defaultPrefix: 'OFF-',
+    defaultPrefix: 'OFB-',
   },
 
   // ── Production ────────────────────────────────────────────────────

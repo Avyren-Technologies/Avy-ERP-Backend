@@ -358,10 +358,19 @@ export class TenantService {
           numberCount: 5,
           startNumber: 1,
         }));
+      // Prevent duplicate code conflicts (e.g. OFF for Offer + Offboarding)
+      // against @@unique([companyId, code]) on NoSeriesConfig.
+      const missingDefaultsUniqueByCode = Array.from(
+        new Map(missingDefaults.map((item) => [item.code, item])).values(),
+      );
 
-      if (missingDefaults.length > 0) {
-        await tx.noSeriesConfig.createMany({ data: missingDefaults });
-        logger.info(`Auto-seeded ${missingDefaults.length} default number series for company ${company.id}`);
+      if (missingDefaultsUniqueByCode.length > 0) {
+        await tx.noSeriesConfig.createMany({
+          data: missingDefaultsUniqueByCode,
+          // Ignore collisions with wizard-provided custom series codes for this company.
+          skipDuplicates: true,
+        });
+        logger.info(`Auto-seeded ${missingDefaultsUniqueByCode.length} default number series for company ${company.id}`);
       }
 
       // ── 7. IOT Reasons (batch) ─────────────────────────────────
@@ -403,6 +412,7 @@ export class TenantService {
             'company:*', 'hr:*', 'ess:*', 'production:*', 'inventory:*', 'sales:*',
             'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
             'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
+            'billing:*', 'analytics:*',
           ],
           isSystem: true,
         },
