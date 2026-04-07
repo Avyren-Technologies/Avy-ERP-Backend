@@ -123,7 +123,13 @@ class AdminAttendanceService {
       });
     }
 
+    // Derive attendance status from today's record
+    let status: 'NOT_CHECKED_IN' | 'CHECKED_IN' | 'CHECKED_OUT' = 'NOT_CHECKED_IN';
+    if (todayRecord?.punchIn && todayRecord?.punchOut) status = 'CHECKED_OUT';
+    else if (todayRecord?.punchIn) status = 'CHECKED_IN';
+
     return {
+      status,
       employee: {
         id: employee.id,
         firstName: employee.firstName,
