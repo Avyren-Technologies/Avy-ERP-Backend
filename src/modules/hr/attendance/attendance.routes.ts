@@ -2,11 +2,15 @@ import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
 import { requireModuleEnabled } from '../../../shared/middleware/config-enforcement.middleware';
 import { attendanceController as controller } from './attendance.controller';
+import { adminAttendanceRoutes } from './admin-attendance.routes';
 
 const router = Router();
 
 // ── Module Enforcement ──────────────────────────────────────────────
 router.use(requireModuleEnabled('attendance'));
+
+// ── Admin Attendance (kiosk / manual mark) ────────────────────────────────────
+router.use('/attendance/admin', adminAttendanceRoutes);
 
 // ── Attendance Rules (must be before :id to avoid "rules" matching as an ID) ──
 router.get('/attendance/rules', requirePermissions(['hr:read']), controller.getRules);

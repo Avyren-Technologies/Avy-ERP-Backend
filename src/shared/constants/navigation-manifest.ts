@@ -105,6 +105,7 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-employees', label: 'Employee Directory', icon: 'users', requiredPerm: 'hr:read', path: '/app/company/hr/employees', module: 'hr', group: 'Org Structure', roleScope: 'company', sortOrder: 505 },
   { id: 'hr-orgchart', label: 'Org Chart', icon: 'git-fork', requiredPerm: 'hr:read', path: '/app/company/hr/org-chart', module: 'hr', group: 'Org Structure', roleScope: 'company', sortOrder: 506 },
 
+  { id: 'hr-att-admin', label: 'Mark Attendance', icon: 'user-check', requiredPerm: 'attendance:mark', path: '/app/company/hr/admin-attendance', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 509 },
   { id: 'hr-att-dash', label: 'Attendance Dashboard', icon: 'calendar-check', requiredPerm: 'hr:read', path: '/app/company/hr/attendance', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 510 },
   { id: 'hr-holidays', label: 'Holiday Calendar', icon: 'calendar', requiredPerm: 'hr:read', path: '/app/company/hr/holidays', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 511 },
   { id: 'hr-rosters', label: 'Rosters', icon: 'calendar-days', requiredPerm: 'hr:read', path: '/app/company/hr/rosters', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 512 },

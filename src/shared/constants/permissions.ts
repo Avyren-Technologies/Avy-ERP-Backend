@@ -28,7 +28,11 @@ export const PERMISSION_INHERITANCE: Record<string, string[]> = {
  * When a company doesn't subscribe to a module, all permissions for that module are suppressed.
  */
 export const MODULE_TO_PERMISSION_MAP: Record<string, string[]> = {
+<<<<<<< HEAD
   'hr': ['hr', 'ess', 'recruitment', 'recruitment-offer', 'training', 'training-evaluation', 'analytics'],
+=======
+  'hr': ['hr', 'ess', 'recruitment', 'recruitment-offer', 'training', 'training-evaluation', 'analytics', 'attendance'],
+>>>>>>> 3f1ae2b64dca5d575648da6c783b745ce24b0e0c
   'security': ['security'],
   'production': ['production'],
   'machine-maintenance': ['maintenance'],
@@ -183,6 +187,10 @@ export const PERMISSION_MODULES = {
   ess: {
     label: 'Employee Self-Service',
     actions: ['view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart', 'use-chatbot', 'view-esign', 'view-disciplinary'],
+  },
+  attendance: {
+    label: 'Attendance Marking',
+    actions: ['mark'],
   },
   platform: {
     label: 'Platform Administration',
