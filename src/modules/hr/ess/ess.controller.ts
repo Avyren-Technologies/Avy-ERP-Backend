@@ -1075,11 +1075,12 @@ export class ESSController {
       // Return the employee's current shift info + resolved policy + location/geofences
       const employee = await platformPrisma.employee.findUnique({
         where: { id: employeeId },
-        select: { shiftId: true, locationId: true },
+        select: { shiftId: true, locationId: true, geofenceId: true },
       });
       let currentShift = null;
       let resolvedPolicy = null;
       let employeeLocation = null;
+      let assignedGeofence = null;
 
       if (employee?.shiftId) {
         currentShift = await platformPrisma.companyShift.findUnique({
@@ -1103,6 +1104,13 @@ export class ESSController {
         // Non-fatal — frontend can still work without resolved policy
       }
 
+      // Include employee's assigned geofence (if individually assigned)
+      if (employee?.geofenceId) {
+        assignedGeofence = await platformPrisma.geofence.findUnique({
+          where: { id: employee.geofenceId },
+        });
+      }
+
       // Include employee's location with active geofences
       if (employee?.locationId) {
         employeeLocation = await platformPrisma.location.findUnique({
@@ -1117,6 +1125,7 @@ export class ESSController {
         currentShift,
         resolvedPolicy,
         location: employeeLocation,
+        assignedGeofence,
       }, 'Not checked in today'));
       return;
     }
