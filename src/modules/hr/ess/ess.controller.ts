@@ -1127,19 +1127,49 @@ export class ESSController {
       throw ApiError.badRequest('Already checked in today. Use check-out instead.');
     }
 
-    // Geofence validation
+    // Geofence validation — check assigned geofence → all location geofences → legacy fields
     let geoStatus = 'NO_LOCATION';
-    if (latitude != null && longitude != null && locationId) {
-      const location = await platformPrisma.location.findUnique({ where: { id: locationId } });
-      if (location?.geoEnabled && location.geoLat && location.geoLng) {
-        const dist = calculateDistance(
-          latitude, longitude,
-          parseFloat(location.geoLat), parseFloat(location.geoLng),
-        );
-        geoStatus = dist <= location.geoRadius ? 'INSIDE_GEOFENCE' : 'OUTSIDE_GEOFENCE';
+    if (latitude != null && longitude != null) {
+      // Get employee's assigned geofence and location
+      const empGeo = await platformPrisma.employee.findUnique({
+        where: { id: employeeId },
+        select: { geofenceId: true, locationId: true },
+      });
+      const effectiveLocationId = locationId || empGeo?.locationId;
+
+      if (empGeo?.geofenceId) {
+        // 1. Check against specifically assigned geofence
+        const geofence = await platformPrisma.geofence.findUnique({
+          where: { id: empGeo.geofenceId },
+        });
+        if (geofence?.isActive) {
+          const dist = calculateDistance(latitude, longitude, geofence.lat, geofence.lng);
+          geoStatus = dist <= geofence.radius ? 'INSIDE_GEOFENCE' : 'OUTSIDE_GEOFENCE';
+        }
+      } else if (effectiveLocationId) {
+        // 2. Check against ALL active geofences for the location
+        const geofences = await platformPrisma.geofence.findMany({
+          where: { locationId: effectiveLocationId, isActive: true },
+        });
+        if (geofences.length > 0) {
+          const insideAny = geofences.some(
+            gf => calculateDistance(latitude, longitude, gf.lat, gf.lng) <= gf.radius,
+          );
+          geoStatus = insideAny ? 'INSIDE_GEOFENCE' : 'OUTSIDE_GEOFENCE';
+        } else {
+          // 3. Fall back to legacy Location geo fields
+          const location = await platformPrisma.location.findUnique({
+            where: { id: effectiveLocationId },
+          });
+          if (location?.geoEnabled && location.geoLat && location.geoLng) {
+            const dist = calculateDistance(
+              latitude, longitude,
+              parseFloat(location.geoLat), parseFloat(location.geoLng),
+            );
+            geoStatus = dist <= location.geoRadius ? 'INSIDE_GEOFENCE' : 'OUTSIDE_GEOFENCE';
+          }
+        }
       }
-    } else if (latitude != null && longitude != null) {
-      geoStatus = 'NO_LOCATION';
     }
 
     // Shift time validation (if employee has a shift assigned)
@@ -1385,18 +1415,52 @@ export class ESSController {
       companyTimezone,
     );
 
-    // Geofence validation for checkout
+    // Geofence validation for checkout — check assigned geofence → all location geofences → legacy fields
     let geoStatus = existing.geoStatus || 'NO_LOCATION';
-    if (latitude != null && longitude != null && existing.locationId) {
-      const location = await platformPrisma.location.findUnique({ where: { id: existing.locationId } });
-      if (location?.geoEnabled && location.geoLat && location.geoLng) {
-        const dist = calculateDistance(
-          latitude, longitude,
-          parseFloat(location.geoLat), parseFloat(location.geoLng),
-        );
-        // If they were inside on check-in but outside on check-out, mark as outside
-        if (dist > location.geoRadius) {
-          geoStatus = 'OUTSIDE_GEOFENCE';
+    if (latitude != null && longitude != null) {
+      const empGeo = await platformPrisma.employee.findUnique({
+        where: { id: employeeId },
+        select: { geofenceId: true, locationId: true },
+      });
+      const checkoutLocationId = existing.locationId ?? empGeo?.locationId;
+
+      if (empGeo?.geofenceId) {
+        // 1. Check against specifically assigned geofence
+        const geofence = await platformPrisma.geofence.findUnique({
+          where: { id: empGeo.geofenceId },
+        });
+        if (geofence?.isActive) {
+          const dist = calculateDistance(latitude, longitude, geofence.lat, geofence.lng);
+          if (dist > geofence.radius) {
+            geoStatus = 'OUTSIDE_GEOFENCE';
+          }
+        }
+      } else if (checkoutLocationId) {
+        // 2. Check against ALL active geofences for the location
+        const geofences = await platformPrisma.geofence.findMany({
+          where: { locationId: checkoutLocationId, isActive: true },
+        });
+        if (geofences.length > 0) {
+          const insideAny = geofences.some(
+            gf => calculateDistance(latitude, longitude, gf.lat, gf.lng) <= gf.radius,
+          );
+          if (!insideAny) {
+            geoStatus = 'OUTSIDE_GEOFENCE';
+          }
+        } else {
+          // 3. Fall back to legacy Location geo fields
+          const location = await platformPrisma.location.findUnique({
+            where: { id: checkoutLocationId },
+          });
+          if (location?.geoEnabled && location.geoLat && location.geoLng) {
+            const dist = calculateDistance(
+              latitude, longitude,
+              parseFloat(location.geoLat), parseFloat(location.geoLng),
+            );
+            if (dist > location.geoRadius) {
+              geoStatus = 'OUTSIDE_GEOFENCE';
+            }
+          }
         }
       }
     }

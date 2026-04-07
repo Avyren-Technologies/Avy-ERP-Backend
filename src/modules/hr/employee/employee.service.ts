@@ -116,6 +116,7 @@ export class EmployeeService {
         grade: { select: { id: true, name: true, code: true, probationMonths: true, noticeDays: true } },
         employeeType: { select: { id: true, name: true, code: true } },
         location: { select: { id: true, name: true, code: true } },
+        geofence: { select: { id: true, name: true, lat: true, lng: true, radius: true } },
         shift: { select: { id: true, name: true, startTime: true, endTime: true } },
         costCentre: { select: { id: true, name: true, code: true } },
         reportingManager: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
@@ -274,6 +275,7 @@ export class EmployeeService {
               shiftId: n(data.shiftId),
               costCentreId: n(data.costCentreId),
               locationId: n(data.locationId),
+              geofenceId: n(data.geofenceId),
               noticePeriodDays,
               probationEndDate,
 
@@ -322,6 +324,20 @@ export class EmployeeService {
               timeline: true,
             },
           });
+
+          // Auto-assign default geofence if location set and no geofence specified
+          if (!data.geofenceId && employee.locationId) {
+            const defaultGeofence = await tx.geofence.findFirst({
+              where: { locationId: employee.locationId, isDefault: true, isActive: true },
+              select: { id: true },
+            });
+            if (defaultGeofence) {
+              await tx.employee.update({
+                where: { id: employee.id },
+                data: { geofenceId: defaultGeofence.id },
+              });
+            }
+          }
 
           // Auto-link to User if officialEmail matches an existing User in the same company
           if (data.officialEmail) {
@@ -634,6 +650,25 @@ export class EmployeeService {
     if (data.shiftId !== undefined) updateData.shiftId = n(data.shiftId);
     if (data.costCentreId !== undefined) updateData.costCentreId = n(data.costCentreId);
     if (data.locationId !== undefined) updateData.locationId = n(data.locationId);
+
+    // If location changed, reassign default geofence (unless explicitly provided)
+    if (data.locationId !== undefined && data.locationId !== existing.locationId) {
+      if (data.geofenceId === undefined) {
+        // Clear old geofence and assign new location's default
+        const defaultGf = data.locationId
+          ? await platformPrisma.geofence.findFirst({
+              where: { locationId: data.locationId, isDefault: true, isActive: true },
+              select: { id: true },
+            })
+          : null;
+        updateData.geofenceId = defaultGf?.id ?? null;
+      }
+    }
+    // Explicit geofenceId in update data
+    if (data.geofenceId !== undefined) {
+      updateData.geofenceId = data.geofenceId || null;
+    }
+
     if (data.noticePeriodDays !== undefined) {
       updateData.noticePeriodDays = n(data.noticePeriodDays);
     } else if (data.gradeId && data.gradeId !== existing.gradeId) {

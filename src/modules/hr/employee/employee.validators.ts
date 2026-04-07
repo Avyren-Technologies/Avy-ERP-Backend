@@ -51,6 +51,7 @@ export const createEmployeeSchema = z.object({
   shiftId: z.string().optional(),
   costCentreId: z.string().optional(),
   locationId: z.string().optional(),
+  geofenceId: z.string().optional(),
   noticePeriodDays: z.number().int().optional(),
 
   // Tab 3: Salary
