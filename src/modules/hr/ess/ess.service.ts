@@ -2366,7 +2366,7 @@ export class ESSService {
   private async getDashboardCurrentShift(_companyId: string, employeeId: string) {
     const employee = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
-      select: { shiftId: true },
+      select: { shiftId: true, locationId: true, geofenceId: true },
     });
 
     if (!employee?.shiftId) return null;
@@ -2387,7 +2387,30 @@ export class ESSService {
       },
     });
 
-    return shift;
+    // Include employee's location and assigned geofence for dashboard display
+    let location = null;
+    let assignedGeofence = null;
+
+    if (employee.locationId) {
+      location = await platformPrisma.location.findUnique({
+        where: { id: employee.locationId },
+        select: {
+          id: true,
+          name: true,
+          geoEnabled: true,
+          geofences: { where: { isActive: true }, select: { id: true, name: true, lat: true, lng: true, radius: true, isDefault: true } },
+        },
+      });
+    }
+
+    if (employee.geofenceId) {
+      assignedGeofence = await platformPrisma.geofence.findUnique({
+        where: { id: employee.geofenceId },
+        select: { id: true, name: true, lat: true, lng: true, radius: true, isDefault: true },
+      });
+    }
+
+    return { ...shift, location, assignedGeofence };
   }
 
   // ── Dashboard helper: Goals Summary ──
