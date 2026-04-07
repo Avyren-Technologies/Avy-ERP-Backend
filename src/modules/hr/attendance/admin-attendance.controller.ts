@@ -33,7 +33,7 @@ class AdminAttendanceController {
     );
 
     // Require remarks for admin override
-    if (callerHasOverride && parsed.data.skipValidation && !parsed.data.remarks) {
+    if (callerHasOverride && parsed.data.skipValidation && !parsed.data.remarks?.trim()) {
       throw ApiError.badRequest('Remarks are required when using admin override');
     }
 
