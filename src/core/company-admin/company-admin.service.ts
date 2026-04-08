@@ -906,8 +906,8 @@ export class CompanyAdminService {
   // Users (CRUD + status toggle)
   // ────────────────────────────────────────────────────────────────────
 
-  async listUsers(companyId: string, options: { page?: number; limit?: number; search?: string; isActive?: boolean } = {}) {
-    const { page = 1, limit = 25, search, isActive } = options;
+  async listUsers(companyId: string, options: { page?: number; limit?: number; search?: string; isActive?: boolean; role?: string } = {}) {
+    const { page = 1, limit = 25, search, isActive, role } = options;
     const offset = (page - 1) * limit;
 
     const where: any = { companyId };
@@ -922,6 +922,18 @@ export class CompanyAdminService {
         { lastName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
+    }
+
+    if (role) {
+      // Accept either role ID or role name from UI filter.
+      where.tenantUsers = {
+        some: {
+          OR: [
+            { roleId: role },
+            { role: { name: role } },
+          ],
+        },
+      };
     }
 
     const [users, total] = await Promise.all([

@@ -27,6 +27,7 @@ import { inventoryRoutes } from '../modules/inventory/routes';
 import { visitorsRoutes } from '../modules/visitors/routes';
 import { maintenanceRoutes } from '../modules/maintenance/routes';
 import { reportsRoutes } from '../modules/reports/routes';
+import { uploadRoutes, uploadPlatformRoutes } from '../modules/upload/upload.routes';
 
 // Create main router
 const router = Router();
@@ -84,6 +85,7 @@ router.use('/platform/dashboard', dashboardPlatformRoutes);
 router.use('/platform/audit-logs', auditRoutes);
 router.use('/platform/support', supportPlatformRoutes);
 router.use('/platform/registrations', registrationPlatformRoutes);
+router.use('/platform/upload', uploadPlatformRoutes);
 
 // Tenant-scoped routes (require tenant context)
 router.use(
@@ -139,6 +141,7 @@ router.use('/inventory', inventoryRoutes);
 router.use('/visitors', visitorsRoutes);
 router.use('/maintenance', maintenanceRoutes);
 router.use('/reports', reportsRoutes);
+router.use('/upload', uploadRoutes);
 
 // Core tenant routes (for company admins)
 router.use('/dashboard', dashboardTenantRoutes);

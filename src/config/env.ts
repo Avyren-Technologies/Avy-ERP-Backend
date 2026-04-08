@@ -66,6 +66,19 @@ const envSchema = z.object({
   AWS_SECRET_KEY: z.string().optional(),
   AWS_REGION: z.string().default('us-east-1'),
 
+  // Cloudflare R2
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET_NAME: z.string().default('avy-erp-files'),
+  R2_ENDPOINT: z.string().optional(),
+  R2_UPLOAD_URL_EXPIRY_SECONDS: z.coerce.number().default(300),
+  R2_DOWNLOAD_URL_EXPIRY_SECONDS: z.coerce.number().default(3600),
+
+  // File Upload Limits (bytes)
+  UPLOAD_MAX_IMAGE_SIZE: z.coerce.number().default(5242880),
+  UPLOAD_MAX_DOCUMENT_SIZE: z.coerce.number().default(10485760),
+
   // Application
   APP_NAME: z.string().default('Avy ERP'),
   APP_URL: z.string().default('http://localhost:3000'),

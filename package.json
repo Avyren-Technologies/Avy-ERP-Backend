@@ -20,7 +20,7 @@
     "worker:analytics": "ts-node src/workers/analytics.worker.ts",
     "worker:notifications": "ts-node src/workers/notification.worker.ts",
     "db:migrate-tenants": "node scripts/merge-prisma.js && prisma migrate deploy && npx tsx scripts/migrate-tenants.ts",
-    "company:seed": "npx tsx scripts/seed-company.ts --api-url http://localhost:3030/api/v1 --email superadmin@avyerp.local --password SuperAdmin@12345",
+    "company:seed": "npx tsx scripts/seed-company.ts --api-url http://localhost:3030/api/v1 --email superadmin@avyrentechnologies.com --password Avyren#Nexus47!Q",
     "demo:seed": "npx tsx scripts/seed-demo-tenant.ts",
     "seed:hrms": "npx tsx scripts/seed-hrms-data.ts"
   },
@@ -35,6 +35,8 @@
   "author": "Avyren Technologies",
   "license": "UNLICENSED",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1026.0",
+    "@aws-sdk/s3-request-presigner": "^3.1026.0",
     "@prisma/client": "^5.7.0",
     "bcryptjs": "^2.4.3",
     "bull": "^4.12.2",

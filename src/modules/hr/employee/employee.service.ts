@@ -26,12 +26,13 @@ export class EmployeeService {
       limit?: number;
       search?: string;
       departmentId?: string;
+      designationId?: string;
       locationId?: string;
       status?: string;
       employeeTypeId?: string;
     } = {},
   ) {
-    const { page = 1, limit = 25, search, departmentId, locationId, status, employeeTypeId } = options;
+    const { page = 1, limit = 25, search, departmentId, designationId, locationId, status, employeeTypeId } = options;
     const offset = (page - 1) * limit;
 
     const where: any = { companyId };
@@ -41,6 +42,9 @@ export class EmployeeService {
     }
     if (departmentId) {
       where.departmentId = departmentId;
+    }
+    if (designationId) {
+      where.designationId = designationId;
     }
     if (locationId) {
       where.locationId = locationId;

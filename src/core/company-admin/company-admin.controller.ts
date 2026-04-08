@@ -411,9 +411,15 @@ export class CompanyAdminController {
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
     const { page, limit } = getPaginationParams(req.query);
-    const opts: { page: number; limit: number; search?: string; isActive?: boolean } = { page, limit };
+    const opts: { page: number; limit: number; search?: string; isActive?: boolean; role?: string } = { page, limit };
     if (req.query.search) opts.search = req.query.search as string;
+    if (req.query.role) opts.role = req.query.role as string;
     if (req.query.isActive !== undefined) opts.isActive = req.query.isActive === 'true';
+    if (req.query.status !== undefined && opts.isActive === undefined) {
+      const status = String(req.query.status).toLowerCase();
+      if (status === 'active') opts.isActive = true;
+      else if (status === 'inactive') opts.isActive = false;
+    }
 
     const result = await companyAdminService.listUsers(companyId, opts);
     res.json(createPaginatedResponse(result.users, result.page, result.limit, result.total, 'Users retrieved'));

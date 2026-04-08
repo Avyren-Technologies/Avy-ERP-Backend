@@ -51,14 +51,14 @@ if (hasFlag('help') || hasFlag('h')) {
 
   Examples:
     npx tsx scripts/seed-company.ts --count 2 --multi-location --employees 15
-    npx tsx scripts/seed-company.ts --employees 5 --email superadmin@avyerp.local --password SuperAdmin@12345
+    npx tsx scripts/seed-company.ts --employees 5 --email superadmin@avyrentechnologies.com --password Avyren#Nexus47!Q
   `);
   process.exit(0);
 }
 
 const API_URL = getArg('api-url', process.env.API_URL || 'http://localhost:3030/api/v1');
-const ADMIN_EMAIL = getArg('email', process.env.ADMIN_EMAIL || 'admin@avyerp.com');
-const ADMIN_PASSWORD = getArg('password', process.env.ADMIN_PASSWORD || 'admin123');
+const ADMIN_EMAIL = getArg('email', process.env.ADMIN_EMAIL || 'superadmin@avyrentechnologies.com');
+const ADMIN_PASSWORD = getArg('password', process.env.ADMIN_PASSWORD || 'Avyren#Nexus47!Q');
 const COUNT = parseInt(getArg('count', '1'), 10);
 const MULTI_LOCATION = hasFlag('multi-location');
 const EMPLOYEE_COUNT = parseInt(getArg('employees', '0'), 10);

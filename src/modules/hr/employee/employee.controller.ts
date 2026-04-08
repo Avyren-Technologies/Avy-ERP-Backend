@@ -29,6 +29,7 @@ export class EmployeeController {
     const opts: any = { page, limit };
     if (req.query.search) opts.search = req.query.search as string;
     if (req.query.departmentId) opts.departmentId = req.query.departmentId as string;
+    if (req.query.designationId) opts.designationId = req.query.designationId as string;
     if (req.query.locationId) opts.locationId = req.query.locationId as string;
     if (req.query.status) opts.status = req.query.status as string;
     if (req.query.employeeTypeId) opts.employeeTypeId = req.query.employeeTypeId as string;

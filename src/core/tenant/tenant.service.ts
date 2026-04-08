@@ -409,7 +409,7 @@ export class TenantService {
           name: 'Company Admin',
           description: 'Full company access — all modules and actions',
           permissions: [
-            'company:*', 'hr:*', 'ess:*', 'production:*', 'inventory:*', 'sales:*',
+            'company:*', 'hr:*', 'ess:*', 'attendance:*', 'production:*', 'inventory:*', 'sales:*',
             'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
             'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
             'billing:*', 'analytics:*',

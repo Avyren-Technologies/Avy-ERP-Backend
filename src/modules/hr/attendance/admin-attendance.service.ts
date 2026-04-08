@@ -10,6 +10,7 @@ import {
   type ShiftInfo,
 } from '../../../shared/services/attendance-status-resolver.service';
 import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
+import { DateTime } from 'luxon';
 
 type AdminMarkInput = z.infer<typeof adminMarkSchema>;
 type TodayLogInput = z.infer<typeof todayLogSchema>;
@@ -91,17 +92,13 @@ class AdminAttendanceService {
       });
     }
 
+    // Resolve holiday/week-off context for today
+    const evalCtx = await this.buildEvaluationContext(companyId, employeeId, employee.shiftId, employee.locationId, today, companyTimezone);
+
     // Resolved policy
     let resolvedPolicy = null;
     try {
-      const policyResult = await resolvePolicy(companyId, {
-        employeeId,
-        shiftId: employee.shiftId,
-        locationId: employee.locationId,
-        date: today,
-        isHoliday: false,
-        isWeekOff: false,
-      });
+      const policyResult = await resolvePolicy(companyId, evalCtx);
       resolvedPolicy = policyResult.policy;
     } catch {
       // Non-fatal — policy resolution may fail if no rules configured yet
@@ -273,16 +270,11 @@ class AdminAttendanceService {
       );
     }
 
-    // Resolve policy and status
+    // Resolve policy and status (with proper holiday/week-off detection)
     const rules = await getCachedAttendanceRules(companyId);
-    const evaluationContext: EvaluationContext = {
-      employeeId: employee.id,
-      shiftId: record.shiftId,
-      locationId: record.locationId,
-      date: record.date,
-      isHoliday: false,
-      isWeekOff: false,
-    };
+    const evaluationContext = await this.buildEvaluationContext(
+      companyId, employee.id, record.shiftId, record.locationId, record.date, companyTimezone,
+    );
 
     const policyResult = await resolvePolicy(companyId, evaluationContext);
 
@@ -523,6 +515,47 @@ class AdminAttendanceService {
     }
     // Cross-day shifts: more lenient — allow check-in anytime
     // (complex midnight-wrapping logic handled by ESS; admin screen is simpler)
+  }
+
+  /**
+   * Build an EvaluationContext with proper holiday/week-off detection.
+   * Mirrors the logic in attendance.service.ts check-in flow.
+   */
+  private async buildEvaluationContext(
+    companyId: string,
+    employeeId: string,
+    shiftId: string | null,
+    locationId: string | null,
+    date: Date,
+    companyTimezone: string,
+  ): Promise<EvaluationContext> {
+    // Check if date is a holiday
+    const holiday = await platformPrisma.holidayCalendar.findFirst({
+      where: { companyId, date },
+      select: { name: true },
+    });
+
+    // Check if date is a week-off using default roster
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+      select: { weekOff1: true, weekOff2: true },
+    });
+
+    const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dtAtt = DateTime.fromJSDate(date).setZone(companyTimezone);
+    const dow = dayOfWeek[dtAtt.weekday % 7];
+    const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
+
+    return {
+      employeeId,
+      shiftId,
+      locationId,
+      date,
+      isHoliday: !!holiday,
+      isWeekOff,
+      ...(holiday?.name && { holidayName: holiday.name }),
+      ...(roster && { rosterPattern: `${roster.weekOff1 ?? ''}${roster.weekOff2 ? '/' + roster.weekOff2 : ''}` }),
+    };
   }
 
   private calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {

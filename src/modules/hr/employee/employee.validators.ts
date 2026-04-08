@@ -89,10 +89,10 @@ export const createEmployeeSchema = z.object({
   userRole: z.string().optional(),
   userLocationId: z.string().optional(),
 
-  // Document uploads (base64)
+  // Document uploads (R2 keys)
   documentUploads: z.record(z.object({
     fileName: z.string(),
-    base64: z.string(),
+    fileUrl: z.string(),
   })).optional(),
 }).passthrough();
 

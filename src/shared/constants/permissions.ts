@@ -180,13 +180,13 @@ export const PERMISSION_MODULES = {
     label: 'Training Evaluation',
     actions: ['read', 'create'],
   },
-  ess: {
-    label: 'Employee Self-Service',
-    actions: ['view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart', 'use-chatbot', 'view-esign', 'view-disciplinary'],
-  },
   attendance: {
     label: 'Attendance Marking',
     actions: ['mark'],
+  },
+  ess: {
+    label: 'Employee Self-Service',
+    actions: ['view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart', 'use-chatbot', 'view-esign', 'view-disciplinary'],
   },
   platform: {
     label: 'Platform Administration',
@@ -260,7 +260,7 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   },
   'HR Personnel': {
     description: 'Full HR module access',
-    permissions: ['hr:*', 'reports:read', 'reports:export'],
+    permissions: ['hr:*', 'attendance:mark', 'reports:read', 'reports:export'],
   },
   'Finance Team': {
     description: 'Finance module with read-only payroll',
@@ -280,7 +280,7 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   },
   'Security Personnel': {
     description: 'Security and Visitor Management',
-    permissions: ['security:*', 'visitors:*'],
+    permissions: ['security:*', 'visitors:*', 'attendance:mark'],
   },
   'Stores Clerk': {
     description: 'Inventory module',
@@ -318,7 +318,7 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   'Manager': {
     description: 'Team manager — ESS access plus team management, approvals, and reporting',
     permissions: [
-      'ess:*', 'hr:read', 'hr:approve', 'reports:read',
+      'ess:*', 'hr:read', 'hr:approve', 'attendance:mark', 'reports:read',
     ],
   },
 };

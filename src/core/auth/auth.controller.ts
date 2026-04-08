@@ -9,6 +9,7 @@ import { asyncHandler } from '../../middleware/error.middleware';
 import { platformPrisma } from '../../config/database';
 import { TenantStatus } from '@prisma/client';
 import jwt from 'jsonwebtoken';
+import { r2Service } from '../../shared/services/r2.service';
 
 /** Subdomain login branding only for tenants that may use the app (aligned with tenant middleware). */
 const TENANT_BRANDING_ALLOWED = new Set<TenantStatus>([TenantStatus.ACTIVE, TenantStatus.TRIAL]);
@@ -243,10 +244,20 @@ export class AuthController {
       return res.json(createSuccessResponse({ exists: false }));
     }
 
+    // Resolve R2 key to presigned URL (this is a public endpoint, no auth)
+    let logoUrl = tenant.company.logoUrl;
+    if (logoUrl && r2Service.isConfigured()) {
+      try {
+        logoUrl = await r2Service.getPresignedDownloadUrl(logoUrl);
+      } catch {
+        logoUrl = null;
+      }
+    }
+
     return res.json(createSuccessResponse({
       exists: true,
       companyName: tenant.company.displayName || tenant.company.name,
-      logoUrl: tenant.company.logoUrl,
+      logoUrl,
     }));
   });
 

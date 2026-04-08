@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError } from '../../../shared/errors';
 import { createSuccessResponse, createPaginatedResponse } from '../../../shared/utils';
+import { hasPermission } from '../../../shared/constants/permissions';
 import { adminAttendanceService } from './admin-attendance.service';
 import { adminMarkSchema, adminBulkMarkSchema, todayLogSchema } from './admin-attendance.validators';
 
@@ -26,11 +27,9 @@ class AdminAttendanceController {
       throw ApiError.badRequest(parsed.error.errors.map(e => e.message).join(', '));
     }
 
-    // Check if caller has admin override privileges
+    // Check if caller has admin override privileges (supports wildcards and inheritance)
     const permissions: string[] = req.user?.permissions ?? [];
-    const callerHasOverride = permissions.some(
-      p => p === 'hr:create' || p === 'hr:configure' || p === 'company:configure' || p === '*',
-    );
+    const callerHasOverride = hasPermission(permissions, 'hr:create');
 
     // Require remarks for admin override
     if (callerHasOverride && parsed.data.skipValidation && !parsed.data.remarks?.trim()) {
