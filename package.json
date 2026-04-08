@@ -96,5 +96,8 @@
     "ts-jest": "^29.4.6",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "@tootallnate/once": "^3.0.1"
   }
 }

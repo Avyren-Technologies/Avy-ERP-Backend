@@ -1,7 +1,8 @@
+import type { z } from 'zod';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
-import { logger } from '../../../config/logger';
 import { getCachedAttendanceRules, getCachedCompanySettings } from '../../../shared/utils/config-cache';
+import { adminMarkSchema, todayLogSchema } from './admin-attendance.validators';
 import { resolvePolicy, type EvaluationContext } from '../../../shared/services/policy-resolver.service';
 import {
   resolveAttendanceStatus,
@@ -9,6 +10,10 @@ import {
   type ShiftInfo,
 } from '../../../shared/services/attendance-status-resolver.service';
 import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
+
+type AdminMarkInput = z.infer<typeof adminMarkSchema>;
+type TodayLogInput = z.infer<typeof todayLogSchema>;
+type MarkGeoRemarksInput = Pick<AdminMarkInput, 'latitude' | 'longitude' | 'photoUrl' | 'remarks'>;
 
 class AdminAttendanceService {
   /**
@@ -26,7 +31,7 @@ class AdminAttendanceService {
         id: true,
         firstName: true,
         lastName: true,
-        employeeCode: true,
+        employeeId: true,
         profilePhotoUrl: true,
         shiftId: true,
         locationId: true,
@@ -134,7 +139,7 @@ class AdminAttendanceService {
         id: employee.id,
         firstName: employee.firstName,
         lastName: employee.lastName,
-        employeeCode: employee.employeeCode,
+        employeeCode: employee.employeeId,
         profilePhotoUrl: employee.profilePhotoUrl,
         departmentName: employee.department?.name ?? null,
         designationName: employee.designation?.name ?? null,
@@ -150,19 +155,7 @@ class AdminAttendanceService {
   /**
    * Mark check-in or check-out for a single employee.
    */
-  async markAttendance(
-    companyId: string,
-    data: {
-      employeeId: string;
-      action: 'CHECK_IN' | 'CHECK_OUT';
-      latitude?: number;
-      longitude?: number;
-      photoUrl?: string;
-      remarks?: string;
-      skipValidation?: boolean;
-    },
-    callerHasOverride: boolean,
-  ) {
+  async markAttendance(companyId: string, data: AdminMarkInput, callerHasOverride: boolean) {
     const canSkip = callerHasOverride && data.skipValidation === true;
 
     const companySettings = await getCachedCompanySettings(companyId);
@@ -188,7 +181,7 @@ class AdminAttendanceService {
   private async handleCheckIn(
     companyId: string,
     employee: { id: string; shiftId: string | null; locationId: string | null; geofenceId: string | null; firstName: string; lastName: string },
-    data: { latitude?: number; longitude?: number; photoUrl?: string; remarks?: string },
+    data: MarkGeoRemarksInput,
     today: Date,
     now: Date,
     nowCT: ReturnType<typeof nowInCompanyTimezone>,
@@ -226,12 +219,12 @@ class AdminAttendanceService {
         punchIn: now,
         status: 'PRESENT',
         source: 'MANUAL',
-        remarks: data.remarks ?? undefined,
-        shiftId: employee.shiftId ?? undefined,
-        locationId: employee.locationId ?? undefined,
-        checkInLatitude: data.latitude ?? undefined,
-        checkInLongitude: data.longitude ?? undefined,
-        checkInPhotoUrl: data.photoUrl ?? undefined,
+        remarks: data.remarks ?? null,
+        shiftId: employee.shiftId,
+        locationId: employee.locationId,
+        checkInLatitude: data.latitude ?? null,
+        checkInLongitude: data.longitude ?? null,
+        checkInPhotoUrl: data.photoUrl ?? null,
         geoStatus,
       },
     });
@@ -242,7 +235,7 @@ class AdminAttendanceService {
   private async handleCheckOut(
     companyId: string,
     employee: { id: string; shiftId: string | null; locationId: string | null; geofenceId: string | null; firstName: string; lastName: string },
-    data: { latitude?: number; longitude?: number; photoUrl?: string; remarks?: string },
+    data: MarkGeoRemarksInput,
     today: Date,
     now: Date,
     nowCT: ReturnType<typeof nowInCompanyTimezone>,
@@ -344,9 +337,9 @@ class AdminAttendanceService {
         isEarlyExit: statusResult.isEarlyExit,
         earlyMinutes: statusResult.earlyMinutes,
         overtimeHours: statusResult.overtimeHours,
-        checkOutLatitude: data.latitude ?? undefined,
-        checkOutLongitude: data.longitude ?? undefined,
-        checkOutPhotoUrl: data.photoUrl ?? undefined,
+        checkOutLatitude: data.latitude ?? null,
+        checkOutLongitude: data.longitude ?? null,
+        checkOutPhotoUrl: data.photoUrl ?? null,
         geoStatus,
         remarks: data.remarks ? (record.remarks ? `${record.remarks}; ${data.remarks}` : data.remarks) : record.remarks,
         appliedGracePeriodMinutes: policyResult.policy.gracePeriodMinutes,
@@ -418,7 +411,7 @@ class AdminAttendanceService {
   /**
    * Get today's manually-marked attendance records for the activity log.
    */
-  async getTodayLog(companyId: string, options: { page: number; limit: number; search?: string }) {
+  async getTodayLog(companyId: string, options: TodayLogInput) {
     const companySettings = await getCachedCompanySettings(companyId);
     const companyTimezone = companySettings.timezone ?? 'Asia/Kolkata';
     const nowCT = nowInCompanyTimezone(companyTimezone);
@@ -436,7 +429,7 @@ class AdminAttendanceService {
         OR: [
           { firstName: { contains: options.search, mode: 'insensitive' } },
           { lastName: { contains: options.search, mode: 'insensitive' } },
-          { employeeCode: { contains: options.search, mode: 'insensitive' } },
+          { employeeId: { contains: options.search, mode: 'insensitive' } },
         ],
       };
     }
@@ -445,7 +438,7 @@ class AdminAttendanceService {
       platformPrisma.attendanceRecord.findMany({
         where,
         include: {
-          employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+          employee: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
         },
         skip: offset,
         take: options.limit,
