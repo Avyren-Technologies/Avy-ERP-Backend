@@ -78,9 +78,10 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'ca-controls', label: 'System Controls', icon: 'sliders', requiredPerm: 'company:configure', path: '/app/company/controls', module: null, group: 'Configuration', roleScope: 'company', sortOrder: 423 },
   { id: 'ca-settings', label: 'Settings', icon: 'settings', requiredPerm: 'company:read', path: '/app/company/settings', module: null, group: 'Configuration', roleScope: 'company', sortOrder: 424 },
 
-  { id: 'ca-billing', label: 'Billing Overview', icon: 'credit-card', requiredPerm: 'billing:read', path: '/app/company/billing', module: null, group: 'Billing', roleScope: 'company', sortOrder: 430 },
-  { id: 'ca-invoices', label: 'Invoices', icon: 'file-text', requiredPerm: 'billing:read', path: '/app/company/billing/invoices', module: null, group: 'Billing', roleScope: 'company', sortOrder: 431 },
-  { id: 'ca-payments', label: 'Payments', icon: 'credit-card', requiredPerm: 'billing:read', path: '/app/company/billing/payments', module: null, group: 'Billing', roleScope: 'company', sortOrder: 432 },
+  // TODO: Temporarily hidden — re-enable when billing screens are ready
+  // { id: 'ca-billing', label: 'Billing Overview', icon: 'credit-card', requiredPerm: 'billing:read', path: '/app/company/billing', module: null, group: 'Billing', roleScope: 'company', sortOrder: 430 },
+  // { id: 'ca-invoices', label: 'Invoices', icon: 'file-text', requiredPerm: 'billing:read', path: '/app/company/billing/invoices', module: null, group: 'Billing', roleScope: 'company', sortOrder: 431 },
+  // { id: 'ca-payments', label: 'Payments', icon: 'credit-card', requiredPerm: 'billing:read', path: '/app/company/billing/payments', module: null, group: 'Billing', roleScope: 'company', sortOrder: 432 },
 
   // ═══════ HR ANALYTICS ═══════
   { id: 'hr-analytics', label: 'Analytics Hub', icon: 'bar-chart-2', requiredPerm: 'analytics:read', path: '/app/company/hr/analytics', module: 'hr', group: 'HR Analytics', moduleSeparator: 'HR Analytics', roleScope: 'company', sortOrder: 450 },
