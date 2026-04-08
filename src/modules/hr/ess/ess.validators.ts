@@ -318,7 +318,7 @@ export const uploadDocumentSchema = z.object({
   documentType: z.string().min(1),
   documentNumber: z.string().optional(),
   expiryDate: z.string().optional(),
-  fileUrl: z.string().url('Must be a valid URL'),
+  fileUrl: z.string().min(1, 'File is required'),
   fileName: z.string().min(1),
 });
 
@@ -328,7 +328,7 @@ export const policyDocumentSchema = z.object({
   title: z.string().min(1),
   category: z.enum(['HR_POLICY', 'LEAVE_POLICY', 'ATTENDANCE_POLICY', 'CODE_OF_CONDUCT', 'SAFETY', 'TRAVEL', 'IT_POLICY', 'OTHER']),
   description: z.string().optional(),
-  fileUrl: z.string().url('Must be a valid URL'),
+  fileUrl: z.string().min(1, 'File is required'),
   fileName: z.string().min(1),
   version: z.string().optional(),
 });

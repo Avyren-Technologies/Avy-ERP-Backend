@@ -109,10 +109,12 @@ router.patch('/ess/wfh-request/:id/cancel', requireESSFeature('wfhRequest'), req
 // ── Employee Documents (ESS feature gated) ──────────────────────────
 router.get('/ess/my-documents', requireESSFeature('documentUpload'), requirePermissions(['hr:read', 'ess:upload-document']), controller.getMyDocuments);
 router.post('/ess/my-documents', requireESSFeature('documentUpload'), requirePermissions(['hr:create', 'ess:upload-document']), controller.uploadMyDocument);
+router.delete('/ess/my-documents/:id', requireESSFeature('documentUpload'), requirePermissions(['hr:delete', 'ess:upload-document']), controller.deleteMyDocument);
 
 // ── Policy Documents (ESS feature gated + admin create) ─────────────
 router.get('/ess/policy-documents', requireESSFeature('policyDocuments'), requirePermissions(['hr:read', 'ess:view-policies']), controller.getPolicyDocuments);
 router.post('/policy-documents', requirePermissions(['hr:create']), controller.createPolicyDocument);
+router.delete('/policy-documents/:id', requirePermissions(['hr:delete']), controller.deletePolicyDocument);
 
 // ── Holiday Calendar (ESS feature gated) ─────────────────────────────
 router.get('/ess/my-holidays', requireESSFeature('holidayCalendar'), requirePermissions(['hr:read', 'ess:view-holidays']), controller.getMyHolidays);

@@ -67,9 +67,9 @@ USER appuser
 # Expose application port
 EXPOSE 3000
 
-# Health check
+# Health check (127.0.0.1 — app listens on 0.0.0.0 only; localhost → ::1 breaks the probe)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1
 
 # Use dumb-init to handle PID 1 and signal forwarding (graceful shutdown)
 ENTRYPOINT ["dumb-init", "--"]

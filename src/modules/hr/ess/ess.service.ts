@@ -3621,6 +3621,21 @@ export class ESSService {
     });
   }
 
+  async deleteMyDocument(companyId: string, userId: string, documentId: string) {
+    const employeeId = await this.resolveEmployeeIdFromUser(userId);
+    if (!employeeId) throw ApiError.notFound('Employee not found');
+
+    const document = await platformPrisma.employeeDocument.findUnique({
+      where: { id: documentId },
+    });
+    if (!document || document.employeeId !== employeeId) {
+      throw ApiError.notFound('Document not found');
+    }
+
+    await platformPrisma.employeeDocument.delete({ where: { id: documentId } });
+    return { deleted: true };
+  }
+
   // ────────────────────────────────────────────────────────────────────
   // Policy Documents
   // ────────────────────────────────────────────────────────────────────
@@ -3654,6 +3669,18 @@ export class ESSService {
         uploadedBy: userId ?? null,
       },
     });
+  }
+
+  async deletePolicyDocument(companyId: string, documentId: string) {
+    const document = await platformPrisma.policyDocument.findUnique({
+      where: { id: documentId },
+    });
+    if (!document || document.companyId !== companyId) {
+      throw ApiError.notFound('Policy document not found');
+    }
+
+    await platformPrisma.policyDocument.delete({ where: { id: documentId } });
+    return { deleted: true };
   }
 
   private async resolveRecipientEmails(companyId: string, recipientRole: string, data: any): Promise<string[]> {

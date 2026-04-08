@@ -935,6 +935,17 @@ export class ESSController {
     res.status(201).json(createSuccessResponse(document, 'Document uploaded'));
   });
 
+  deleteMyDocument = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const result = await essService.deleteMyDocument(companyId, userId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Document deleted'));
+  });
+
   // ── Policy Documents ───────────────────────────────────────────────
 
   getPolicyDocuments = asyncHandler(async (req: Request, res: Response) => {
@@ -956,6 +967,14 @@ export class ESSController {
 
     const document = await essService.createPolicyDocument(companyId, parsed.data, req.user?.id);
     res.status(201).json(createSuccessResponse(document, 'Policy document created'));
+  });
+
+  deletePolicyDocument = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await essService.deletePolicyDocument(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Policy document deleted'));
   });
 
   // ── MSS Manager Self-Service ──────────────────────────────────────
