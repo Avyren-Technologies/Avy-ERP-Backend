@@ -6,6 +6,8 @@ import { generateNextNumber } from '../../../shared/utils/number-series';
 import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { essService } from '../ess/ess.service';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { logger } from '../../../config/logger';
+import { notificationService } from '../../../core/notifications/notification.service';
 
 interface ListOptions {
   page?: number | undefined;
@@ -755,7 +757,7 @@ export class OffboardingService {
       throw ApiError.badRequest(`Cannot approve settlement in ${settlement.status} status. Must be COMPUTED.`);
     }
 
-    return platformPrisma.fnFSettlement.update({
+    const updated = await platformPrisma.fnFSettlement.update({
       where: { id: settlementId },
       data: {
         status: 'APPROVED',
@@ -763,6 +765,33 @@ export class OffboardingService {
         approvedAt: new Date(),
       },
     });
+
+    // Non-blocking dispatch — F&F is approved, notify the exiting employee
+    try {
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: settlement.employeeId },
+        select: { firstName: true, lastName: true, user: { select: { id: true } } },
+      });
+      if (employee?.user?.id) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'FNF_INITIATED',
+          entityType: 'FnFSettlement',
+          entityId: settlementId,
+          explicitRecipients: [employee.user.id],
+          tokens: {
+            employee_name: `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim(),
+            amount: Number(settlement.totalAmount).toString(),
+          },
+          priority: 'HIGH',
+          type: 'RESIGNATION',
+        });
+      }
+    } catch (err) {
+      logger.warn('FnF initiated dispatch failed (non-blocking)', { error: err, settlementId });
+    }
+
+    return updated;
   }
 
   async payFnF(companyId: string, settlementId: string) {
@@ -779,7 +808,7 @@ export class OffboardingService {
       throw ApiError.badRequest(`Cannot mark as paid. Settlement must be in APPROVED status, currently: ${settlement.status}`);
     }
 
-    return platformPrisma.$transaction(async (tx) => {
+    const result = await platformPrisma.$transaction(async (tx) => {
       // 1. Update settlement to PAID
       const updated = await tx.fnFSettlement.update({
         where: { id: settlementId },
@@ -817,6 +846,36 @@ export class OffboardingService {
 
       return updated;
     });
+
+    // Non-blocking dispatch — F&F paid. Notify the exiting employee AND HR.
+    // systemCritical: true so the alert bypasses quiet hours + user prefs
+    // since regulatory payout confirmation must always deliver.
+    try {
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: settlement.employeeId },
+        select: { firstName: true, lastName: true, user: { select: { id: true } } },
+      });
+      if (employee?.user?.id) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'FNF_COMPLETED',
+          entityType: 'FnFSettlement',
+          entityId: settlementId,
+          explicitRecipients: [employee.user.id],
+          tokens: {
+            employee_name: `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim(),
+            amount: Number(settlement.totalAmount).toString(),
+          },
+          priority: 'CRITICAL',
+          systemCritical: true,
+          type: 'RESIGNATION',
+        });
+      }
+    } catch (err) {
+      logger.warn('FnF completed dispatch failed (non-blocking)', { error: err, settlementId });
+    }
+
+    return result;
   }
 
   async getFnFByExitRequest(companyId: string, exitRequestId: string) {
