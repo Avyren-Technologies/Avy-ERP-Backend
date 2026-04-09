@@ -31,3 +31,19 @@ export const updatePreferencesSchema = z.object({
 );
 
 export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;
+
+export const updateCategoryPreferencesSchema = z.object({
+  categoryPreferences: z
+    .array(
+      z.object({
+        category: z.string().min(1),
+        channel: z.enum(['IN_APP', 'PUSH', 'EMAIL', 'SMS', 'WHATSAPP']),
+        enabled: z.boolean(),
+      }),
+    )
+    .min(1),
+});
+
+export type UpdateCategoryPreferencesInput = z.infer<
+  typeof updateCategoryPreferencesSchema
+>;
