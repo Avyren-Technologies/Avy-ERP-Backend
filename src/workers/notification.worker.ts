@@ -47,13 +47,22 @@ function makeWorker(queueName: QueueName) {
   const worker = new Worker(
     queueName,
     async (job: Job) => {
-      const { notificationId, userId, channels, traceId, priority, systemCritical } = job.data as {
+      const {
+        notificationId,
+        userId,
+        channels,
+        traceId,
+        priority,
+        systemCritical,
+        category,
+      } = job.data as {
         notificationId: string;
         userId: string;
         channels: NotificationChannel[];
         traceId: string;
         priority: NotificationPriority;
         systemCritical: boolean;
+        category?: string | null;
       };
 
       logger.info('Notification delivery start', {
@@ -90,7 +99,13 @@ function makeWorker(queueName: QueueName) {
           // 2. Re-check consent from cache (may have changed since dispatch,
           //    but changing within the same job's consent cache is a negligible
           //    risk — prefs are infrequent and we reload on every new job).
-          const consent = evaluateConsent(consentCache, channel, priority, systemCritical);
+          const consent = evaluateConsent(
+            consentCache,
+            channel,
+            priority,
+            category ?? null,
+            systemCritical,
+          );
           if (!consent.allowed) {
             await updateDeliveryStatus(notificationId, channel, 'SKIPPED');
             await recordEvent({

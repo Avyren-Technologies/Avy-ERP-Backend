@@ -1,4 +1,6 @@
 import { platformPrisma } from '../../../config/database';
+import { invalidateUserConsent } from '../dispatch/consent-gate';
+import { NOTIFICATION_CATEGORIES } from '../../../shared/constants/notification-categories';
 import type { UpdatePreferencesInput } from './preferences.validators';
 
 export const preferencesService = {
@@ -21,6 +23,11 @@ export const preferencesService = {
       ? await platformPrisma.companySettings.findFirst({ where: { companyId: user.companyId } })
       : null;
 
+    const categoryPreferences = await platformPrisma.userNotificationCategoryPreference.findMany({
+      where: { userId },
+      select: { category: true, channel: true, enabled: true },
+    });
+
     return {
       preference: pref,
       companyMasters: {
@@ -30,6 +37,8 @@ export const preferencesService = {
         sms: companySettings?.smsNotifications ?? false,
         whatsapp: companySettings?.whatsappNotifications ?? false,
       },
+      categoryPreferences,
+      categoryCatalogue: NOTIFICATION_CATEGORIES,
     };
   },
 
@@ -38,10 +47,13 @@ export const preferencesService = {
     for (const [k, v] of Object.entries(data)) {
       if (v !== undefined) cleanData[k] = v;
     }
-    return platformPrisma.userNotificationPreference.upsert({
+    const result = await platformPrisma.userNotificationPreference.upsert({
       where: { userId },
       create: { userId, ...cleanData },
       update: cleanData,
     });
+    // O(1) consent cache invalidation — bumps user version.
+    await invalidateUserConsent(userId);
+    return result;
   },
 };
