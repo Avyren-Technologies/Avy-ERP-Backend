@@ -4,6 +4,7 @@ import { ApiError } from '../../shared/errors';
 import { logger } from '../../config/logger';
 import { emitTicketMessage, emitTicketStatusChange, emitNewTicket, emitTicketResolved } from '../../lib/socket';
 import { generateNextNumber } from '../../shared/utils/number-series';
+import { notificationService } from '../notifications/notification.service';
 
 // ── Status Transition Map ──────────────────────────────────────────
 
@@ -118,6 +119,27 @@ export class SupportService {
 
     // Emit real-time event
     emitNewTicket(result);
+
+    // Bridge into notification pipeline — rule engine resolves ADMIN role
+    // recipients (super-admin support team) from NotificationRule rows.
+    try {
+      await notificationService.dispatch({
+        companyId,
+        triggerEvent: 'TICKET_CREATED',
+        entityType: 'SupportTicket',
+        entityId: ticket.id,
+        tokens: {
+          ticket_subject: subject,
+          ticket_number: ticketNumber,
+          category,
+          company_name: companyName,
+        },
+        type: 'SUPPORT',
+        actionUrl: `/admin/support/tickets/${ticket.id}`,
+      });
+    } catch (err) {
+      logger.warn('Ticket created dispatch failed (non-blocking)', { error: err, ticketId: ticket.id });
+    }
 
     return result;
   }
@@ -254,6 +276,31 @@ export class SupportService {
     // Emit real-time event
     emitTicketMessage(ticketId, message);
 
+    // Bridge into notification pipeline. If sender is SUPER_ADMIN, notify
+    // the ticket creator (company admin); if sender is COMPANY_ADMIN,
+    // leave explicitRecipients undefined so the rule engine resolves the
+    // ADMIN role (super-admin team).
+    try {
+      const explicitRecipients =
+        senderRole === 'SUPER_ADMIN' ? [ticket.createdByUserId] : undefined;
+      await notificationService.dispatch({
+        companyId: ticket.companyId,
+        triggerEvent: 'TICKET_MESSAGE',
+        entityType: 'SupportTicket',
+        entityId: ticketId,
+        ...(explicitRecipients && { explicitRecipients }),
+        tokens: {
+          ticket_subject: ticket.subject,
+          sender_name: senderName,
+          message_preview: body.slice(0, 100),
+        },
+        type: 'SUPPORT',
+        actionUrl: `/company/support/tickets/${ticketId}`,
+      });
+    } catch (err) {
+      logger.warn('Ticket message dispatch failed (non-blocking)', { error: err, ticketId });
+    }
+
     return message;
   }
 
@@ -292,6 +339,26 @@ export class SupportService {
 
     // Emit real-time event
     emitTicketStatusChange(ticketId, ticket.companyId, newStatus as string, updated);
+
+    // Notify the ticket creator (company admin) of the status change.
+    try {
+      await notificationService.dispatch({
+        companyId: ticket.companyId,
+        triggerEvent: 'TICKET_STATUS_CHANGED',
+        entityType: 'SupportTicket',
+        entityId: ticketId,
+        explicitRecipients: [ticket.createdByUserId],
+        tokens: {
+          ticket_subject: ticket.subject,
+          old_status: ticket.status,
+          new_status: newStatus,
+        },
+        type: 'SUPPORT',
+        actionUrl: `/company/support/tickets/${ticketId}`,
+      });
+    } catch (err) {
+      logger.warn('Ticket status changed dispatch failed (non-blocking)', { error: err, ticketId });
+    }
 
     return updated;
   }
@@ -395,6 +462,29 @@ export class SupportService {
 
     // Emit real-time event
     emitTicketResolved(ticketId, ticket.companyId, result);
+
+    // Notify the company admin who requested the module change.
+    try {
+      await notificationService.dispatch({
+        companyId: ticket.companyId,
+        triggerEvent: 'MODULE_CHANGE_APPROVED',
+        entityType: 'SupportTicket',
+        entityId: ticketId,
+        explicitRecipients: [ticket.createdByUserId],
+        tokens: {
+          ticket_subject: ticket.subject,
+          module_name: metadata.moduleName,
+          location_name: metadata.locationName,
+          action: metadata.type === 'ADD' ? 'added' : 'removed',
+          approver_name: approverName,
+        },
+        priority: 'HIGH',
+        type: 'SUPPORT',
+        actionUrl: `/company/support/tickets/${ticketId}`,
+      });
+    } catch (err) {
+      logger.warn('Module change approved dispatch failed (non-blocking)', { error: err, ticketId });
+    }
 
     return result;
   }
