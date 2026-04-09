@@ -3,7 +3,11 @@ import { cacheRedis } from '../../../config/redis';
 import { logger } from '../../../config/logger';
 import type { NotificationRule, NotificationTemplate } from '@prisma/client';
 
-export type LoadedRule = NotificationRule & { template: NotificationTemplate };
+export type LoadedRule = NotificationRule & {
+  template: NotificationTemplate;
+  /** True for synthetic ad-hoc rules (not persisted, no DB FK). */
+  isAdHoc?: boolean;
+};
 
 const CACHE_TTL_SEC = 60;
 
