@@ -15,6 +15,8 @@ import {
 import { eventBus } from '../../../shared/events/event-bus';
 import { HR_EVENTS } from '../../../shared/events/hr-events';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { logger } from '../../../config/logger';
+import { notificationService } from '../../../core/notifications/notification.service';
 
 interface ListOptions {
   page?: number;
@@ -1546,6 +1548,35 @@ export class AdvancedHRService {
       });
     }
 
+    // Direct notification to the employee so they know an asset was
+    // assigned to them (separate from the approval workflow above).
+    try {
+      const empWithUser = await platformPrisma.employee.findUnique({
+        where: { id: data.employeeId },
+        select: { firstName: true, lastName: true, user: { select: { id: true } } },
+      });
+      if (empWithUser?.user?.id) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'ASSET_ASSIGNED',
+          entityType: 'AssetAssignment',
+          entityId: assignment.id,
+          explicitRecipients: [empWithUser.user.id],
+          tokens: {
+            employee_name: `${empWithUser.firstName ?? ''} ${empWithUser.lastName ?? ''}`.trim(),
+            asset_name: asset.name,
+            serial_number: asset.serialNumber ?? '',
+            issue_date: new Date(data.issueDate).toISOString().slice(0, 10),
+          },
+          priority: 'MEDIUM',
+          type: 'ASSETS',
+          actionUrl: `/company/hr/my-assets`,
+        });
+      }
+    } catch (err) {
+      logger.warn('Asset assigned dispatch failed (non-blocking)', { error: err, assignmentId: assignment.id });
+    }
+
     return assignment;
   }
 
@@ -1584,6 +1615,33 @@ export class AdvancedHRService {
         },
       }),
     ]);
+
+    // Notify the employee that their asset return was recorded.
+    try {
+      const empWithUser = await platformPrisma.employee.findUnique({
+        where: { id: assignment.employeeId },
+        select: { firstName: true, lastName: true, user: { select: { id: true } } },
+      });
+      if (empWithUser?.user?.id) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'ASSET_RETURNED',
+          entityType: 'AssetAssignment',
+          entityId: id,
+          explicitRecipients: [empWithUser.user.id],
+          tokens: {
+            employee_name: `${empWithUser.firstName ?? ''} ${empWithUser.lastName ?? ''}`.trim(),
+            asset_name: updatedAssignment.asset?.name ?? '',
+            return_condition: data.returnCondition,
+            return_date: new Date(data.returnDate).toISOString().slice(0, 10),
+          },
+          priority: 'MEDIUM',
+          type: 'ASSETS',
+        });
+      }
+    } catch (err) {
+      logger.warn('Asset returned dispatch failed (non-blocking)', { error: err, assignmentId: id });
+    }
 
     return updatedAssignment;
   }

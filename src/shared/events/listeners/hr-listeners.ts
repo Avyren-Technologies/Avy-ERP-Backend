@@ -12,17 +12,77 @@ type EventPayload<T extends HREvent['type']> = Extract<HREvent, { type: T }>;
  * and recipients from NotificationRule rows seeded per tenant.
  */
 export function registerHRListeners() {
-  // Offer sent/accepted/rejected — notify hiring manager when resolver can find them
+  // Candidate stage change → notify HR team via rule engine.
+  eventBus.onEvent<EventPayload<'candidate.stage_changed'>>(
+    HR_EVENTS.CANDIDATE_STAGE_CHANGED,
+    async (payload) => {
+      try {
+        await notificationService.dispatch({
+          companyId: payload.companyId,
+          triggerEvent: 'CANDIDATE_STAGE_CHANGED',
+          entityType: 'Candidate',
+          entityId: payload.candidateId,
+          tokens: {
+            from_stage: payload.fromStage,
+            to_stage: payload.toStage,
+          },
+          type: 'RECRUITMENT',
+          actionUrl: `/company/hr/recruitment/candidates/${payload.candidateId}`,
+        });
+      } catch (err) {
+        logger.warn('Candidate stage changed dispatch failed', { error: err, payload });
+      }
+    },
+  );
+
+  // Offer sent → notify HR team via rule engine.
   eventBus.onEvent<EventPayload<'offer.sent'>>(HR_EVENTS.OFFER_SENT, async (payload) => {
-    logger.info(`Offer ${payload.offerId} sent for candidate ${payload.candidateId}`);
+    try {
+      await notificationService.dispatch({
+        companyId: payload.companyId,
+        triggerEvent: 'OFFER_SENT',
+        entityType: 'CandidateOffer',
+        entityId: payload.offerId,
+        tokens: { candidate_id: payload.candidateId },
+        type: 'RECRUITMENT',
+        actionUrl: `/company/hr/recruitment/offers/${payload.offerId}`,
+      });
+    } catch (err) {
+      logger.warn('Offer sent dispatch failed', { error: err, payload });
+    }
   });
 
   eventBus.onEvent<EventPayload<'offer.accepted'>>(HR_EVENTS.OFFER_ACCEPTED, async (payload) => {
-    logger.info(`Offer ${payload.offerId} accepted by candidate ${payload.candidateId}`);
+    try {
+      await notificationService.dispatch({
+        companyId: payload.companyId,
+        triggerEvent: 'OFFER_ACCEPTED',
+        entityType: 'CandidateOffer',
+        entityId: payload.offerId,
+        tokens: { candidate_id: payload.candidateId },
+        priority: 'HIGH',
+        type: 'RECRUITMENT',
+        actionUrl: `/company/hr/recruitment/offers/${payload.offerId}`,
+      });
+    } catch (err) {
+      logger.warn('Offer accepted dispatch failed', { error: err, payload });
+    }
   });
 
   eventBus.onEvent<EventPayload<'offer.rejected'>>(HR_EVENTS.OFFER_REJECTED, async (payload) => {
-    logger.info(`Offer ${payload.offerId} rejected by candidate ${payload.candidateId}`);
+    try {
+      await notificationService.dispatch({
+        companyId: payload.companyId,
+        triggerEvent: 'OFFER_REJECTED',
+        entityType: 'CandidateOffer',
+        entityId: payload.offerId,
+        tokens: { candidate_id: payload.candidateId },
+        type: 'RECRUITMENT',
+        actionUrl: `/company/hr/recruitment/offers/${payload.offerId}`,
+      });
+    } catch (err) {
+      logger.warn('Offer rejected dispatch failed', { error: err, payload });
+    }
   });
 
   // Interview scheduled → notify panelists via rule engine (falls back to ad-hoc if no rules).
