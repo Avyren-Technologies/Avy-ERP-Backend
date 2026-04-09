@@ -15,6 +15,8 @@ import { validateLocationConstraints } from '../../../shared/services/location-v
 import { DateTime } from 'luxon';
 import { parseInCompanyTimezone } from '../../../shared/utils/timezone';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { notificationService } from '../../../core/notifications/notification.service';
+import { getRequesterUserId } from '../../../core/notifications/dispatch/approver-resolver';
 
 interface ListOptions {
   page?: number;
@@ -1878,6 +1880,33 @@ export class AttendanceService {
       logger.error(`Failed to grant comp-off for OT request ${id}:`, err);
     }
 
+    // Non-blocking dispatch — direct approve bypasses ApprovalRequest/
+    // onApprovalComplete so we notify the requester inline.
+    try {
+      const requesterUserId = await getRequesterUserId({ employeeId: request.employeeId });
+      if (requesterUserId) {
+        const employeeName = `${updated.employee?.firstName ?? ''} ${updated.employee?.lastName ?? ''}`.trim();
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'OVERTIME_CLAIM_APPROVED',
+          entityType: 'OvertimeRequest',
+          entityId: id,
+          explicitRecipients: [requesterUserId],
+          tokens: {
+            employee_name: employeeName,
+            date: new Date(request.date).toISOString().slice(0, 10),
+            hours: Number(request.requestedHours),
+            amount: calculatedAmount ?? 0,
+          },
+          priority: 'MEDIUM',
+          type: 'OVERTIME',
+          actionUrl: `/company/hr/my-overtime`,
+        });
+      }
+    } catch (err) {
+      logger.warn('Overtime approval dispatch failed (non-blocking)', { error: err, overtimeRequestId: id });
+    }
+
     return updated;
   }
 
@@ -1914,6 +1943,33 @@ export class AttendanceService {
     });
 
     logger.info(`Overtime request ${id} rejected by ${userId}, reason: ${notes}`);
+
+    // Non-blocking dispatch to the requester.
+    try {
+      const requesterUserId = await getRequesterUserId({ employeeId: request.employeeId });
+      if (requesterUserId) {
+        const employeeName = `${updated.employee?.firstName ?? ''} ${updated.employee?.lastName ?? ''}`.trim();
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'OVERTIME_CLAIM_REJECTED',
+          entityType: 'OvertimeRequest',
+          entityId: id,
+          explicitRecipients: [requesterUserId],
+          tokens: {
+            employee_name: employeeName,
+            date: new Date(request.date).toISOString().slice(0, 10),
+            hours: Number(request.requestedHours),
+            reason: notes,
+          },
+          priority: 'MEDIUM',
+          type: 'OVERTIME',
+          actionUrl: `/company/hr/my-overtime`,
+        });
+      }
+    } catch (err) {
+      logger.warn('Overtime rejection dispatch failed (non-blocking)', { error: err, overtimeRequestId: id });
+    }
+
     return updated;
   }
 
