@@ -43,27 +43,182 @@ const LIMITERS = {
 
 type QueueName = keyof typeof WORKER_CONCURRENCY;
 
+/**
+ * Shared per-notification processing. Used by both the single-notification
+ * and bulk job paths. Throws on provider failure so BullMQ retry kicks in.
+ */
+async function processOne(args: {
+  notificationId: string;
+  userId: string;
+  channels: NotificationChannel[];
+  traceId: string;
+  priority: NotificationPriority;
+  systemCritical: boolean;
+  category?: string | null;
+  source: NotificationSource;
+}): Promise<void> {
+  const { notificationId, userId, channels, traceId, priority, systemCritical, category, source } = args;
+
+  // Load consent cache ONCE per notification (versioned Redis cache).
+  const consentCache = await loadConsentCache(userId);
+
+  // Track which channels this run successfully claimed — released on throw.
+  const claimedThisRun: NotificationChannel[] = [];
+
+  try {
+    for (const channel of channels) {
+      // 1. Atomic claim — SET NX EX.
+      const won = await claimSendSlot(notificationId, channel);
+      if (!won) {
+        logger.info('Skip — already claimed (idempotency)', { notificationId, channel, traceId });
+        continue;
+      }
+      claimedThisRun.push(channel);
+
+      // 2. Re-check consent from cache (category-aware).
+      const consent = evaluateConsent(
+        consentCache,
+        channel,
+        priority,
+        category ?? null,
+        systemCritical,
+      );
+      if (!consent.allowed) {
+        await updateDeliveryStatus(notificationId, channel, 'SKIPPED');
+        await recordEvent({
+          notificationId,
+          channel,
+          event: 'SKIPPED',
+          errorCode: consent.reason,
+          traceId,
+          source,
+        });
+        continue;
+      }
+
+      // 3. Dispatch to provider
+      try {
+        const result = await channelRouter.send({
+          notificationId,
+          userId,
+          channel,
+          traceId,
+          priority,
+        });
+        await updateDeliveryStatus(notificationId, channel, 'SENT');
+        await recordEvent({
+          notificationId,
+          channel,
+          event: 'SENT',
+          provider: result.provider,
+          providerMessageId: result.messageId ?? undefined,
+          expoTicketId: result.expoTicketId ?? undefined,
+          traceId,
+          source,
+        });
+      } catch (err) {
+        const errCode = (err as { code?: string })?.code ?? 'UNKNOWN';
+        const errMsg = truncate((err as Error)?.message ?? String(err), 500);
+        await updateDeliveryStatus(notificationId, channel, 'FAILED');
+        await recordEvent({
+          notificationId,
+          channel,
+          event: 'FAILED',
+          errorCode: errCode,
+          errorMessage: errMsg,
+          traceId,
+          source,
+        });
+        // Release the claim so BullMQ retry can re-attempt this channel.
+        await releaseSendSlot(notificationId, channel);
+        const idx = claimedThisRun.indexOf(channel);
+        if (idx >= 0) claimedThisRun.splice(idx, 1);
+        throw err;
+      }
+    }
+  } catch (err) {
+    // Safety net: release any remaining claimed slots.
+    for (const ch of claimedThisRun) {
+      await releaseSendSlot(notificationId, ch);
+    }
+    throw err;
+  }
+}
+
 function makeWorker(queueName: QueueName) {
   const worker = new Worker(
     queueName,
     async (job: Job) => {
-      const {
-        notificationId,
-        userId,
-        channels,
-        traceId,
-        priority,
-        systemCritical,
-        category,
-      } = job.data as {
-        notificationId: string;
-        userId: string;
-        channels: NotificationChannel[];
-        traceId: string;
-        priority: NotificationPriority;
-        systemCritical: boolean;
-        category?: string | null;
-      };
+      const source: NotificationSource = job.attemptsMade > 0 ? 'RETRY' : 'SYSTEM';
+
+      // Bulk job shape — process many notifications in parallel.
+      if (job.data.isBulk === true) {
+        const { notificationIds, userIds, channels, traceId, priority, systemCritical, category } =
+          job.data as {
+            isBulk: true;
+            notificationIds: string[];
+            userIds: string[];
+            channels: NotificationChannel[];
+            traceId: string;
+            priority: NotificationPriority;
+            systemCritical: boolean;
+            category?: string | null;
+          };
+
+        logger.info('Notification bulk delivery start', {
+          jobId: job.id,
+          count: notificationIds.length,
+          channels,
+          traceId,
+          queue: queueName,
+        });
+
+        // Process each (notificationId, userId) pair in parallel.
+        // allSettled so one failure doesn't stop the rest of the chunk.
+        const results = await Promise.allSettled(
+          notificationIds.map((nid, idx) =>
+            processOne({
+              notificationId: nid,
+              userId: userIds[idx]!,
+              channels,
+              traceId,
+              priority,
+              systemCritical,
+              ...(category !== undefined && { category }),
+              source,
+            }),
+          ),
+        );
+
+        const failures = results.filter((r) => r.status === 'rejected');
+        if (failures.length > 0) {
+          logger.warn('Bulk delivery partial failure', {
+            jobId: job.id,
+            total: notificationIds.length,
+            failed: failures.length,
+          });
+          // Re-throw if ALL failed — triggers BullMQ retry for the whole chunk.
+          // Partial failures stay within the chunk and are recorded as FAILED
+          // events; the individual notifications stay claimed so retry
+          // wouldn't re-send them anyway.
+          if (failures.length === notificationIds.length) {
+            throw (failures[0] as PromiseRejectedResult).reason;
+          }
+        }
+        return;
+      }
+
+      // Single-notification job (existing shape)
+      const { notificationId, userId, channels, traceId, priority, systemCritical, category } =
+        job.data as {
+          notificationId: string;
+          userId: string;
+          channels: NotificationChannel[];
+          traceId: string;
+          priority: NotificationPriority;
+          systemCritical: boolean;
+          category?: string | null;
+        };
 
       logger.info('Notification delivery start', {
         jobId: job.id,
@@ -73,102 +228,16 @@ function makeWorker(queueName: QueueName) {
         queue: queueName,
       });
 
-      const source: NotificationSource = job.attemptsMade > 0 ? 'RETRY' : 'SYSTEM';
-
-      // Load consent cache ONCE per job (user, companySettings, preference).
-      // The per-channel consent check below is now a pure function, avoiding
-      // N+1 DB lookups when a job has multiple channels.
-      const consentCache = await loadConsentCache(userId);
-
-      // Track which channels this worker run successfully claimed, so we can
-      // release them on throw (to allow retries). Channels already claimed by
-      // a previous attempt are NOT released.
-      const claimedThisRun: NotificationChannel[] = [];
-
-      try {
-        for (const channel of channels) {
-          // 1. Atomic claim — SET NX EX. Wins mean we proceed; loses mean another
-          //    worker (or a previous attempt that partially succeeded) handled it.
-          const won = await claimSendSlot(notificationId, channel);
-          if (!won) {
-            logger.info('Skip — already claimed (idempotency)', { notificationId, channel, traceId });
-            continue;
-          }
-          claimedThisRun.push(channel);
-
-          // 2. Re-check consent from cache (may have changed since dispatch,
-          //    but changing within the same job's consent cache is a negligible
-          //    risk — prefs are infrequent and we reload on every new job).
-          const consent = evaluateConsent(
-            consentCache,
-            channel,
-            priority,
-            category ?? null,
-            systemCritical,
-          );
-          if (!consent.allowed) {
-            await updateDeliveryStatus(notificationId, channel, 'SKIPPED');
-            await recordEvent({
-              notificationId,
-              channel,
-              event: 'SKIPPED',
-              errorCode: consent.reason,
-              traceId,
-              source,
-            });
-            // Leave claim in place — SKIPPED is final, don't retry.
-            continue;
-          }
-
-          // 3. Dispatch to provider
-          try {
-            const result = await channelRouter.send({
-              notificationId,
-              userId,
-              channel,
-              traceId,
-              priority,
-            });
-            await updateDeliveryStatus(notificationId, channel, 'SENT');
-            await recordEvent({
-              notificationId,
-              channel,
-              event: 'SENT',
-              provider: result.provider,
-              providerMessageId: result.messageId ?? undefined,
-              expoTicketId: result.expoTicketId ?? undefined,
-              traceId,
-              source,
-            });
-            // Keep the claim — SENT is final for the TTL window.
-          } catch (err) {
-            const errCode = (err as { code?: string })?.code ?? 'UNKNOWN';
-            const errMsg = truncate((err as Error)?.message ?? String(err), 500);
-            await updateDeliveryStatus(notificationId, channel, 'FAILED');
-            await recordEvent({
-              notificationId,
-              channel,
-              event: 'FAILED',
-              errorCode: errCode,
-              errorMessage: errMsg,
-              traceId,
-              source,
-            });
-            // Release the claim so BullMQ retry can re-attempt this channel.
-            await releaseSendSlot(notificationId, channel);
-            // Remove from claimedThisRun so the outer catch doesn't double-release.
-            const idx = claimedThisRun.indexOf(channel);
-            if (idx >= 0) claimedThisRun.splice(idx, 1);
-            throw err; // trigger BullMQ retry
-          }
-        }
-      } catch (err) {
-        // Safety net: release any slots we claimed but didn't explicitly release.
-        for (const ch of claimedThisRun) {
-          await releaseSendSlot(notificationId, ch);
-        }
-        throw err;
-      }
+      await processOne({
+        notificationId,
+        userId,
+        channels,
+        traceId,
+        priority,
+        systemCritical,
+        ...(category !== undefined && { category }),
+        source,
+      });
     },
     {
       connection: bullmqConnection,
