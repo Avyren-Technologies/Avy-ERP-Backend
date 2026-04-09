@@ -35,6 +35,7 @@ function buildAdHocRules(input: DispatchInput): LoadedRule[] {
       sensitiveFields: [] as Prisma.JsonValue,
       compiledBody: body,
       compiledSubject: title,
+      whatsappTemplateName: null,
       isSystem: false,
       isActive: true,
       companyId: input.companyId,

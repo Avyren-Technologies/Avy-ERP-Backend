@@ -248,9 +248,10 @@ model Company {
   supportTickets SupportTicket[]
 
   // Notification, Audit & Analytics Relations
-  notifications         Notification[]
-  auditLogs             AuditLog[]
-  analyticsSnapshots    AnalyticsSnapshot[]
+  notifications               Notification[]
+  notificationEventAggregates NotificationEventAggregateDaily[]
+  auditLogs                   AuditLog[]
+  analyticsSnapshots          AnalyticsSnapshot[]
 
   // Analytics
   employeeAnalytics     EmployeeAnalyticsDaily[]

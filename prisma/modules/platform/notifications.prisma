@@ -142,6 +142,49 @@ model UserNotificationPreference {
   @@map("user_notification_preferences")
 }
 
+// Per-category × channel matrix for fine-grained user preferences.
+// Missing row = use channel default. Row with enabled=false overrides.
+// Locked categories (AUTH) cannot have override rows — enforced in API layer.
+model UserNotificationCategoryPreference {
+  id        String              @id @default(cuid())
+  userId    String
+  category  String              // LEAVE, PAYROLL, etc. (see src/shared/constants/notification-categories.ts)
+  channel   NotificationChannel
+  enabled   Boolean             @default(true)
+
+  user      User                @relation("UserNotificationCategoryPrefUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@unique([userId, category, channel])
+  @@index([userId])
+  @@map("user_notification_category_preferences")
+}
+
+// Pre-aggregated daily rollup of NotificationEvent rows for the analytics
+// dashboard. Populated by the `runEventAggregation` cron at 01:30 daily.
+// Retention cron deletes raw NotificationEvent rows after 90 days —
+// this table keeps the aggregated analytics available indefinitely.
+model NotificationEventAggregateDaily {
+  id        String                @id @default(cuid())
+  companyId String
+  date      DateTime              @db.Date
+  channel   NotificationChannel
+  event     NotificationEventType
+  provider  String?
+  count     Int                   @default(0)
+
+  company   Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime              @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@unique([companyId, date, channel, event, provider])
+  @@index([companyId, date])
+  @@map("notification_event_aggregate_daily")
+}
+
 enum NotificationStatus {
   UNREAD
   READ
