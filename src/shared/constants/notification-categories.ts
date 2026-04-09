@@ -70,6 +70,139 @@ export function isCategoryLocked(code: string): boolean {
   return getCategoryDef(code)?.locked === true;
 }
 
+/**
+ * Map from trigger-event UPPER_SNAKE_CASE to the category code used in
+ * `NOTIFICATION_CATEGORIES`. Lets dispatch call sites pass the trigger
+ * event they already have and get back the correct category for
+ * per-category preference filtering.
+ *
+ * Keep in sync whenever a new trigger event is added. Unknown events
+ * fall through to `null` and the dispatcher's `type` becomes the raw
+ * trigger event (same behavior as before this table existed).
+ */
+export const TRIGGER_TO_CATEGORY: Record<string, string> = {
+  // Leave
+  LEAVE_APPLICATION: 'LEAVE',
+  LEAVE_APPROVED: 'LEAVE',
+  LEAVE_REJECTED: 'LEAVE',
+  LEAVE_CANCELLED: 'LEAVE',
+
+  // Attendance
+  ATTENDANCE_REGULARIZATION: 'ATTENDANCE',
+  ATTENDANCE_REGULARIZED: 'ATTENDANCE',
+  ATTENDANCE_REGULARIZATION_REJECTED: 'ATTENDANCE',
+
+  // Overtime
+  OVERTIME_CLAIM: 'OVERTIME',
+  OVERTIME_CLAIM_APPROVED: 'OVERTIME',
+  OVERTIME_CLAIM_REJECTED: 'OVERTIME',
+
+  // Shift
+  SHIFT_CHANGE: 'SHIFT',
+  SHIFT_SWAP: 'SHIFT',
+  SHIFT_SWAP_APPROVED: 'SHIFT',
+  SHIFT_SWAP_REJECTED: 'SHIFT',
+
+  // Work from home
+  WFH_REQUEST: 'WFH',
+  WFH_APPROVED: 'WFH',
+  WFH_REJECTED: 'WFH',
+
+  // Reimbursement
+  REIMBURSEMENT: 'REIMBURSEMENT',
+  REIMBURSEMENT_APPROVED: 'REIMBURSEMENT',
+  REIMBURSEMENT_REJECTED: 'REIMBURSEMENT',
+
+  // Loan
+  LOAN_APPLICATION: 'LOAN',
+  LOAN_APPROVED: 'LOAN',
+  LOAN_REJECTED: 'LOAN',
+
+  // Payroll
+  PAYROLL_APPROVAL: 'PAYROLL',
+  PAYROLL_APPROVED: 'PAYROLL',
+  PAYROLL_REJECTED: 'PAYROLL',
+  PAYSLIP_PUBLISHED: 'PAYROLL',
+  SALARY_CREDITED: 'PAYROLL',
+  SALARY_REVISION: 'PAYROLL',
+  SALARY_REVISION_APPROVED: 'PAYROLL',
+  SALARY_REVISION_REJECTED: 'PAYROLL',
+  BONUS_UPLOAD: 'PAYROLL',
+
+  // Resignation / offboarding
+  RESIGNATION: 'RESIGNATION',
+  RESIGNATION_ACCEPTED: 'RESIGNATION',
+  RESIGNATION_REJECTED: 'RESIGNATION',
+  FNF_INITIATED: 'RESIGNATION',
+  FNF_COMPLETED: 'RESIGNATION',
+
+  // Employee lifecycle
+  EMPLOYEE_ONBOARDED: 'EMPLOYEE_LIFECYCLE',
+  EMPLOYEE_TRANSFER: 'EMPLOYEE_LIFECYCLE',
+  EMPLOYEE_TRANSFER_APPLIED: 'EMPLOYEE_LIFECYCLE',
+  EMPLOYEE_TRANSFER_REJECTED: 'EMPLOYEE_LIFECYCLE',
+  EMPLOYEE_PROMOTION: 'EMPLOYEE_LIFECYCLE',
+  EMPLOYEE_PROMOTION_APPLIED: 'EMPLOYEE_LIFECYCLE',
+  EMPLOYEE_PROMOTION_REJECTED: 'EMPLOYEE_LIFECYCLE',
+  PROBATION_END_REMINDER: 'EMPLOYEE_LIFECYCLE',
+
+  // Recruitment
+  CANDIDATE_STAGE_CHANGED: 'RECRUITMENT',
+  OFFER_SENT: 'RECRUITMENT',
+  OFFER_ACCEPTED: 'RECRUITMENT',
+  OFFER_REJECTED: 'RECRUITMENT',
+  INTERVIEW_SCHEDULED: 'RECRUITMENT',
+  INTERVIEW_COMPLETED: 'RECRUITMENT',
+  JOB_REQUISITION: 'RECRUITMENT',
+
+  // Training
+  TRAINING_REQUEST: 'TRAINING',
+  TRAINING_NOMINATION: 'TRAINING',
+  TRAINING_COMPLETED: 'TRAINING',
+  TRAINING_SESSION_UPCOMING: 'TRAINING',
+  CERTIFICATE_EXPIRING: 'TRAINING',
+
+  // Assets
+  ASSET_ISSUANCE: 'ASSETS',
+  ASSET_ASSIGNED: 'ASSETS',
+  ASSET_RETURNED: 'ASSETS',
+  ASSET_RETURN_DUE: 'ASSETS',
+
+  // Other ESS
+  PROFILE_UPDATE: 'EMPLOYEE_LIFECYCLE',
+  IT_DECLARATION: 'PAYROLL',
+  TRAVEL_REQUEST: 'REIMBURSEMENT',
+  HELPDESK_SUBMITTED: 'SUPPORT',
+  GRIEVANCE_SUBMITTED: 'SUPPORT',
+
+  // Support
+  TICKET_CREATED: 'SUPPORT',
+  TICKET_MESSAGE: 'SUPPORT',
+  TICKET_STATUS_CHANGED: 'SUPPORT',
+  MODULE_CHANGE_APPROVED: 'SUPPORT',
+
+  // Auth — locked category
+  PASSWORD_RESET: 'AUTH',
+  NEW_DEVICE_LOGIN: 'AUTH',
+  ACCOUNT_LOCKED: 'AUTH',
+
+  // Celebrations
+  BIRTHDAY: 'BIRTHDAY_ANNIVERSARY',
+  WORK_ANNIVERSARY: 'BIRTHDAY_ANNIVERSARY',
+
+  // Announcements
+  HOLIDAY_REMINDER: 'ANNOUNCEMENTS',
+};
+
+/**
+ * Resolve a trigger event to its notification category code. Returns the
+ * raw trigger event if no mapping exists so the dispatcher always sets
+ * a non-null `type` on the Notification row.
+ */
+export function categoryForTrigger(triggerEvent: string): string {
+  return TRIGGER_TO_CATEGORY[triggerEvent] ?? triggerEvent;
+}
+
 // TODO(I5 — phase 2): expose `NOTIFICATION_CATEGORIES` via a public API
 // (e.g. `GET /notifications/categories`) so the web/mobile preference UIs can
 // render the matrix dynamically instead of hard-coding the list. Include
