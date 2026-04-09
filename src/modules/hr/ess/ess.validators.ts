@@ -124,15 +124,27 @@ export const processApprovalSchema = z.object({
 
 // ── Notification Templates ──────────────────────────────────────────
 
-export const createNotificationTemplateSchema = z.object({
-  name: z.string().min(1, 'Template name is required'),
-  subject: z.string().optional(),
-  body: z.string().min(1, 'Template body is required'),
-  channel: z.enum(['EMAIL', 'SMS', 'PUSH', 'IN_APP', 'WHATSAPP']),
-  isActive: z.boolean().optional().default(true),
-});
+export const createNotificationTemplateSchema = z
+  .object({
+    name: z.string().min(1, 'Template name is required'),
+    subject: z.string().optional(),
+    body: z.string().min(1, 'Template body is required'),
+    channel: z.enum(['EMAIL', 'SMS', 'PUSH', 'IN_APP', 'WHATSAPP']),
+    isActive: z.boolean().optional().default(true),
+    /** Pre-approved Meta Business template name. Required for WHATSAPP channel. */
+    whatsappTemplateName: z.string().optional(),
+  })
+  .refine(
+    (data) => data.channel !== 'WHATSAPP' || !!data.whatsappTemplateName,
+    {
+      message: 'whatsappTemplateName is required when channel is WHATSAPP',
+      path: ['whatsappTemplateName'],
+    },
+  );
 
-export const updateNotificationTemplateSchema = createNotificationTemplateSchema.partial();
+export const updateNotificationTemplateSchema = createNotificationTemplateSchema
+  .innerType()
+  .partial();
 
 // ── Notification Rules ──────────────────────────────────────────────
 
