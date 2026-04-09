@@ -38,8 +38,9 @@ model User {
   employee   Employee? @relation("UserEmployee", fields: [employeeId], references: [id])
 
   // Notifications & devices
-  notifications Notification[] @relation("NotificationUser")
-  devices       UserDevice[]   @relation("UserDeviceUser")
+  notifications          Notification[]              @relation("NotificationUser")
+  devices                UserDevice[]                @relation("UserDeviceUser")
+  notificationPreference UserNotificationPreference? @relation("UserNotificationPrefUser")
 
   @@map("users")
 }

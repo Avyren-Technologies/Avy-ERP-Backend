@@ -110,35 +110,54 @@ model ApprovalRequest {
 }
 
 model NotificationTemplate {
-  id        String              @id @default(cuid())
-  name      String
-  subject   String? // For email
-  body      String // With tokens: {employee_name}, {leave_days}, {salary_amount}, etc.
-  channel   NotificationChannel @default(EMAIL)
-  isActive  Boolean             @default(true)
-  companyId String
-  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  id              String               @id @default(cuid())
+  name            String
+  code            String               @default("") // stable machine code (e.g. 'LEAVE_SUBMITTED')
+  subject         String? // For email
+  body            String // Handlebars source with tokens: {{employee_name}}, etc.
+  channel         NotificationChannel  @default(EMAIL)
+  priority        NotificationPriority @default(MEDIUM)
+  version         Int                  @default(1)
+
+  // Template safety
+  variables       Json                 @default("[]") // allowlist: ['employee_name', 'leave_days']
+  sensitiveFields Json                 @default("[]") // masked on PUSH: ['amount', 'account_number']
+  compiledBody    String?                             // pre-compiled cache
+  compiledSubject String?
+
+  isSystem        Boolean              @default(false) // seeded by platform, editable by tenant
+  isActive        Boolean              @default(true)
+
+  companyId       String
+  company         Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   rules NotificationRule[]
 
+  @@unique([companyId, code, channel])
   @@map("notification_templates")
 }
 
 model NotificationRule {
   id            String               @id @default(cuid())
-  triggerEvent  String // Same event list as workflows + more: PAYSLIP_PUBLISHED, BIRTHDAY, ANNIVERSARY, etc.
+  triggerEvent  String
+  category      String? // batching groupKey, e.g. 'LEAVE_APPROVAL'
   templateId    String
   template      NotificationTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  recipientRole String // EMPLOYEE, MANAGER, HR, FINANCE, IT, ADMIN, ALL
+  recipientRole String // EMPLOYEE, MANAGER, HR, FINANCE, IT, ADMIN, REQUESTER, APPROVER, ALL
   channel       NotificationChannel  @default(EMAIL)
+  priority      NotificationPriority @default(MEDIUM)
+  version       Int                  @default(1)
+
+  isSystem      Boolean              @default(false)
   isActive      Boolean              @default(true)
   companyId     String
   company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
+  @@index([companyId, triggerEvent, isActive])
   @@map("notification_rules")
 }
 

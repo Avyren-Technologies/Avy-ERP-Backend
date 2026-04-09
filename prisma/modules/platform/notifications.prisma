@@ -1,40 +1,185 @@
 // ==========================================
 // Platform — Notifications
 // ==========================================
-// Models: Notification, UserDevice
+// Models: Notification, UserDevice, NotificationEvent, UserNotificationPreference
+// Enums: NotificationStatus, NotificationPriority, DeviceTokenType, NotificationEventType, NotificationSource, DeviceStrategy
 
 model Notification {
-  id          String    @id @default(cuid())
-  userId      String
-  title       String
-  body        String
-  type        String
-  entityType  String?
-  entityId    String?
-  data        Json?
-  isRead      Boolean   @default(false)
-  companyId   String
-  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user        User      @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
+  id              String               @id @default(cuid())
+  userId          String
+  companyId       String
 
+  // Content
+  title           String
+  body            String
+  type            String
+  category        String?
+  entityType      String?
+  entityId        String?
+  data            Json?
+  actionUrl       String?
+
+  // Lifecycle
+  status          NotificationStatus   @default(UNREAD)
+  priority        NotificationPriority @default(MEDIUM)
+  isRead          Boolean              @default(false)
+  readAt          DateTime?
+  archivedAt      DateTime?
+
+  // Delivery tracking — snapshot of per-channel state
+  deliveryStatus  Json                 @default("{}")
+
+  // Provenance
+  traceId         String               @default("")
+  ruleId          String?
+  ruleVersion     Int?
+  templateId      String?
+  templateVersion Int?
+  dedupHash       String               @default("")
+
+  // Relations
+  user            User                 @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+  company         Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  events          NotificationEvent[]
+
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @default(now()) @updatedAt
+
+  @@index([userId, status])
   @@index([userId, isRead])
   @@index([companyId, createdAt])
+  @@index([traceId])
+  @@index([dedupHash])
   @@map("notifications")
 }
 
 model UserDevice {
-  id           String    @id @default(cuid())
-  userId       String
-  platform     String    // MOBILE_IOS, MOBILE_ANDROID, WEB
-  fcmToken     String
-  deviceName   String?
-  lastActiveAt DateTime  @default(now())
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  user         User      @relation("UserDeviceUser", fields: [userId], references: [id], onDelete: Cascade)
+  id              String          @id @default(cuid())
+  userId          String
+  platform        String          // MOBILE_IOS | MOBILE_ANDROID | WEB
+  fcmToken        String
+  tokenType       DeviceTokenType @default(EXPO)
+
+  // Device metadata
+  deviceName      String?
+  deviceModel     String?
+  osVersion       String?
+  appVersion      String?
+  locale          String?
+  timezone        String?
+
+  // Lifecycle
+  isActive        Boolean         @default(true)
+  failureCount    Int             @default(0)
+  lastSuccessAt   DateTime?
+  lastFailureAt   DateTime?
+  lastFailureCode String?
+  lastActiveAt    DateTime        @default(now())
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  user            User            @relation("UserDeviceUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, fcmToken])
-  @@index([userId])
+  @@index([userId, isActive])
+  @@index([tokenType, isActive])
   @@map("user_devices")
+}
+
+model NotificationEvent {
+  id                String                @id @default(cuid())
+  notificationId    String
+  notification      Notification          @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  channel           NotificationChannel
+  event             NotificationEventType
+
+  provider          String?
+  providerMessageId String?
+  expoTicketId      String?
+  receiptCheckedAt  DateTime?
+  receiptStatus     String?
+
+  source            NotificationSource    @default(SYSTEM)
+
+  errorCode         String?
+  errorMessage      String?
+  metadata          Json?
+  traceId           String
+
+  occurredAt        DateTime              @default(now())
+
+  @@index([notificationId])
+  @@index([traceId])
+  @@index([event, occurredAt])
+  @@index([provider, expoTicketId])
+  @@map("notification_events")
+}
+
+model UserNotificationPreference {
+  id                String         @id @default(cuid())
+  userId            String         @unique
+
+  // Channel opt-in
+  inAppEnabled      Boolean        @default(true)
+  pushEnabled       Boolean        @default(true)
+  emailEnabled      Boolean        @default(true)
+  smsEnabled        Boolean        @default(true)
+  whatsappEnabled   Boolean        @default(true)
+
+  // Device delivery strategy
+  deviceStrategy    DeviceStrategy @default(ALL)
+
+  // Quiet hours
+  quietHoursEnabled Boolean        @default(false)
+  quietHoursStart   String?
+  quietHoursEnd     String?
+
+  user              User           @relation("UserNotificationPrefUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@map("user_notification_preferences")
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DeviceTokenType {
+  EXPO
+  FCM_WEB
+  FCM_NATIVE
+}
+
+enum NotificationEventType {
+  ENQUEUED
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  FAILED
+  BOUNCED
+  SKIPPED
+  RETRYING
+}
+
+enum NotificationSource {
+  SYSTEM
+  USER_ACTION
+  RETRY
+}
+
+enum DeviceStrategy {
+  ALL
+  LATEST_ONLY
 }
