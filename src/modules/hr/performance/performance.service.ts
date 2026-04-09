@@ -4,6 +4,7 @@ import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { notificationService } from '../../../core/notifications/notification.service';
 
 interface ListOptions {
   page?: number;
@@ -182,10 +183,52 @@ export class PerformanceService {
       throw ApiError.badRequest('Only DRAFT cycles can be activated');
     }
 
-    return platformPrisma.appraisalCycle.update({
+    const updated = await platformPrisma.appraisalCycle.update({
       where: { id },
       data: { status: 'ACTIVE' },
     });
+
+    // Fanout — notify all active employees that the appraisal window is open.
+    // Uses dispatchBulk because companies often have 100+ employees.
+    try {
+      const employees = await platformPrisma.employee.findMany({
+        where: { companyId, status: { notIn: ['EXITED'] } },
+        select: {
+          firstName: true,
+          lastName: true,
+          user: { select: { id: true } },
+        },
+      });
+      const recipients = employees
+        .filter((e) => e.user?.id)
+        .map((e) => ({
+          userId: e.user!.id,
+          tokens: {
+            employee_name: `${e.firstName ?? ''} ${e.lastName ?? ''}`.trim(),
+          },
+        }));
+      if (recipients.length > 0) {
+        await notificationService.dispatchBulk({
+          companyId,
+          triggerEvent: 'APPRAISAL_CYCLE_ACTIVATED',
+          entityType: 'AppraisalCycle',
+          entityId: id,
+          recipients,
+          sharedTokens: {
+            cycle_name: cycle.name,
+            start_date: cycle.startDate.toISOString().slice(0, 10),
+            end_date: cycle.endDate.toISOString().slice(0, 10),
+          },
+          priority: 'MEDIUM',
+          actionUrl: '/company/hr/my-appraisals',
+          type: 'PERFORMANCE',
+        });
+      }
+    } catch (err) {
+      logger.warn('Appraisal cycle activated dispatch failed (non-blocking)', { error: err, cycleId: id });
+    }
+
+    return updated;
   }
 
   async closeReviewWindow(companyId: string, id: string) {
@@ -279,10 +322,54 @@ export class PerformanceService {
       }
     }
 
-    return platformPrisma.appraisalCycle.update({
+    const published = await platformPrisma.appraisalCycle.update({
       where: { id },
       data: { status: 'PUBLISHED' },
     });
+
+    // Fanout — every employee with an appraisal entry in this cycle needs
+    // to know their rating is now visible. HIGH + systemCritical because
+    // ratings affect compensation and promotion decisions.
+    try {
+      const entries = await platformPrisma.appraisalEntry.findMany({
+        where: { companyId, cycleId: id },
+        select: {
+          employee: {
+            select: {
+              firstName: true,
+              lastName: true,
+              user: { select: { id: true } },
+            },
+          },
+        },
+      });
+      const recipients = entries
+        .filter((e) => e.employee?.user?.id)
+        .map((e) => ({
+          userId: e.employee!.user!.id,
+          tokens: {
+            employee_name: `${e.employee!.firstName ?? ''} ${e.employee!.lastName ?? ''}`.trim(),
+          },
+        }));
+      if (recipients.length > 0) {
+        await notificationService.dispatchBulk({
+          companyId,
+          triggerEvent: 'APPRAISAL_RATINGS_PUBLISHED',
+          entityType: 'AppraisalCycle',
+          entityId: id,
+          recipients,
+          sharedTokens: { cycle_name: cycle.name },
+          priority: 'HIGH',
+          systemCritical: true,
+          actionUrl: '/company/hr/my-appraisals',
+          type: 'PERFORMANCE',
+        });
+      }
+    } catch (err) {
+      logger.warn('Appraisal ratings published dispatch failed (non-blocking)', { error: err, cycleId: id });
+    }
+
+    return published;
   }
 
   async closeCycle(companyId: string, id: string) {

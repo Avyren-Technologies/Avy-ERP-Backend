@@ -3,6 +3,8 @@ import { ApiError } from '../../shared/errors';
 import { HttpStatus } from '../../shared/types';
 import { addDays } from '../../shared/utils';
 import { pricingService, LocationCostSummary, LocationPricingInput, CompanyPricingInput } from './pricing.service';
+import { logger } from '../../config/logger';
+import { notificationService } from '../notifications/notification.service';
 
 // ────────────────────────────────────────────────────────────────────
 // Types
@@ -281,6 +283,32 @@ export class SubscriptionService {
       });
     }
 
+    // Notify company admins that billing has changed.
+    try {
+      const admins = await platformPrisma.user.findMany({
+        where: { companyId, role: 'COMPANY_ADMIN', isActive: true },
+        select: { id: true },
+      });
+      if (admins.length > 0) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'BILLING_TYPE_CHANGED',
+          entityType: 'Subscription',
+          entityId: subscription.id,
+          explicitRecipients: admins.map((a) => a.id),
+          tokens: {
+            new_billing_type: data.billingType,
+            location_id: data.locationId ?? '',
+          },
+          priority: 'HIGH',
+          systemCritical: true,
+          type: 'BILLING',
+        });
+      }
+    } catch (err) {
+      logger.warn('Billing type changed dispatch failed (non-blocking)', { error: err, companyId });
+    }
+
     return this.getSubscriptionDetail(companyId);
   }
 
@@ -371,6 +399,32 @@ export class SubscriptionService {
       where: { id: tenant.id },
       data: { status: 'CANCELLED' },
     });
+
+    // Notify all company admins — CRITICAL + systemCritical so the
+    // cancellation alert bypasses quiet hours and user preferences.
+    try {
+      const admins = await platformPrisma.user.findMany({
+        where: { companyId, role: 'COMPANY_ADMIN', isActive: true },
+        select: { id: true },
+      });
+      if (admins.length > 0) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'SUBSCRIPTION_CANCELLED',
+          entityType: 'Subscription',
+          entityId: subscription.id,
+          explicitRecipients: admins.map((a) => a.id),
+          tokens: {
+            export_window_end: exportWindowEnd.toISOString().slice(0, 10),
+          },
+          priority: 'CRITICAL',
+          systemCritical: true,
+          type: 'BILLING',
+        });
+      }
+    } catch (err) {
+      logger.warn('Subscription cancelled dispatch failed (non-blocking)', { error: err, companyId });
+    }
 
     return {
       status: 'CANCELLED',
