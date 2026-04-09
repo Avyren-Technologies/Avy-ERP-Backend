@@ -42,7 +42,6 @@ export interface DispatchResult {
   traceId: string;
   enqueued: number;
   notificationIds: string[];
-  error?: string;
 }
 
 export interface QueueablePayload {
