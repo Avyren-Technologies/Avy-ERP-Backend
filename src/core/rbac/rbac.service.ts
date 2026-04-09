@@ -8,6 +8,7 @@ import { getAllPermissions, REFERENCE_ROLE_PERMISSIONS, hasPermission } from '..
 import { NAVIGATION_MANIFEST, getGroupedNavigation, type NavigationItem } from '../../shared/constants/navigation-manifest';
 import { createUserCacheKey, createUserPermissionsCacheKey } from '../../shared/utils';
 import { getCachedSystemControls, getCachedESSConfig } from '../../shared/utils/config-cache';
+import { notificationService } from '../notifications/notification.service';
 import { CreateRoleRequest, UpdateRoleRequest, RoleResponse } from './rbac.types';
 
 // ── Nav Item → ESSConfig field mapping ──────────────────────────────
@@ -221,6 +222,33 @@ export class RbacService {
     await cacheRedis.del(createUserPermissionsCacheKey(userId, tenantId));
 
     logger.info(`Role ${role.name} (platform: ${platformRole}) assigned to user ${userId} in tenant ${tenantId}`);
+
+    // Notify the user that their role changed. HIGH + systemCritical
+    // because permission changes alter what the user can access.
+    try {
+      const targetUser = await platformPrisma.user.findUnique({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, companyId: true },
+      });
+      if (targetUser?.companyId) {
+        await notificationService.dispatch({
+          companyId: targetUser.companyId,
+          triggerEvent: 'USER_ROLE_CHANGED',
+          entityType: 'User',
+          entityId: userId,
+          explicitRecipients: [userId],
+          tokens: {
+            user_name: `${targetUser.firstName ?? ''} ${targetUser.lastName ?? ''}`.trim(),
+            role_name: role.name,
+          },
+          priority: 'HIGH',
+          systemCritical: true,
+          type: 'AUTH',
+        });
+      }
+    } catch (err) {
+      logger.warn('Role assigned dispatch failed (non-blocking)', { error: err, userId });
+    }
   }
 
   // Get permissions for a user in a specific tenant (used by auth middleware)

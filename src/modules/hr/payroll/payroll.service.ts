@@ -1,8 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { logger } from '../../../config/logger';
 import { essService } from '../ess/ess.service';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { notificationService } from '../../../core/notifications/notification.service';
 
 interface ListOptions {
   page?: number;
@@ -1258,7 +1260,7 @@ export class PayrollConfigService {
       updateData.outstanding = 0;
     }
 
-    return platformPrisma.loanRecord.update({
+    const updated = await platformPrisma.loanRecord.update({
       where: { id },
       data: updateData,
       include: {
@@ -1268,6 +1270,7 @@ export class PayrollConfigService {
             employeeId: true,
             firstName: true,
             lastName: true,
+            user: { select: { id: true } },
           },
         },
         policy: {
@@ -1275,6 +1278,33 @@ export class PayrollConfigService {
         },
       },
     });
+
+    // Notify employee on disbursement or closure (regulatory — CRITICAL +
+    // systemCritical bypasses quiet hours/prefs).
+    if ((status === 'ACTIVE' || status === 'CLOSED') && updated.employee?.user?.id) {
+      try {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: status === 'ACTIVE' ? 'LOAN_DISBURSED' : 'LOAN_CLOSED',
+          entityType: 'LoanRecord',
+          entityId: id,
+          explicitRecipients: [updated.employee.user.id],
+          tokens: {
+            employee_name: `${updated.employee.firstName ?? ''} ${updated.employee.lastName ?? ''}`.trim(),
+            loan_type: updated.loanType,
+            amount: Number(updated.amount).toString(),
+            policy_name: updated.policy?.name ?? '',
+          },
+          priority: 'HIGH',
+          systemCritical: true,
+          type: 'LOAN',
+        });
+      } catch (err) {
+        logger.warn('Loan status dispatch failed (non-blocking)', { error: err, loanId: id, status });
+      }
+    }
+
+    return updated;
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1423,6 +1453,35 @@ export class PayrollConfigService {
         });
       }
     });
+
+    // Notify the employee that their travel advance has been settled.
+    try {
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: loan.employeeId },
+        select: { firstName: true, lastName: true, user: { select: { id: true } } },
+      });
+      if (employee?.user?.id) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'TRAVEL_ADVANCE_SETTLED',
+          entityType: 'LoanRecord',
+          entityId: loanId,
+          explicitRecipients: [employee.user.id],
+          tokens: {
+            employee_name: `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim(),
+            advance_amount: advanceAmount.toString(),
+            claim_amount: claimAmount.toString(),
+            outcome,
+            remaining_outstanding: remainingOutstanding.toString(),
+          },
+          priority: 'HIGH',
+          systemCritical: true,
+          type: 'LOAN',
+        });
+      }
+    } catch (err) {
+      logger.warn('Travel advance settled dispatch failed (non-blocking)', { error: err, loanId });
+    }
 
     return {
       advanceAmount,

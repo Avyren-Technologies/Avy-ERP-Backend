@@ -45,6 +45,17 @@ export const NOTIFICATION_CATEGORIES: NotificationCategoryDef[] = [
   { code: 'ASSETS', label: 'Assets', description: 'Asset assignments and return reminders' },
   { code: 'SUPPORT', label: 'Support', description: 'Support ticket updates' },
   {
+    code: 'PERFORMANCE',
+    label: 'Performance',
+    description: 'Appraisal cycles, ratings, feedback, reviews',
+  },
+  {
+    code: 'BILLING',
+    label: 'Billing & Subscription',
+    description: 'Billing changes, subscription lifecycle, invoice alerts',
+    locked: true,
+  },
+  {
     code: 'AUTH',
     label: 'Security',
     description: 'Password reset, new device login, account lock',
@@ -112,11 +123,17 @@ export const TRIGGER_TO_CATEGORY: Record<string, string> = {
   REIMBURSEMENT: 'REIMBURSEMENT',
   REIMBURSEMENT_APPROVED: 'REIMBURSEMENT',
   REIMBURSEMENT_REJECTED: 'REIMBURSEMENT',
+  EXPENSE_CLAIM_APPROVED: 'REIMBURSEMENT',
+  EXPENSE_CLAIM_REJECTED: 'REIMBURSEMENT',
+  EXPENSE_CLAIM_PARTIALLY_APPROVED: 'REIMBURSEMENT',
 
   // Loan
   LOAN_APPLICATION: 'LOAN',
   LOAN_APPROVED: 'LOAN',
   LOAN_REJECTED: 'LOAN',
+  LOAN_DISBURSED: 'LOAN',
+  LOAN_CLOSED: 'LOAN',
+  TRAVEL_ADVANCE_SETTLED: 'LOAN',
 
   // Payroll
   PAYROLL_APPROVAL: 'PAYROLL',
@@ -185,6 +202,17 @@ export const TRIGGER_TO_CATEGORY: Record<string, string> = {
   PASSWORD_RESET: 'AUTH',
   NEW_DEVICE_LOGIN: 'AUTH',
   ACCOUNT_LOCKED: 'AUTH',
+  USER_ROLE_CHANGED: 'AUTH',
+  USER_DEACTIVATED: 'AUTH',
+  USER_REACTIVATED: 'AUTH',
+
+  // Performance
+  APPRAISAL_CYCLE_ACTIVATED: 'PERFORMANCE',
+  APPRAISAL_RATINGS_PUBLISHED: 'PERFORMANCE',
+
+  // Billing — locked category
+  BILLING_TYPE_CHANGED: 'BILLING',
+  SUBSCRIPTION_CANCELLED: 'BILLING',
 
   // Celebrations
   BIRTHDAY: 'BIRTHDAY_ANNIVERSARY',
