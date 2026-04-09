@@ -2,9 +2,15 @@ import { Prisma, AttendanceStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { logger } from '../../../config/logger';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { notificationService } from '../../../core/notifications/notification.service';
+import {
+  getCurrentStepApproverIds,
+  getRequesterUserId,
+} from '../../../core/notifications/dispatch/approver-resolver';
 
 interface ListOptions {
   page?: number;
@@ -777,6 +783,7 @@ export class LeaveService {
           : []),
       ]);
 
+      await this.dispatchLeaveSubmission(companyId, request);
       return { ...request, lopDays, documentRequired };
     }
 
@@ -851,7 +858,57 @@ export class LeaveService {
         : []),
     ]);
 
+    await this.dispatchLeaveSubmission(companyId, request);
     return { ...request, lopDays, documentRequired };
+  }
+
+  /**
+   * Fire a submission notification for a freshly-created leave request.
+   * Non-blocking — logs on failure so a notification bug never rolls back
+   * the leave creation. Approvals/rejections flow through the universal
+   * `onApprovalComplete` handler in `ess.service.ts`.
+   */
+  private async dispatchLeaveSubmission(
+    companyId: string,
+    request: {
+      id: string;
+      employeeId: string | null;
+      fromDate: Date;
+      toDate: Date;
+      days: Prisma.Decimal | number;
+      employee?: { firstName?: string | null; lastName?: string | null } | null;
+      leaveType?: { name?: string | null } | null;
+    },
+  ): Promise<void> {
+    try {
+      const approverIds = await getCurrentStepApproverIds('LeaveRequest', request.id);
+      const requesterUserId = await getRequesterUserId({ employeeId: request.employeeId });
+      const employeeName = `${request.employee?.firstName ?? ''} ${request.employee?.lastName ?? ''}`.trim();
+      await notificationService.dispatch({
+        companyId,
+        triggerEvent: 'LEAVE_APPLICATION',
+        entityType: 'LeaveRequest',
+        entityId: request.id,
+        recipientContext: {
+          ...(requesterUserId && { requesterId: requesterUserId }),
+          approverIds,
+        },
+        tokens: {
+          employee_name: employeeName,
+          leave_type: request.leaveType?.name ?? '',
+          leave_days: Number(request.days),
+          from_date: request.fromDate.toISOString().slice(0, 10),
+          to_date: request.toDate.toISOString().slice(0, 10),
+        },
+        actionUrl: `/company/hr/leave-management/requests`,
+        type: 'LEAVE',
+      });
+    } catch (err) {
+      logger.warn('Leave submission dispatch failed (non-blocking)', {
+        error: err,
+        leaveRequestId: request.id,
+      });
+    }
   }
 
   async approveRequest(companyId: string, id: string, userId: string) {
@@ -1158,6 +1215,37 @@ export class LeaveService {
     await platformPrisma.attendanceRecord.deleteMany({
       where: { leaveRequestId: id },
     });
+
+    // Non-blocking: notify the original approver that the request was cancelled.
+    try {
+      const typedRequest = updatedRequest as {
+        id: string;
+        approvedBy: string | null;
+        fromDate: Date;
+        toDate: Date;
+        days: Prisma.Decimal | number;
+        employee?: { firstName?: string | null; lastName?: string | null } | null;
+      };
+      const employeeName = `${typedRequest.employee?.firstName ?? ''} ${typedRequest.employee?.lastName ?? ''}`.trim();
+      await notificationService.dispatch({
+        companyId,
+        triggerEvent: 'LEAVE_CANCELLED',
+        entityType: 'LeaveRequest',
+        entityId: id,
+        recipientContext: {
+          approverIds: typedRequest.approvedBy ? [typedRequest.approvedBy] : [],
+        },
+        tokens: {
+          employee_name: employeeName,
+          leave_days: Number(typedRequest.days),
+          from_date: typedRequest.fromDate.toISOString().slice(0, 10),
+          to_date: typedRequest.toDate.toISOString().slice(0, 10),
+        },
+        type: 'LEAVE',
+      });
+    } catch (err) {
+      logger.warn('Leave cancel dispatch failed (non-blocking)', { error: err, leaveRequestId: id });
+    }
 
     return updatedRequest;
   }
