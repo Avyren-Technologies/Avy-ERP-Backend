@@ -22,6 +22,7 @@ export interface NavigationItem {
 export const NAVIGATION_MANIFEST: NavigationItem[] = [
   // ═══════ OVERVIEW ═══════
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', requiredPerm: null, path: '/app/dashboard', module: null, group: 'Overview', roleScope: 'all', sortOrder: 0 },
+  { id: 'notification-preferences', label: 'Notification Preferences', icon: 'bell', requiredPerm: null, path: '/app/settings/notifications', module: null, group: 'Account', roleScope: 'all', sortOrder: 9990 },
 
   // ═══════ SUPER ADMIN: PLATFORM ═══════
   { id: 'sa-companies', label: 'Companies', icon: 'building', requiredPerm: 'platform:admin', path: '/app/companies', module: null, group: 'Platform Management', moduleSeparator: 'Platform Management', roleScope: 'super_admin', sortOrder: 100 },
