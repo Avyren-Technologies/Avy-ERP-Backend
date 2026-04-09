@@ -57,6 +57,7 @@ function buildAdHocRules(input: DispatchInput): LoadedRule[] {
       createdAt: now,
       updatedAt: now,
       template,
+      isAdHoc: true,
     };
   });
 }
@@ -164,10 +165,10 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
             channels: [rule.channel],
             priority: input.priority ?? rule.priority ?? rule.template.priority ?? 'MEDIUM',
             category: rule.category ?? null,
-            ruleId: rule.id?.startsWith('adhoc:') ? null : rule.id,
-            ruleVersion: rule.version ?? null,
-            templateId: rule.template.id === 'adhoc' ? null : rule.template.id,
-            templateVersion: rule.template.version ?? null,
+            ruleId: rule.isAdHoc ? null : rule.id,
+            ruleVersion: rule.isAdHoc ? null : (rule.version ?? null),
+            templateId: rule.isAdHoc ? null : rule.template.id,
+            templateVersion: rule.isAdHoc ? null : (rule.template.version ?? null),
           });
         }
       }
@@ -246,7 +247,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       });
     } catch (err) {
       logger.error('Failed to batch-create Notification rows', { error: err, traceId });
-      return { traceId, enqueued: 0, notificationIds: [], error: String(err) };
+      return { traceId, enqueued: 0, notificationIds: [] };
     }
 
     const createdNotificationIds: string[] = createdRows.map((r) => r.id);
@@ -311,7 +312,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     return { traceId, enqueued: toEnqueue.length, notificationIds: createdNotificationIds };
   } catch (err) {
     logger.error('Dispatcher internal error', { error: err, traceId, trigger: input.triggerEvent });
-    return { traceId, enqueued: 0, notificationIds: [], error: String(err) };
+    return { traceId, enqueued: 0, notificationIds: [] };
   }
 }
 

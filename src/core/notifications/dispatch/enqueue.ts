@@ -26,10 +26,16 @@ export async function enqueueWithBatching(payload: QueueablePayload): Promise<vo
     const windowMs = env.NOTIFICATIONS_BATCH_WINDOW_SEC * 1000;
     const now = Date.now();
     try {
-      await cacheRedis.zremrangebyscore(batchKey, 0, now - windowMs);
-      const pending = await cacheRedis.zcard(batchKey);
-      await cacheRedis.zadd(batchKey, now, payload.notificationId);
-      await cacheRedis.expire(batchKey, env.NOTIFICATIONS_BATCH_WINDOW_SEC);
+      // Atomic MULTI pipeline — prevents two concurrent dispatchers from
+      // both reading the same pending count and under-batching.
+      const pipeline = cacheRedis.multi();
+      pipeline.zremrangebyscore(batchKey, 0, now - windowMs);
+      pipeline.zcard(batchKey);
+      pipeline.zadd(batchKey, now, payload.notificationId);
+      pipeline.expire(batchKey, env.NOTIFICATIONS_BATCH_WINDOW_SEC);
+      const results = await pipeline.exec();
+      // results[1] is the zcard result (post zremrangebyscore, pre zadd)
+      const pending = (results?.[1]?.[1] as number) ?? 0;
 
       if (pending >= env.NOTIFICATIONS_BATCH_THRESHOLD) {
         // Spec formula: holdMs = min(60s, pendingCount × 5s)

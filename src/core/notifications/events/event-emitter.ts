@@ -1,6 +1,11 @@
 import { platformPrisma } from '../../../config/database';
 import { logger } from '../../../config/logger';
-import type { NotificationChannel, NotificationEventType, NotificationSource } from '@prisma/client';
+import type {
+  NotificationChannel,
+  NotificationEventType,
+  NotificationSource,
+  Prisma,
+} from '@prisma/client';
 
 export interface RecordEventInput {
   notificationId: string | null;
@@ -35,7 +40,9 @@ export async function recordEvent(input: RecordEventInput): Promise<void> {
         expoTicketId: input.expoTicketId ?? null,
         errorCode: input.errorCode ?? null,
         errorMessage: input.errorMessage ?? null,
-        metadata: (input.metadata ?? undefined) as any,
+        ...(input.metadata !== undefined && {
+          metadata: input.metadata as Prisma.InputJsonValue,
+        }),
         traceId: input.traceId,
         source: input.source ?? 'SYSTEM',
       },

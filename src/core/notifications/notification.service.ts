@@ -1,7 +1,19 @@
+import type { NotificationChannel } from '@prisma/client';
 import { platformPrisma } from '../../config/database';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../config/logger';
 import { dispatch } from './dispatch/dispatcher';
+
+/**
+ * Typed mapping from legacy lowercase channel strings to the Prisma enum.
+ * Used by the deprecated `send()` facade to preserve backward compat without
+ * an unsafe `as any` cast.
+ */
+const LEGACY_CHANNEL_MAP: Record<'in_app' | 'push' | 'email', NotificationChannel> = {
+  in_app: 'IN_APP',
+  push: 'PUSH',
+  email: 'EMAIL',
+};
 
 /**
  * NotificationService — thin facade. All new callers should use `dispatch()`
@@ -65,7 +77,7 @@ class NotificationService {
       adHoc: {
         title: params.title,
         body: params.body,
-        channels: params.channels.map((c) => c.toUpperCase()) as any,
+        channels: params.channels.map((c) => LEGACY_CHANNEL_MAP[c]),
       },
     });
   }
