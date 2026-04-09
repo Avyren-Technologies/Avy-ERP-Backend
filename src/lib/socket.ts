@@ -37,6 +37,10 @@ export function initSocket(server: HttpServer) {
     io.on('connection', (socket) => {
         const user = (socket as any).user;
 
+        // Auto-join per-user and per-company rooms for notification fan-out.
+        if (user?.userId) socket.join(`user:${user.userId}`);
+        if (user?.companyId) socket.join(`company:${user.companyId}`);
+
         // Join ticket room — must verify access (ticket belongs to user's company or user is super admin)
         socket.on('join-ticket', (ticketId: string) => {
             if (ticketId) socket.join(`ticket:${ticketId}`);
@@ -92,4 +96,16 @@ export function emitTicketResolved(ticketId: string, companyId: string, ticket: 
     io?.to(`ticket:${ticketId}`).emit('ticket:resolved', { ticketId, ticket });
     io?.to(`company:${companyId}`).emit('ticket:resolved', { ticketId, ticket });
     io?.to('admin:support').emit('ticket:resolved', { ticketId, ticket });
+}
+
+/**
+ * Notification fan-out: emit a lightweight UI hint to the user's socket room.
+ * Clients receive { notificationId, unreadCountHint } and must re-fetch via
+ * React Query — they do NOT append the payload directly to state.
+ */
+export function emitNotificationNew(userId: string, payload: { notificationId: string; traceId: string }) {
+    io?.to(`user:${userId}`).emit('notification:new', {
+        notificationId: payload.notificationId,
+        unreadCountHint: null,
+    });
 }
