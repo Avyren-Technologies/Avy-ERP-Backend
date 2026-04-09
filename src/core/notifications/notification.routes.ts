@@ -7,6 +7,7 @@ const notificationRoutes = Router();
 // Preferences (must come before /:id/read routes to avoid matching)
 notificationRoutes.get('/preferences', controller.getMyPreferences);
 notificationRoutes.patch('/preferences', controller.updateMyPreferences);
+notificationRoutes.patch('/preferences/categories', controller.updateMyCategoryPreferences);
 
 // Device registration
 notificationRoutes.post('/register-device', controller.registerDevice);
