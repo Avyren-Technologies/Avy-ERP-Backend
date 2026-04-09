@@ -724,16 +724,19 @@ export class AuthService {
     const tokenHash = this.hashToken(refreshToken);
     const expiresAt = new Date(Date.now() + this.parseExpiresInToSeconds(env.JWT_REFRESH_EXPIRES_IN) * 1000);
 
-    // New-device detection — compare against the user's most recent session
-    // before creating the new one. "New" = no prior session, or a different
-    // deviceInfo string (most platforms send a stable UA/device fingerprint).
+    // New-device detection — compare against ALL of the user's prior sessions
+    // (not just the most recent). Skipped if the user has no prior sessions
+    // at all, to avoid spamming "new device" on the very first login.
     let isNewDevice = false;
     try {
-      const lastSession = await platformPrisma.activeSession.findFirst({
+      const priorSessions = await platformPrisma.activeSession.findMany({
         where: { userId },
-        orderBy: { createdAt: 'desc' },
+        select: { deviceInfo: true },
+        take: 20,
       });
-      isNewDevice = !lastSession || lastSession.deviceInfo !== (deviceInfo ?? null);
+      if (priorSessions.length > 0 && deviceInfo) {
+        isNewDevice = !priorSessions.some((s) => s.deviceInfo === deviceInfo);
+      }
     } catch {
       // Detection is best-effort; don't fail login on a lookup error.
     }
