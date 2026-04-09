@@ -69,3 +69,8 @@ export function getCategoryDef(code: string): NotificationCategoryDef | undefine
 export function isCategoryLocked(code: string): boolean {
   return getCategoryDef(code)?.locked === true;
 }
+
+// TODO(I5 — phase 2): expose `NOTIFICATION_CATEGORIES` via a public API
+// (e.g. `GET /notifications/categories`) so the web/mobile preference UIs can
+// render the matrix dynamically instead of hard-coding the list. Include
+// `locked` in the payload so the UI can disable the toggle for AUTH.

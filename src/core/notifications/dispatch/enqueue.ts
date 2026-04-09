@@ -10,8 +10,13 @@ import type { QueueablePayload } from './types';
  * Batching semantics:
  *   - groupKey = userId + category + entityType (never cross entity types)
  *   - sliding window = NOTIFICATIONS_BATCH_WINDOW_SEC (default 300s)
- *   - if pending count >= threshold, delay new job by min(60s, (count+1)*5s)
- *   - HIGH/CRITICAL never batched
+ *   - `pending` is the pre-zadd count (items already in the window BEFORE
+ *     this one is added). When `pending >= NOTIFICATIONS_BATCH_THRESHOLD`,
+ *     we delay this new job by `min(60s, pending * 5s)`. The +1 for the
+ *     current item is intentionally omitted so the first batched item
+ *     (pending == threshold) gets `threshold * 5s` delay — not
+ *     `(threshold+1) * 5s` — keeping the initial hold short.
+ *   - HIGH/CRITICAL never batched.
  */
 export async function enqueueWithBatching(payload: QueueablePayload): Promise<void> {
   const queue = pickQueueByPriority(payload.priority);

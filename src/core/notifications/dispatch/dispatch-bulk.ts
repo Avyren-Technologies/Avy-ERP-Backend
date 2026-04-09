@@ -3,7 +3,7 @@ import type { NotificationChannel, NotificationPriority, Prisma } from '@prisma/
 import { platformPrisma } from '../../../config/database';
 import { env } from '../../../config/env';
 import { logger } from '../../../config/logger';
-import { loadActiveRules } from './rule-loader';
+import { loadActiveRules, type LoadedRule } from './rule-loader';
 import { renderTemplate } from '../templates/renderer';
 import { checkUserRateLimit, checkTenantRateLimit } from './rate-limiter';
 import { checkDedup } from './dedup';
@@ -11,7 +11,7 @@ import { pickQueueByPriority } from '../queue/queues';
 import { emitSocketEvent } from '../events/socket-emitter';
 import { recordEvent } from '../events/event-emitter';
 import { notificationMetrics } from '../metrics/notification-metrics';
-import type { DispatchInput } from './types';
+import type { NotificationTemplate } from '@prisma/client';
 
 export interface DispatchBulkInput {
   companyId: string;
@@ -70,33 +70,31 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
 
   try {
     // 1. Load rules once
-    const rules = await loadActiveRules(input.companyId, input.triggerEvent);
+    let rules = await loadActiveRules(input.companyId, input.triggerEvent);
     if (rules.length === 0) {
-      // Fall back to per-recipient dispatch via the normal path (which handles
-      // the no-rules fallback). This keeps behavior identical for small fanouts
-      // without rules configured.
-      logger.warn('dispatchBulk: no rules — falling back to per-recipient dispatch', {
+      // No rules for this trigger — synthesize an in-process IN_APP fallback
+      // rule so the bulk fanout still produces a Notification row per recipient.
+      // This avoids C2 (double-incrementing the tenant rate limit via re-entering
+      // dispatch()) and C3 (sequential N-recipient dispatch loop that blocks the
+      // event loop for large fanouts).
+      logger.warn('dispatchBulk: no rules — synthesizing IN_APP fallback rule', {
         traceId,
         triggerEvent: input.triggerEvent,
+        companyId: input.companyId,
+        recipients: input.recipients.length,
       });
-      const { dispatch } = await import('./dispatcher');
-      let enqueued = 0;
-      for (const r of input.recipients) {
-        const res = await dispatch({
-          companyId: input.companyId,
-          triggerEvent: input.triggerEvent,
-          ...(input.type !== undefined && { type: input.type }),
-          ...(input.entityType !== undefined && { entityType: input.entityType }),
-          ...(input.entityId !== undefined && { entityId: input.entityId }),
-          explicitRecipients: [r.userId],
-          tokens: { ...(input.sharedTokens ?? {}), ...(r.tokens ?? {}) },
-          priority,
-          ...(input.systemCritical !== undefined && { systemCritical: input.systemCritical }),
-          ...(input.actionUrl !== undefined && { actionUrl: input.actionUrl }),
-        } as DispatchInput);
-        enqueued += res.enqueued;
-      }
-      return { traceId, enqueued, skipped: 0, notificationIds: [] };
+      rules = [buildFallbackRule(input)];
+    } else if (rules.length > 1) {
+      // Bulk path only uses the first rule (single primary channel). Multi-rule
+      // trigger events will silently drop secondary channels — warn so operators
+      // notice and either switch to per-recipient dispatch() or consolidate rules.
+      logger.warn('dispatchBulk: multiple rules — only primary channel will be used', {
+        traceId,
+        triggerEvent: input.triggerEvent,
+        ruleCount: rules.length,
+        primaryChannel: rules[0]!.channel,
+        droppedChannels: rules.slice(1).map((r) => r.channel),
+      });
     }
 
     // 2. Rate-limit filter (per-recipient)
@@ -277,4 +275,52 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
       notificationIds: [],
     };
   }
+}
+
+/**
+ * Construct a synthetic IN_APP LoadedRule for bulk dispatch when no rules
+ * exist for the trigger event. Keeps the bulk path self-contained and avoids
+ * re-entering dispatch() (which would double-count the tenant rate limit).
+ */
+function buildFallbackRule(input: DispatchBulkInput): LoadedRule {
+  const now = new Date();
+  const title = input.type ?? input.triggerEvent.replace(/_/g, ' ');
+  const body = `Event: ${input.triggerEvent}`;
+  const template: NotificationTemplate = {
+    id: 'adhoc',
+    name: title,
+    code: 'ADHOC',
+    subject: title,
+    body,
+    channel: 'IN_APP',
+    priority: input.priority ?? 'LOW',
+    version: 1,
+    variables: [] as Prisma.JsonValue,
+    sensitiveFields: [] as Prisma.JsonValue,
+    compiledBody: body,
+    compiledSubject: title,
+    whatsappTemplateName: null,
+    isSystem: false,
+    isActive: true,
+    companyId: input.companyId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return {
+    id: `adhoc:${input.triggerEvent}:IN_APP`,
+    triggerEvent: input.triggerEvent,
+    category: null,
+    templateId: 'adhoc',
+    recipientRole: 'EMPLOYEE',
+    channel: 'IN_APP',
+    priority: input.priority ?? 'LOW',
+    version: 1,
+    isSystem: false,
+    isActive: true,
+    companyId: input.companyId,
+    createdAt: now,
+    updatedAt: now,
+    template,
+    isAdHoc: true,
+  };
 }

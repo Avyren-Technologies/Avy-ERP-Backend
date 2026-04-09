@@ -15,7 +15,13 @@ export async function checkUserRateLimit(
   userId: string,
   priority: NotificationPriority,
 ): Promise<boolean> {
-  if (priority === 'CRITICAL') return true;
+  if (priority === 'CRITICAL') {
+    notificationMetrics.increment('notifications.rate_limit_bypassed', {
+      scope: 'user',
+      priority,
+    });
+    return true;
+  }
 
   const key = `notif:rate:user:${userId}`;
   const max = env.NOTIFICATIONS_USER_RATE_LIMIT_PER_MIN;
@@ -53,7 +59,13 @@ export async function checkTenantRateLimit(
   companyId: string,
   priority: NotificationPriority,
 ): Promise<boolean> {
-  if (priority === 'CRITICAL') return true;
+  if (priority === 'CRITICAL') {
+    notificationMetrics.increment('notifications.rate_limit_bypassed', {
+      scope: 'tenant',
+      priority,
+    });
+    return true;
+  }
 
   const key = `notif:rate:tenant:${companyId}`;
   const max = env.NOTIFICATIONS_TENANT_RATE_LIMIT_PER_MIN;

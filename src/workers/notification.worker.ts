@@ -46,6 +46,10 @@ type QueueName = keyof typeof WORKER_CONCURRENCY;
 /**
  * Shared per-notification processing. Used by both the single-notification
  * and bulk job paths. Throws on provider failure so BullMQ retry kicks in.
+ *
+ * @param args.consentCache Optional pre-loaded cache (used by the bulk path
+ *                          to amortize consent lookups across a chunk). If
+ *                          absent, loads fresh via `loadConsentCache(userId)`.
  */
 async function processOne(args: {
   notificationId: string;
@@ -56,11 +60,21 @@ async function processOne(args: {
   systemCritical: boolean;
   category?: string | null;
   source: NotificationSource;
+  consentCache?: Awaited<ReturnType<typeof loadConsentCache>> | undefined;
 }): Promise<void> {
-  const { notificationId, userId, channels, traceId, priority, systemCritical, category, source } = args;
+  const {
+    notificationId,
+    userId,
+    channels,
+    traceId,
+    priority,
+    systemCritical,
+    category,
+    source,
+  } = args;
 
-  // Load consent cache ONCE per notification (versioned Redis cache).
-  const consentCache = await loadConsentCache(userId);
+  // Use pre-loaded cache if provided; otherwise load fresh.
+  const consentCache = args.consentCache ?? (await loadConsentCache(userId));
 
   // Track which channels this run successfully claimed — released on throw.
   const claimedThisRun: NotificationChannel[] = [];
@@ -76,13 +90,10 @@ async function processOne(args: {
       claimedThisRun.push(channel);
 
       // 2. Re-check consent from cache (category-aware).
-      const consent = evaluateConsent(
-        consentCache,
-        channel,
-        priority,
-        category ?? null,
+      const consent = evaluateConsent(consentCache, channel, priority, {
+        category: category ?? null,
         systemCritical,
-      );
+      });
       if (!consent.allowed) {
         await updateDeliveryStatus(notificationId, channel, 'SKIPPED');
         await recordEvent({
@@ -173,6 +184,12 @@ function makeWorker(queueName: QueueName) {
           queue: queueName,
         });
 
+        // Pre-load consent caches in parallel so the subsequent processOne
+        // calls are DB-free (I4 — amortize consent cache across the chunk).
+        const consentCaches = await Promise.all(
+          userIds.map((uid) => loadConsentCache(uid)),
+        );
+
         // Process each (notificationId, userId) pair in parallel.
         // allSettled so one failure doesn't stop the rest of the chunk.
         const results = await Promise.allSettled(
@@ -186,6 +203,7 @@ function makeWorker(queueName: QueueName) {
               systemCritical,
               ...(category !== undefined && { category }),
               source,
+              consentCache: consentCaches[idx],
             }),
           ),
         );
@@ -197,13 +215,13 @@ function makeWorker(queueName: QueueName) {
             total: notificationIds.length,
             failed: failures.length,
           });
-          // Re-throw if ALL failed — triggers BullMQ retry for the whole chunk.
-          // Partial failures stay within the chunk and are recorded as FAILED
-          // events; the individual notifications stay claimed so retry
-          // wouldn't re-send them anyway.
-          if (failures.length === notificationIds.length) {
-            throw (failures[0] as PromiseRejectedResult).reason;
-          }
+          // Re-throw on ANY failure so BullMQ retries the whole chunk.
+          // Already-sent items will be skipped by the idempotency claim
+          // (`claimSendSlot` — TTL 24h), so retry is safe and only re-attempts
+          // the items that actually failed. Without this re-throw, transient
+          // provider errors on individual items would be permanently lost to
+          // retries.
+          throw (failures[0] as PromiseRejectedResult).reason;
         }
         return;
       }
