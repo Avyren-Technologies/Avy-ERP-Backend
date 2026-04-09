@@ -8,7 +8,7 @@ CREATE TYPE "NotificationPriority" AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')
 CREATE TYPE "DeviceTokenType" AS ENUM ('EXPO', 'FCM_WEB', 'FCM_NATIVE');
 
 -- CreateEnum
-CREATE TYPE "NotificationEventType" AS ENUM ('ENQUEUED', 'SENT', 'DELIVERED', 'OPENED', 'CLICKED', 'FAILED', 'BOUNCED', 'SKIPPED', 'RETRYING');
+CREATE TYPE "NotificationEventType" AS ENUM ('ENQUEUED', 'SENT', 'DELIVERED', 'OPENED', 'CLICKED', 'FAILED', 'BOUNCED', 'SKIPPED', 'RETRYING', 'RATE_LIMITED');
 
 -- CreateEnum
 CREATE TYPE "NotificationSource" AS ENUM ('SYSTEM', 'USER_ACTION', 'RETRY');
@@ -38,7 +38,8 @@ ADD COLUMN     "isSystem" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN     "priority" "NotificationPriority" NOT NULL DEFAULT 'MEDIUM',
 ADD COLUMN     "sensitiveFields" JSONB NOT NULL DEFAULT '[]',
 ADD COLUMN     "variables" JSONB NOT NULL DEFAULT '[]',
-ADD COLUMN     "version" INTEGER NOT NULL DEFAULT 1;
+ADD COLUMN     "version" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN     "whatsappTemplateName" TEXT;
 
 -- AlterTable
 ALTER TABLE "notifications" ADD COLUMN     "actionUrl" TEXT,
@@ -109,6 +110,34 @@ CREATE TABLE "user_notification_preferences" (
     CONSTRAINT "user_notification_preferences_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "user_notification_category_preferences" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "category" TEXT NOT NULL,
+    "channel" "NotificationChannel" NOT NULL,
+    "enabled" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "user_notification_category_preferences_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "notification_event_aggregate_daily" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "date" DATE NOT NULL,
+    "channel" "NotificationChannel" NOT NULL,
+    "event" "NotificationEventType" NOT NULL,
+    "provider" TEXT,
+    "count" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "notification_event_aggregate_daily_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE INDEX "notification_events_notificationId_idx" ON "notification_events"("notificationId");
 
@@ -123,6 +152,18 @@ CREATE INDEX "notification_events_provider_expoTicketId_idx" ON "notification_ev
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_notification_preferences_userId_key" ON "user_notification_preferences"("userId");
+
+-- CreateIndex
+CREATE INDEX "user_notification_category_preferences_userId_idx" ON "user_notification_category_preferences"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "user_notification_category_preferences_userId_category_chan_key" ON "user_notification_category_preferences"("userId", "category", "channel");
+
+-- CreateIndex
+CREATE INDEX "notification_event_aggregate_daily_companyId_date_idx" ON "notification_event_aggregate_daily"("companyId", "date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "notification_event_aggregate_daily_companyId_date_channel_e_key" ON "notification_event_aggregate_daily"("companyId", "date", "channel", "event", "provider");
 
 -- CreateIndex
 CREATE INDEX "notification_rules_companyId_triggerEvent_isActive_idx" ON "notification_rules"("companyId", "triggerEvent", "isActive");
@@ -150,4 +191,10 @@ ALTER TABLE "notification_events" ADD CONSTRAINT "notification_events_notificati
 
 -- AddForeignKey
 ALTER TABLE "user_notification_preferences" ADD CONSTRAINT "user_notification_preferences_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_notification_category_preferences" ADD CONSTRAINT "user_notification_category_preferences_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "notification_event_aggregate_daily" ADD CONSTRAINT "notification_event_aggregate_daily_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

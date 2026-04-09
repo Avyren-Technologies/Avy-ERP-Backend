@@ -110,6 +110,12 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
 
   // Tenant-level rate limit check — single INCR, fast, bypasses CRITICAL.
   // Protects the whole system from a runaway tenant bug/cron.
+  //
+  // Note: rate-limit drops happen BEFORE a Notification row is created, so
+  // they cannot produce a NotificationEvent row (notificationId is non-null
+  // FK). Instead the `notifications.rate_limited` metric counter is emitted
+  // from inside `checkTenantRateLimit` itself — analytics + alerting should
+  // use that counter as the source of truth for rate-limit drops.
   const tenantAllowed = await checkTenantRateLimit(
     input.companyId,
     input.priority ?? 'MEDIUM',

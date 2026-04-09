@@ -58,6 +58,40 @@ async function getVersion(scope: 'user' | 'company', id: string): Promise<number
 }
 
 /**
+ * Cache the userId → companyId mapping (1-hour TTL). This is immutable for
+ * a given user and avoids a DB round-trip on every `loadConsentCache` call.
+ * The mapping can only change when a user is moved to a different company
+ * (rare admin action) — stale entries TTL out in an hour.
+ */
+const COMPANY_CACHE_TTL_SEC = 3600;
+
+async function getCompanyIdForUser(userId: string): Promise<string | null> {
+  const key = `notif:consent:companyOf:${userId}`;
+  try {
+    const cached = await cacheRedis.get(key);
+    if (cached !== null) return cached || null;
+  } catch {
+    // fall through to DB
+  }
+  try {
+    const user = await platformPrisma.user.findUnique({
+      where: { id: userId },
+      select: { companyId: true },
+    });
+    const companyId = user?.companyId ?? null;
+    try {
+      await cacheRedis.set(key, companyId ?? '', 'EX', COMPANY_CACHE_TTL_SEC);
+    } catch {
+      /* non-fatal */
+    }
+    return companyId;
+  } catch (err) {
+    logger.warn('Company lookup for consent cache failed', { error: err, userId });
+    return null;
+  }
+}
+
+/**
  * DB-only fetch path — bypasses cache. Used by `loadConsentCache` on cache miss
  * and by tests/one-off callers that want fresh data.
  */
@@ -103,21 +137,29 @@ async function loadConsentCacheFromDB(userId: string): Promise<ConsentCache> {
  *   - No thundering herd when large company's settings change
  *   - Next read per user lazily refreshes
  */
-export async function loadConsentCache(userId: string): Promise<ConsentCache> {
-  // Resolve company once — need it for the version key.
-  let companyId: string | null = null;
-  try {
-    const user = await platformPrisma.user.findUnique({
-      where: { id: userId },
-      select: { companyId: true },
-    });
-    companyId = user?.companyId ?? null;
-  } catch (err) {
-    logger.warn('Consent cache user lookup failed', { error: err, userId });
+/**
+ * Rehydrate Date fields on the cached Prisma rows after JSON.parse.
+ * Without this, `createdAt` / `updatedAt` / `joiningDate` etc. are strings
+ * after deserialization, and downstream `.getTime()` calls would throw.
+ */
+function rehydrateDates<T extends Record<string, unknown> | null>(obj: T): T {
+  if (!obj) return obj;
+  const result: Record<string, unknown> = { ...obj };
+  for (const [key, value] of Object.entries(result)) {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) result[key] = parsed;
+    }
   }
+  return result as T;
+}
+
+export async function loadConsentCache(userId: string): Promise<ConsentCache> {
+  // Resolve company via the userId→companyId cache (1h TTL, avoids DB hit on warm cache).
+  const companyId = await getCompanyIdForUser(userId);
 
   if (!companyId) {
-    // Can't cache without a company version; fall through to DB
+    // Can't version-key without a company; fall through to DB
     return loadConsentCacheFromDB(userId);
   }
 
@@ -129,14 +171,9 @@ export async function loadConsentCache(userId: string): Promise<ConsentCache> {
     if (cached) {
       const parsed = JSON.parse(cached) as SerializedCache;
       return {
-        ...parsed,
-        // rehydrate Date fields on companySettings / preference
-        companySettings: parsed.companySettings
-          ? (parsed.companySettings as CompanySettings)
-          : null,
-        preference: parsed.preference
-          ? (parsed.preference as UserNotificationPreference)
-          : null,
+        userId: parsed.userId,
+        companySettings: rehydrateDates(parsed.companySettings) as CompanySettings | null,
+        preference: rehydrateDates(parsed.preference) as UserNotificationPreference | null,
         categoryPrefs: new Map(parsed.categoryPrefs),
       };
     }
@@ -185,6 +222,11 @@ export async function invalidateUserConsent(userId: string): Promise<void> {
  * next dispatch without looping the user table.
  *
  * Call on: CompanySettings notification-toggle change.
+ *
+ * TODO(I6 — phase 2): wire this into the CompanySettings update controller so
+ * that toggling `pushNotifications`/`emailNotifications`/etc. bumps the
+ * version counter immediately. Currently relies on the 5-minute cache TTL,
+ * which is acceptable but leaves a window where stale company toggles apply.
  */
 export async function invalidateCompanyConsent(companyId: string): Promise<void> {
   try {
@@ -195,25 +237,62 @@ export async function invalidateCompanyConsent(companyId: string): Promise<void>
 }
 
 /**
+ * Options for `evaluateConsent`. Using an object keeps the call sites
+ * robust to future additions (e.g. new gates) and makes positional-arg
+ * regressions impossible.
+ */
+export interface EvaluateConsentOptions {
+  category?: string | null;
+  systemCritical?: boolean;
+}
+
+/**
  * Pure consent evaluation — no DB access. Call after loadConsentCache().
  * Use this inside the per-channel worker loop to avoid N+1.
  *
- * @param category Optional notification category (e.g. LEAVE, PAYROLL).
- *                 When set, checks `UserNotificationCategoryPreference` for
- *                 fine-grained overrides. Locked categories (AUTH) cannot be
- *                 overridden — the check is skipped.
+ * Fail-closed by default: if `companySettings` is missing (e.g. DB error
+ * during cache load, unknown user), the notification is DROPPED — EXCEPT
+ * for CRITICAL / systemCritical notifications, which fail-OPEN so that
+ * security/payroll alerts can still deliver when the platform DB is
+ * momentarily unavailable.
+ *
+ * @param options.category       Optional notification category (e.g. LEAVE,
+ *                               PAYROLL). When set, checks
+ *                               `UserNotificationCategoryPreference` for
+ *                               fine-grained overrides. Locked categories
+ *                               (AUTH) cannot be overridden — the check is
+ *                               skipped.
+ * @param options.systemCritical Bypasses user preference + quiet hours +
+ *                               category prefs (still respects company master
+ *                               toggle unless the cache is unavailable).
  */
 export function evaluateConsent(
   cache: ConsentCache,
   channel: NotificationChannel,
   priority: NotificationPriority,
-  category: string | null = null,
-  systemCritical = false,
+  options: EvaluateConsentOptions = {},
 ): ConsentResult {
+  const { category = null, systemCritical = false } = options;
+  const isCritical = systemCritical || priority === 'CRITICAL';
+
   if (channel === 'IN_APP') return { allowed: true };
 
   const { companySettings, preference, categoryPrefs } = cache;
-  if (!companySettings) return { allowed: false, reason: 'NO_COMPANY_SETTINGS' };
+
+  // No company settings could mean DB error or unknown user.
+  // Fail-OPEN for CRITICAL so security/payroll alerts always deliver,
+  // fail-CLOSED otherwise to avoid accidental sends without policy checks.
+  if (!companySettings) {
+    if (isCritical) {
+      logger.warn('Consent fail-open — CRITICAL bypass without company settings', {
+        userId: cache.userId,
+        channel,
+        priority,
+      });
+      return { allowed: true };
+    }
+    return { allowed: false, reason: 'NO_COMPANY_SETTINGS' };
+  }
 
   const masterMap: Record<NotificationChannel, keyof CompanySettings> = {
     IN_APP: 'inAppNotifications',
@@ -226,7 +305,7 @@ export function evaluateConsent(
   if (!companySettings[masterField]) return { allowed: false, reason: 'COMPANY_MASTER_OFF' };
 
   // SYSTEM_CRITICAL bypasses user preference + quiet hours + category prefs
-  if (systemCritical || priority === 'CRITICAL') return { allowed: true };
+  if (isCritical) return { allowed: true };
 
   if (preference) {
     const userMap: Record<NotificationChannel, keyof UserNotificationPreference> = {
@@ -277,13 +356,10 @@ export async function checkConsent(
   input: ConsentInput & { category?: string | null },
 ): Promise<ConsentResult> {
   const cache = await loadConsentCache(input.userId);
-  return evaluateConsent(
-    cache,
-    input.channel,
-    input.priority,
-    input.category ?? null,
-    input.systemCritical,
-  );
+  return evaluateConsent(cache, input.channel, input.priority, {
+    category: input.category ?? null,
+    systemCritical: input.systemCritical ?? false,
+  });
 }
 
 function isInQuietHours(now: DateTime, startStr: string, endStr: string): boolean {
