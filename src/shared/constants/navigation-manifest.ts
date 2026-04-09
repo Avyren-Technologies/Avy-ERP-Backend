@@ -147,7 +147,8 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-workflows', label: 'Approval Workflows', icon: 'git-branch', requiredPerm: 'hr:configure', path: '/app/company/hr/approval-workflows', module: 'hr', group: 'ESS & Workflows', roleScope: 'company', sortOrder: 551 },
   { id: 'hr-notif-tpl', label: 'Notification Templates', icon: 'mail', requiredPerm: 'hr:configure', path: '/app/company/hr/notification-templates', module: 'hr', group: 'ESS & Workflows', roleScope: 'company', sortOrder: 552 },
   { id: 'hr-notif-rules', label: 'Notification Rules', icon: 'bell-ring', requiredPerm: 'hr:configure', path: '/app/company/hr/notification-rules', module: 'hr', group: 'ESS & Workflows', roleScope: 'company', sortOrder: 553 },
-  { id: 'hr-esign', label: 'E-Sign Tracking', icon: 'pen-tool', requiredPerm: 'hr:read', path: '/app/company/hr/esign', module: 'hr', group: 'ESS & Workflows', roleScope: 'company', sortOrder: 554 },
+  { id: 'hr-notif-analytics', label: 'Notification Analytics', icon: 'bar-chart-2', requiredPerm: 'hr:configure', path: '/app/company/hr/notification-analytics', module: 'hr', group: 'ESS & Workflows', roleScope: 'company', sortOrder: 554 },
+  { id: 'hr-esign', label: 'E-Sign Tracking', icon: 'pen-tool', requiredPerm: 'hr:read', path: '/app/company/hr/esign', module: 'hr', group: 'ESS & Workflows', roleScope: 'company', sortOrder: 555 },
 
   { id: 'hr-transfers', label: 'Employee Transfers', icon: 'arrow-left-right', requiredPerm: 'hr:read', path: '/app/company/hr/transfers', module: 'hr', group: 'Transfers & Promotions', roleScope: 'company', sortOrder: 560 },
   { id: 'hr-promotions', label: 'Employee Promotions', icon: 'trending-up', requiredPerm: 'hr:read', path: '/app/company/hr/promotions', module: 'hr', group: 'Transfers & Promotions', roleScope: 'company', sortOrder: 561 },
