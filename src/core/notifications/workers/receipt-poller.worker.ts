@@ -10,9 +10,23 @@ import { logger } from '../../../config/logger';
 const expo = new Expo(env.EXPO_ACCESS_TOKEN ? { accessToken: env.EXPO_ACCESS_TOKEN } : {});
 
 /**
- * Schedule the repeatable receipt poller job. Idempotent — uses a stable jobId.
+ * Schedule the repeatable receipt poller job. Idempotent — removes any
+ * existing repeatable jobs with the same key before re-scheduling so
+ * interval changes across deploys take effect immediately.
  */
 export async function ensureReceiptPollerScheduled(): Promise<void> {
+  try {
+    // Remove any existing repeatable first so interval changes take effect
+    const existing = await notifQueueReceipts.getRepeatableJobs();
+    for (const job of existing) {
+      if (job.id === 'receipt-poller-singleton') {
+        await notifQueueReceipts.removeRepeatableByKey(job.key);
+      }
+    }
+  } catch (err) {
+    logger.warn('Failed to clean up existing receipt poller repeatables', { error: err });
+  }
+
   await notifQueueReceipts.add(
     'poll-receipts',
     {},
@@ -24,12 +38,12 @@ export async function ensureReceiptPollerScheduled(): Promise<void> {
 }
 
 /**
- * Start the receipt poller worker. Runs in-process (lightweight).
+ * Start the receipt poller worker.
  *
- * For each SENT NotificationEvent with an expoTicketId and no receiptCheckedAt,
- * within the 15-minute window, fetch the receipt from Expo and update the row.
- * Emits DELIVERED / BOUNCED / FAILED follow-up events so analytics stays accurate.
- * After 15 minutes, unchecked tickets are marked 'unknown' and never polled again.
+ * Race safety: the NotificationEvent update uses a compare-and-set
+ * (`receiptCheckedAt: null` in the where clause) so only one poll run wins
+ * per event. The follow-up DELIVERED/BOUNCED/FAILED event is only recorded
+ * if the update actually claimed the row (affectedRows === 1).
  */
 export function startReceiptPollerWorker() {
   return new Worker(
@@ -50,7 +64,7 @@ export function startReceiptPollerWorker() {
       });
       if (pending.length === 0) return;
 
-      const ticketIds = pending.map((p) => p.expoTicketId!).filter(Boolean);
+      const ticketIds = pending.flatMap((p) => (p.expoTicketId ? [p.expoTicketId] : []));
       const chunks = expo.chunkPushNotificationReceiptIds(ticketIds);
 
       for (const chunk of chunks) {
@@ -60,15 +74,23 @@ export function startReceiptPollerWorker() {
             const event = pending.find((p) => p.expoTicketId === ticketId);
             if (!event) continue;
 
-            await platformPrisma.notificationEvent.update({
-              where: { id: event.id },
+            // Compare-and-set: only one poll run per event succeeds
+            const claim = await platformPrisma.notificationEvent.updateMany({
+              where: { id: event.id, receiptCheckedAt: null },
               data: {
                 receiptCheckedAt: new Date(),
                 receiptStatus: receipt.status,
-                errorCode: receipt.status === 'error' ? (receipt as any).details?.error ?? null : null,
-                errorMessage: receipt.status === 'error' ? (receipt as any).message ?? null : null,
+                errorCode:
+                  receipt.status === 'error'
+                    ? (receipt as { details?: { error?: string } }).details?.error ?? null
+                    : null,
+                errorMessage:
+                  receipt.status === 'error'
+                    ? truncate((receipt as { message?: string }).message ?? '', 500)
+                    : null,
               },
             });
+            if (claim.count === 0) continue;
 
             if (receipt.status === 'ok') {
               await recordEvent({
@@ -81,7 +103,7 @@ export function startReceiptPollerWorker() {
                 source: 'SYSTEM',
               });
             } else {
-              const errCode = (receipt as any).details?.error;
+              const errCode = (receipt as { details?: { error?: string } }).details?.error;
               const eventType = errCode === 'DeviceNotRegistered' ? 'BOUNCED' : 'FAILED';
               await recordEvent({
                 notificationId: event.notificationId,
@@ -90,7 +112,7 @@ export function startReceiptPollerWorker() {
                 provider: 'expo',
                 expoTicketId: ticketId,
                 errorCode: errCode,
-                errorMessage: (receipt as any).message,
+                errorMessage: truncate((receipt as { message?: string }).message ?? '', 500),
                 traceId: event.traceId,
                 source: 'SYSTEM',
               });
@@ -101,7 +123,7 @@ export function startReceiptPollerWorker() {
         }
       }
 
-      // Mark stale (>15 min old) tickets as 'unknown' and stop polling them
+      // Mark stale (>15 min) tickets as 'unknown' and stop polling them
       await platformPrisma.notificationEvent.updateMany({
         where: {
           provider: 'expo',
@@ -114,4 +136,8 @@ export function startReceiptPollerWorker() {
     },
     { connection: bullmqConnection, prefix: BULLMQ_PREFIX, concurrency: 1 },
   );
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) + '…' : s;
 }

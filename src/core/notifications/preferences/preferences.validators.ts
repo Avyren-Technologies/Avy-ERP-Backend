@@ -10,14 +10,24 @@ export const updatePreferencesSchema = z.object({
   quietHoursEnabled: z.boolean().optional(),
   quietHoursStart: z
     .string()
-    .regex(/^\d{2}:\d{2}$/)
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Must be HH:MM (24-hour)')
     .optional()
     .nullable(),
   quietHoursEnd: z
     .string()
-    .regex(/^\d{2}:\d{2}$/)
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Must be HH:MM (24-hour)')
     .optional()
     .nullable(),
-});
+}).refine(
+  (data) => {
+    // If quiet hours enabled, both start and end must be present and distinct
+    if (data.quietHoursEnabled === true) {
+      if (!data.quietHoursStart || !data.quietHoursEnd) return false;
+      if (data.quietHoursStart === data.quietHoursEnd) return false;
+    }
+    return true;
+  },
+  { message: 'Quiet hours start and end must be set and different when enabled' },
+);
 
 export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;

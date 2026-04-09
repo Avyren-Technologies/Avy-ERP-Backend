@@ -32,7 +32,8 @@ export async function enqueueWithBatching(payload: QueueablePayload): Promise<vo
       await cacheRedis.expire(batchKey, env.NOTIFICATIONS_BATCH_WINDOW_SEC);
 
       if (pending >= env.NOTIFICATIONS_BATCH_THRESHOLD) {
-        const holdMs = Math.min(60_000, (pending + 1) * 5_000);
+        // Spec formula: holdMs = min(60s, pendingCount × 5s)
+        const holdMs = Math.min(60_000, pending * 5_000);
         await queue.add('deliver', payload, { delay: holdMs });
         logger.info('Notification enqueued with batching delay', {
           notificationId: payload.notificationId,

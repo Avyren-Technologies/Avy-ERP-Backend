@@ -1,6 +1,10 @@
 import Handlebars from 'handlebars';
+import { LRUCache } from 'lru-cache';
 
-const cache = new Map<string, HandlebarsTemplateDelegate>();
+// LRU-bounded cache to avoid unbounded memory growth from dynamic templates.
+const cache = new LRUCache<string, HandlebarsTemplateDelegate>({
+  max: 1000,
+});
 
 /**
  * Compile a handlebars template source and cache it in-memory.
@@ -36,4 +40,8 @@ export function extractVariables(source: string): string[] {
 
 export function clearCompilerCache(): void {
   cache.clear();
+}
+
+export function getCompilerCacheSize(): number {
+  return cache.size;
 }

@@ -12,8 +12,28 @@ export interface DedupInput {
   payload: { title: string; body: string; data?: unknown };
 }
 
+/**
+ * Stable JSON stringify with sorted object keys for deterministic hashing.
+ * Without this, `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` would hash differently.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableStringify).join(',') + ']';
+  }
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return (
+    '{' +
+    keys
+      .map((k) => JSON.stringify(k) + ':' + stableStringify((value as Record<string, unknown>)[k]))
+      .join(',') +
+    '}'
+  );
+}
+
 export function computeDedupHash(p: DedupInput['payload']): string {
-  const canonical = JSON.stringify({ t: p.title, b: p.body, d: p.data ?? null });
+  const canonical = stableStringify({ t: p.title, b: p.body, d: p.data ?? null });
   return crypto.createHash('sha1').update(canonical).digest('hex');
 }
 

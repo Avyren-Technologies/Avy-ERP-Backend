@@ -47,7 +47,10 @@ export async function recordEvent(input: RecordEventInput): Promise<void> {
 
 /**
  * Update the deliveryStatus JSON map on a Notification row.
- * Merges with existing status so multiple channels can be tracked.
+ *
+ * Uses Postgres `jsonb_set` so two workers concurrently updating different
+ * channel keys on the same Notification row do not clobber each other's
+ * writes (the previous read-modify-write was racy).
  */
 export async function updateDeliveryStatus(
   notificationId: string,
@@ -55,16 +58,19 @@ export async function updateDeliveryStatus(
   status: 'PENDING' | 'SENT' | 'FAILED' | 'SKIPPED' | 'BOUNCED' | 'RETRYING',
 ): Promise<void> {
   try {
-    const current = await platformPrisma.notification.findUnique({
-      where: { id: notificationId },
-      select: { deliveryStatus: true },
-    });
-    const ds = ((current?.deliveryStatus as Record<string, string> | null) ?? {}) as Record<string, string>;
-    ds[channel.toLowerCase()] = status;
-    await platformPrisma.notification.update({
-      where: { id: notificationId },
-      data: { deliveryStatus: ds },
-    });
+    const key = channel.toLowerCase();
+    // jsonb_set(target, path, new_value, create_missing=true)
+    // path uses the {key} array syntax; value must be jsonb
+    await platformPrisma.$executeRaw`
+      UPDATE notifications
+      SET "deliveryStatus" = jsonb_set(
+        COALESCE("deliveryStatus", '{}'::jsonb),
+        ARRAY[${key}]::text[],
+        to_jsonb(${status}::text),
+        true
+      )
+      WHERE id = ${notificationId}
+    `;
   } catch (err) {
     logger.warn('Failed to update deliveryStatus', { error: err, notificationId, channel, status });
   }
