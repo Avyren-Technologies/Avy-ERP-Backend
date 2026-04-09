@@ -9,12 +9,12 @@ import type { ChannelSendArgs, ChannelSendResult } from '../channel-router';
  * Push channel entry point. Routes to Expo or FCM based on device token type.
  *
  * Flow:
- *   1. Fetch active devices for the user.
+ *   1. Fetch active devices for the user (scoped strictly to this userId).
  *   2. Apply device strategy (ALL vs LATEST_ONLY) from preferences.
  *   3. Partition devices by tokenType (EXPO → Expo SDK, FCM_WEB/FCM_NATIVE → firebase-admin).
  *   4. Apply PUSH-channel masking from the template's sensitiveFields.
  *   5. Send to both providers in parallel; surface first successful result.
- *   6. Deactivate dead tokens returned by either provider.
+ *   6. Deactivate DeviceNotRegistered tokens scoped by userId (avoid cross-user deactivation).
  */
 export const pushChannel = {
   async send({ notificationId, userId, traceId, priority }: ChannelSendArgs): Promise<ChannelSendResult> {
@@ -27,7 +27,8 @@ export const pushChannel = {
 
     const pref = await platformPrisma.userNotificationPreference.findUnique({ where: { userId } });
     const sorted = [...devices].sort((a, b) => b.lastActiveAt.getTime() - a.lastActiveAt.getTime());
-    const targetDevices = pref?.deviceStrategy === 'LATEST_ONLY' && sorted[0] ? [sorted[0]] : devices;
+    const targetDevices =
+      pref?.deviceStrategy === 'LATEST_ONLY' && sorted[0] ? [sorted[0]] : devices;
 
     const expoDevices = targetDevices.filter((d) => d.tokenType === 'EXPO');
     const fcmDevices = targetDevices.filter(
@@ -62,20 +63,24 @@ export const pushChannel = {
       fcmDevices.length > 0 ? fcmProvider.send(fcmDevices, payload, traceId) : Promise.resolve(null),
     ]);
 
-    // Deactivate dead tokens across both providers
+    // Deactivate dead tokens SCOPED BY USER ID to prevent cross-user deactivation
+    // (the unique is @@unique([userId, fcmToken]), not unique on fcmToken alone).
     for (const r of results) {
       if (r.status === 'fulfilled' && r.value) {
         const dead = (r.value as { deadTokens?: string[] }).deadTokens ?? [];
         if (dead.length > 0) {
           await platformPrisma.userDevice.updateMany({
-            where: { fcmToken: { in: dead } },
+            where: {
+              userId,
+              fcmToken: { in: dead },
+            },
             data: {
               isActive: false,
               lastFailureAt: new Date(),
               lastFailureCode: 'DeviceNotRegistered',
             },
           });
-          logger.info('Deactivated dead push tokens', { count: dead.length });
+          logger.info('Deactivated dead push tokens', { count: dead.length, userId });
         }
       }
     }
@@ -84,7 +89,11 @@ export const pushChannel = {
     const fcmRes = results[1];
 
     if (expoRes?.status === 'fulfilled' && expoRes.value) {
-      const v = expoRes.value as { messageId: string | null; expoTicketId: string | null; deadTokens: string[] };
+      const v = expoRes.value as {
+        messageId: string | null;
+        expoTicketId: string | null;
+        deadTokens: string[];
+      };
       return {
         provider: 'expo',
         messageId: v.messageId,
