@@ -55,7 +55,7 @@ export async function getCurrentStepApproverIds(
     if (currentStep.approverRole) {
       const role = currentStep.approverRole.toUpperCase();
       if (role === 'MANAGER') {
-        return await resolveManagerUserIds(request.companyId, request.requesterId);
+        return await resolveManagerUserIds(request.requesterId);
       }
       if (role === 'HR') {
         return await resolveHrUserIds(request.companyId);
@@ -82,8 +82,11 @@ export async function getCurrentStepApproverIds(
 /**
  * Normalize an ID that might be an employeeId OR a userId into a userId.
  * Returns null if neither lookup finds a match.
+ *
+ * Exported so submission wiring code can pass whatever identifier is handy
+ * (ApprovalRequest.requesterId is typed as a string but can be either).
  */
-async function resolveToUserId(idOrEmployeeId: string): Promise<string | null> {
+export async function resolveToUserId(idOrEmployeeId: string): Promise<string | null> {
   try {
     // Try as user ID first
     const asUser = await platformPrisma.user.findUnique({
@@ -107,10 +110,7 @@ async function resolveToUserId(idOrEmployeeId: string): Promise<string | null> {
  * Resolve the reporting-manager user ID for a given requester.
  * Falls back to active delegates if the manager has any configured.
  */
-async function resolveManagerUserIds(
-  _companyId: string,
-  requesterId: string,
-): Promise<string[]> {
+async function resolveManagerUserIds(requesterId: string): Promise<string[]> {
   try {
     const requester = await platformPrisma.employee.findFirst({
       where: { OR: [{ id: requesterId }, { user: { id: requesterId } }] },
@@ -178,25 +178,25 @@ async function resolveHrUserIds(companyId: string): Promise<string[]> {
 
 /**
  * Look up the requester user ID for an entity. Accepts an employeeId
- * and/or a userId (either may be null). If userId is provided, returns
- * it directly. Otherwise joins Employee → User. Returns null if neither
- * field is set.
+ * and/or a userId (either may be null). VERIFIES whichever is set before
+ * returning it — if you pass a userId that doesn't exist, it falls back
+ * to treating it as an employeeId and joining Employee → User. This
+ * protects against the "ApprovalRequest.requesterId is a string but
+ * could be either kind of ID" foot-gun.
  */
 export async function getRequesterUserId(opts: {
   employeeId?: string | null | undefined;
   userId?: string | null | undefined;
 }): Promise<string | null> {
-  if (opts.userId) return opts.userId;
-  if (opts.employeeId) {
-    try {
-      const emp = await platformPrisma.employee.findUnique({
-        where: { id: opts.employeeId },
-        select: { user: { select: { id: true } } },
-      });
-      return emp?.user?.id ?? null;
-    } catch {
-      return null;
-    }
+  // Collect non-null candidates, deduping so we don't double-query when
+  // the caller passes the same value for both fields (safe default).
+  const candidates = new Set<string>();
+  if (opts.userId) candidates.add(opts.userId);
+  if (opts.employeeId) candidates.add(opts.employeeId);
+
+  for (const candidate of candidates) {
+    const resolved = await resolveToUserId(candidate);
+    if (resolved) return resolved;
   }
   return null;
 }
