@@ -53,10 +53,15 @@ class NotificationCronService {
 
   // ── Helpers ─────────────────────────────────────────────────────────
 
-  /** Idempotent cron dedup with 24h TTL. `true` = claim acquired, proceed. */
-  private async checkCronDedup(key: string): Promise<boolean> {
+  /**
+   * Idempotent cron dedup. Default TTL = 24h (safe to re-run on the same day).
+   * For "one-shot per entity" crons (probation reminder, certificate expiring,
+   * etc.) pass a longer TTL so a single reminder fires across the entire
+   * eligibility window instead of once per day.
+   */
+  private async checkCronDedup(key: string, ttlSeconds: number = 86400): Promise<boolean> {
     try {
-      const result = await cacheRedis.set(`notif:cron-dedup:${key}`, '1', 'EX', 86400, 'NX');
+      const result = await cacheRedis.set(`notif:cron-dedup:${key}`, '1', 'EX', ttlSeconds, 'NX');
       return result === 'OK';
     } catch (err) {
       // Fail-open so a Redis outage doesn't silently swallow an entire day's notifications.
@@ -265,8 +270,10 @@ class NotificationCronService {
       });
 
       for (const holiday of upcoming) {
-        const dedupKey = `HOLIDAY_REMINDER:${company.id}:${holiday.id}:${todayStr}`;
-        const ok = await this.checkCronDedup(dedupKey);
+        // One-shot per holiday — keyed by holiday id only, TTL 7 days
+        // so a single reminder fires during the 3-day lookahead window.
+        const dedupKey = `HOLIDAY_REMINDER:${company.id}:${holiday.id}`;
+        const ok = await this.checkCronDedup(dedupKey, 7 * 86400);
         if (!ok) continue;
 
         const holidayDt = DateTime.fromJSDate(holiday.date).setZone(tz).startOf('day');
@@ -326,7 +333,14 @@ class NotificationCronService {
 
       for (const emp of ending) {
         if (!emp.probationEndDate || !emp.reportingManager?.user?.id) continue;
-        const ok = await this.checkCronDedup(`PROBATION_END:${company.id}:${emp.id}:${todayStr}`);
+        // One-shot per employee — dedup key is tied to the probation end
+        // date (not today), TTL = 30 days so a single reminder fires in
+        // the 7-day window rather than once daily for 7 days.
+        const endDateStr = DateTime.fromJSDate(emp.probationEndDate).toFormat('yyyy-MM-dd');
+        const ok = await this.checkCronDedup(
+          `PROBATION_END:${company.id}:${emp.id}:${endDateStr}`,
+          30 * 86400,
+        );
         if (!ok) continue;
 
         try {
@@ -389,7 +403,13 @@ class NotificationCronService {
 
       for (const nom of noms) {
         if (!nom.employee?.user?.id || !nom.certificateExpiryDate) continue;
-        const ok = await this.checkCronDedup(`CERTIFICATE_EXPIRING:${company.id}:${nom.id}:${todayStr}`);
+        // One-shot per nomination — keyed by expiry date so a single
+        // reminder fires during the 30-day window, TTL 60 days to cover it.
+        const expiryStr = DateTime.fromJSDate(nom.certificateExpiryDate).toFormat('yyyy-MM-dd');
+        const ok = await this.checkCronDedup(
+          `CERTIFICATE_EXPIRING:${company.id}:${nom.id}:${expiryStr}`,
+          60 * 86400,
+        );
         if (!ok) continue;
 
         try {
