@@ -1,7 +1,10 @@
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 import { env } from '../../../../config/env';
 import { logger } from '../../../../config/logger';
+import { platformPrisma } from '../../../../config/database';
 import type { NotificationPriority, UserDevice } from '@prisma/client';
+
+const MAX_FAILURE_COUNT = 5;
 
 const expo = new Expo(
   env.EXPO_ACCESS_TOKEN ? { accessToken: env.EXPO_ACCESS_TOKEN } : {},
@@ -19,6 +22,8 @@ export interface ExpoSendResult {
   messageId: string | null;
   expoTicketId: string | null;
   deadTokens: string[];
+  successDeviceIds: string[];
+  failedDeviceIds: string[];
 }
 
 export const expoProvider = {
@@ -60,22 +65,63 @@ export const expoProvider = {
       }
     }
 
-    const deadTokens = all
-      .filter(
-        (t) =>
-          t.ticket?.status === 'error' &&
-          (t.ticket as any).details?.error === 'DeviceNotRegistered',
-      )
-      .map((t) => t.device.fcmToken);
+    const deadTokens: string[] = [];
+    const successDeviceIds: string[] = [];
+    const failedDeviceIds: string[] = [];
+
+    for (const { device, ticket } of all) {
+      if (ticket?.status === 'ok') {
+        successDeviceIds.push(device.id);
+      } else if (ticket?.status === 'error') {
+        const errCode = (ticket as { details?: { error?: string } }).details?.error;
+        failedDeviceIds.push(device.id);
+        if (errCode === 'DeviceNotRegistered') {
+          deadTokens.push(device.fcmToken);
+        }
+      }
+    }
+
+    // Lifecycle updates: increment failureCount for failed devices, reset for successes.
+    if (successDeviceIds.length > 0) {
+      await platformPrisma.userDevice.updateMany({
+        where: { id: { in: successDeviceIds } },
+        data: { failureCount: 0, lastSuccessAt: new Date() },
+      });
+    }
+    if (failedDeviceIds.length > 0) {
+      // Increment failureCount atomically. Devices hitting MAX_FAILURE_COUNT are
+      // soft-deactivated by the caller (push.channel.ts).
+      for (const deviceId of failedDeviceIds) {
+        try {
+          await platformPrisma.userDevice.update({
+            where: { id: deviceId },
+            data: {
+              failureCount: { increment: 1 },
+              lastFailureAt: new Date(),
+            },
+          });
+        } catch (err) {
+          logger.warn('Failed to increment device failure count', { error: err, deviceId });
+        }
+      }
+      // Cap-and-deactivate any that hit the threshold
+      await platformPrisma.userDevice.updateMany({
+        where: { id: { in: failedDeviceIds }, failureCount: { gte: MAX_FAILURE_COUNT } },
+        data: { isActive: false },
+      });
+    }
 
     const ok = all.find((t) => t.ticket?.status === 'ok');
-    const firstTicketId = ok?.ticket.status === 'ok' ? (ok.ticket as any).id : null;
+    const firstTicketId =
+      ok?.ticket.status === 'ok' ? ((ok.ticket as { id?: string }).id ?? null) : null;
 
     return {
       provider: 'expo',
       messageId: firstTicketId,
       expoTicketId: firstTicketId,
       deadTokens,
+      successDeviceIds,
+      failedDeviceIds,
     };
   },
 };

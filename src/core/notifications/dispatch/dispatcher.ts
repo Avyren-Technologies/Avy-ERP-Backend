@@ -7,11 +7,11 @@ import { resolveRecipients } from './recipient-resolver';
 import { checkDedup } from './dedup';
 import { guardBackpressure } from './backpressure';
 import { enqueueWithBatching } from './enqueue';
-import { renderTemplate } from '../templates/renderer';
+import { renderTemplate, type RenderedNotification } from '../templates/renderer';
 import { recordEvent } from '../events/event-emitter';
 import { emitSocketEvent } from '../events/socket-emitter';
 import type { DispatchInput, DispatchResult, QueueablePayload } from './types';
-import type { NotificationChannel, NotificationPriority, NotificationTemplate } from '@prisma/client';
+import type { NotificationChannel, NotificationPriority, NotificationTemplate, Prisma } from '@prisma/client';
 
 /**
  * Build a synthetic "rule" for ad-hoc dispatches that bypass the rule engine.
@@ -20,21 +20,9 @@ import type { NotificationChannel, NotificationPriority, NotificationTemplate } 
 function buildAdHocRules(input: DispatchInput): LoadedRule[] {
   if (!input.adHoc) return [];
   const { title, body, channels, priority } = input.adHoc;
-  return channels.map((channel) => ({
-    id: `adhoc:${input.triggerEvent}:${channel}`,
-    triggerEvent: input.triggerEvent,
-    category: null,
-    templateId: 'adhoc',
-    recipientRole: 'EMPLOYEE',
-    channel,
-    priority: priority ?? input.priority ?? 'MEDIUM',
-    version: 1,
-    isSystem: false,
-    isActive: true,
-    companyId: input.companyId,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    template: {
+  return channels.map((channel): LoadedRule => {
+    const now = new Date();
+    const template: NotificationTemplate = {
       id: 'adhoc',
       name: title,
       code: 'ADHOC',
@@ -43,23 +31,35 @@ function buildAdHocRules(input: DispatchInput): LoadedRule[] {
       channel,
       priority: priority ?? input.priority ?? 'MEDIUM',
       version: 1,
-      variables: [] as any,
-      sensitiveFields: [] as any,
+      variables: [] as Prisma.JsonValue,
+      sensitiveFields: [] as Prisma.JsonValue,
       compiledBody: body,
       compiledSubject: title,
       isSystem: false,
       isActive: true,
       companyId: input.companyId,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as NotificationTemplate,
-  } as unknown as LoadedRule));
+      createdAt: now,
+      updatedAt: now,
+    };
+    return {
+      id: `adhoc:${input.triggerEvent}:${channel}`,
+      triggerEvent: input.triggerEvent,
+      category: null,
+      templateId: 'adhoc',
+      recipientRole: 'EMPLOYEE',
+      channel,
+      priority: priority ?? input.priority ?? 'MEDIUM',
+      version: 1,
+      isSystem: false,
+      isActive: true,
+      companyId: input.companyId,
+      createdAt: now,
+      updatedAt: now,
+      template,
+    };
+  });
 }
 
-/**
- * Build a minimal fallback rule when no configured rules exist for a trigger event.
- * Guarantees at least an in-app notification so nothing is silently dropped.
- */
 function buildFallbackRules(input: DispatchInput): LoadedRule[] {
   const title = input.type ?? input.triggerEvent.replace(/_/g, ' ');
   const body = `Event: ${input.triggerEvent}`;
@@ -69,17 +69,31 @@ function buildFallbackRules(input: DispatchInput): LoadedRule[] {
   });
 }
 
+interface RecipientBucket {
+  userId: string;
+  rendered: RenderedNotification;
+  channels: NotificationChannel[];
+  priority: NotificationPriority;
+  category: string | null;
+  ruleId: string | null;
+  ruleVersion: number | null;
+  templateId: string | null;
+  templateVersion: number | null;
+}
+
 /**
  * PRIMARY entry point. Synchronous, fast, never throws.
  *
  * Flow:
  *   1. Load rules (or ad-hoc/fallback)
- *   2. Resolve recipients per rule
- *   3. Render template + dedup check per recipient
- *   4. Backpressure guard
- *   5. Write Notification rows (system of record)
- *   6. Emit socket event per recipient
- *   7. Enqueue delivery job with batching awareness
+ *   2. Group rules by recipient. For each recipient, aggregate all channels
+ *      into a single Notification row (the system of record).
+ *   3. Render template + dedup check per recipient (using the first rule's
+ *      template — rules targeting the same recipient share the same body).
+ *   4. Write ONE Notification row per recipient with deliveryStatus reflecting
+ *      each channel: IN_APP=SENT (always), others=PENDING.
+ *   5. Emit a single socket event per recipient.
+ *   6. Enqueue ONE delivery job per recipient with all non-IN_APP channels.
  */
 export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   const traceId = input.traceId ?? nanoid(12);
@@ -90,6 +104,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   }
 
   try {
+    // Load rules (or synthesize ad-hoc/fallback)
     let rules: LoadedRule[] = [];
     if (input.adHoc) {
       rules = buildAdHocRules(input);
@@ -105,17 +120,17 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       }
     }
 
-    const toEnqueue: QueueablePayload[] = [];
-    const createdNotificationIds: string[] = [];
+    // Group by recipient → aggregated RecipientBucket
     const recipientCache = new Map<string, string[]>();
+    const buckets = new Map<string, RecipientBucket>();
 
     for (const rule of rules) {
-      const cacheKey = rule.recipientRole;
+      // Resolve recipients for this rule (cached per recipientRole)
       let recipients: string[];
       if (input.explicitRecipients && input.explicitRecipients.length > 0) {
         recipients = input.explicitRecipients;
       } else {
-        const cached = recipientCache.get(cacheKey);
+        const cached = recipientCache.get(rule.recipientRole);
         recipients = cached ?? (await resolveRecipients(rule.recipientRole, {
           companyId: input.companyId,
           requesterId: input.recipientContext?.requesterId,
@@ -123,97 +138,134 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
           managerId: input.recipientContext?.managerId,
           departmentId: input.recipientContext?.departmentId,
         }));
-        recipientCache.set(cacheKey, recipients);
+        recipientCache.set(rule.recipientRole, recipients);
       }
       if (recipients.length === 0) continue;
 
-      const rendered = renderTemplate(rule.template, input.tokens ?? {});
-
-      // Dedup per recipient
-      const accepted: string[] = [];
       for (const userId of recipients) {
-        const dup = await checkDedup({
-          companyId: input.companyId,
-          triggerEvent: input.triggerEvent,
-          entityType: input.entityType,
-          entityId: input.entityId,
-          recipientId: userId,
-          payload: rendered,
-        });
-        if (!dup) accepted.push(userId);
-      }
-      if (accepted.length === 0) continue;
-
-      const priority: NotificationPriority =
-        input.priority ?? rule.priority ?? rule.template.priority ?? 'MEDIUM';
-
-      const guard = await guardBackpressure(priority);
-      if (guard === 'DROP') {
-        logger.warn('Dispatcher drop — backpressure', { traceId, trigger: input.triggerEvent, priority });
-        continue;
-      }
-
-      const channelForRule: NotificationChannel = rule.channel;
-
-      // Write Notification rows (system of record)
-      const createdRows: Array<{ id: string; userId: string }> = [];
-      for (const userId of accepted) {
-        try {
-          const row = await platformPrisma.notification.create({
-            data: {
-              userId,
-              companyId: input.companyId,
-              title: rendered.title,
-              body: rendered.body,
-              type: input.type ?? rule.triggerEvent,
-              category: rule.category ?? null,
-              entityType: input.entityType ?? null,
-              entityId: input.entityId ?? null,
-              data: rendered.data as any,
-              actionUrl: input.actionUrl ?? null,
-              priority,
-              status: 'UNREAD',
-              isRead: false,
-              deliveryStatus: {
-                inApp: 'SENT',
-                [channelForRule.toLowerCase()]: channelForRule === 'IN_APP' ? 'SENT' : 'PENDING',
-              } as any,
-              traceId,
-              ruleId: rule.id?.startsWith('adhoc:') ? null : rule.id,
-              ruleVersion: rule.version ?? null,
-              templateId: rule.template.id === 'adhoc' ? null : rule.template.id,
-              templateVersion: rule.template.version ?? null,
-              dedupHash: rendered.dedupHash,
-            },
-            select: { id: true, userId: true },
-          });
-          createdRows.push(row);
-          createdNotificationIds.push(row.id);
-        } catch (err) {
-          logger.error('Failed to create Notification row', { error: err, userId, traceId });
-        }
-      }
-
-      // Emit socket events + build queue payloads
-      for (const row of createdRows) {
-        emitSocketEvent(row.userId, { notificationId: row.id, traceId });
-
-        if (channelForRule !== 'IN_APP') {
-          toEnqueue.push({
-            notificationId: row.id,
-            userId: row.userId,
-            channels: [channelForRule],
-            priority,
-            traceId,
+        const existing = buckets.get(userId);
+        if (existing) {
+          // Merge: add this rule's channel to the user's bucket (deduplicated).
+          if (!existing.channels.includes(rule.channel)) {
+            existing.channels.push(rule.channel);
+          }
+          // Upgrade priority if this rule is higher priority
+          const thisPriority: NotificationPriority =
+            input.priority ?? rule.priority ?? rule.template.priority ?? 'MEDIUM';
+          if (priorityRank(thisPriority) > priorityRank(existing.priority)) {
+            existing.priority = thisPriority;
+          }
+        } else {
+          const rendered = renderTemplate(rule.template, input.tokens ?? {});
+          buckets.set(userId, {
+            userId,
+            rendered,
+            channels: [rule.channel],
+            priority: input.priority ?? rule.priority ?? rule.template.priority ?? 'MEDIUM',
             category: rule.category ?? null,
-            entityType: input.entityType ?? null,
-            systemCritical: input.systemCritical === true || priority === 'CRITICAL',
+            ruleId: rule.id?.startsWith('adhoc:') ? null : rule.id,
+            ruleVersion: rule.version ?? null,
+            templateId: rule.template.id === 'adhoc' ? null : rule.template.id,
+            templateVersion: rule.template.version ?? null,
           });
         }
       }
     }
 
-    // Enqueue delivery jobs
+    if (buckets.size === 0) {
+      return { traceId, enqueued: 0, notificationIds: [] };
+    }
+
+    // Dedup + create rows + emit sockets + enqueue, all per recipient
+    const createdNotificationIds: string[] = [];
+    const toEnqueue: QueueablePayload[] = [];
+
+    for (const bucket of buckets.values()) {
+      // Dedup on (companyId, triggerEvent, entityType, entityId, userId, payloadHash)
+      const dup = await checkDedup({
+        companyId: input.companyId,
+        triggerEvent: input.triggerEvent,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        recipientId: bucket.userId,
+        payload: bucket.rendered,
+      });
+      if (dup) continue;
+
+      const guard = await guardBackpressure(bucket.priority);
+      if (guard === 'DROP') {
+        logger.warn('Dispatcher drop — backpressure', {
+          traceId,
+          trigger: input.triggerEvent,
+          priority: bucket.priority,
+        });
+        continue;
+      }
+
+      // Build deliveryStatus: IN_APP always SENT, rest PENDING
+      const deliveryStatus: Record<string, string> = { inApp: 'SENT' };
+      for (const channel of bucket.channels) {
+        if (channel !== 'IN_APP') {
+          deliveryStatus[channel.toLowerCase()] = 'PENDING';
+        }
+      }
+
+      let row: { id: string; userId: string };
+      try {
+        row = await platformPrisma.notification.create({
+          data: {
+            userId: bucket.userId,
+            companyId: input.companyId,
+            title: bucket.rendered.title,
+            body: bucket.rendered.body,
+            type: input.type ?? input.triggerEvent,
+            category: bucket.category,
+            entityType: input.entityType ?? null,
+            entityId: input.entityId ?? null,
+            data: bucket.rendered.data as Prisma.InputJsonValue,
+            actionUrl: input.actionUrl ?? null,
+            priority: bucket.priority,
+            status: 'UNREAD',
+            isRead: false,
+            deliveryStatus: deliveryStatus as Prisma.InputJsonValue,
+            traceId,
+            ruleId: bucket.ruleId,
+            ruleVersion: bucket.ruleVersion,
+            templateId: bucket.templateId,
+            templateVersion: bucket.templateVersion,
+            dedupHash: bucket.rendered.dedupHash,
+          },
+          select: { id: true, userId: true },
+        });
+      } catch (err) {
+        logger.error('Failed to create Notification row', {
+          error: err,
+          userId: bucket.userId,
+          traceId,
+        });
+        continue;
+      }
+
+      createdNotificationIds.push(row.id);
+      emitSocketEvent(row.userId, { notificationId: row.id, traceId });
+
+      // Enqueue one job for all non-IN_APP channels (IN_APP is already delivered)
+      const deliveryChannels = bucket.channels.filter((c) => c !== 'IN_APP');
+      if (deliveryChannels.length > 0) {
+        toEnqueue.push({
+          notificationId: row.id,
+          userId: row.userId,
+          channels: deliveryChannels,
+          priority: bucket.priority,
+          traceId,
+          category: bucket.category,
+          entityType: input.entityType ?? null,
+          systemCritical: input.systemCritical === true || bucket.priority === 'CRITICAL',
+        });
+      }
+    }
+
+    // Enqueue with batching
     for (const payload of toEnqueue) {
       try {
         await enqueueWithBatching(payload);
@@ -235,5 +287,15 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   } catch (err) {
     logger.error('Dispatcher internal error', { error: err, traceId, trigger: input.triggerEvent });
     return { traceId, enqueued: 0, notificationIds: [], error: String(err) };
+  }
+}
+
+function priorityRank(p: NotificationPriority): number {
+  switch (p) {
+    case 'CRITICAL': return 4;
+    case 'HIGH': return 3;
+    case 'MEDIUM': return 2;
+    case 'LOW': return 1;
+    default: return 0;
   }
 }
