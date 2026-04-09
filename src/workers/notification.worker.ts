@@ -1,158 +1,173 @@
-import Queue from 'bull';
-import nodemailer from 'nodemailer';
+import 'dotenv/config';
+import { Worker, Job } from 'bullmq';
+import { bullmqConnection, BULLMQ_PREFIX } from '../core/notifications/queue/connection';
+import { notifQueueDLQ } from '../core/notifications/queue/queues';
+import {
+  WORKER_CONCURRENCY,
+  WORKER_LIMITER_HIGH,
+  WORKER_LIMITER_DEFAULT,
+  WORKER_LIMITER_LOW,
+} from '../core/notifications/queue/rate-limiter-config';
+import { channelRouter } from '../core/notifications/channels/channel-router';
+import { isAlreadySent, markSent } from '../core/notifications/idempotency/worker-idempotency';
+import { checkConsent } from '../core/notifications/dispatch/consent-gate';
+import { recordEvent, updateDeliveryStatus } from '../core/notifications/events/event-emitter';
 import { logger } from '../config/logger';
-import { getBullQueueConfig } from '../config/redis';
-import { env } from '../config/env';
+import { notificationService } from '../core/notifications/notification.service';
 
-// Create notification queue
-const notificationQueue = new Queue('notifications', getBullQueueConfig('notifications'));
+// Initialise Firebase Admin so the FCM provider can dispatch web pushes.
+void notificationService.initFirebase();
 
-// Email transporter
-const emailTransporter = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: env.SMTP_PORT,
-  secure: env.SMTP_PORT === 465,
-  auth: env.SMTP_USER && env.SMTP_PASS ? {
-    user: env.SMTP_USER,
-    pass: env.SMTP_PASS,
-  } : undefined,
-});
+const LIMITERS = {
+  'notifications:high': WORKER_LIMITER_HIGH,
+  'notifications:default': WORKER_LIMITER_DEFAULT,
+  'notifications:low': WORKER_LIMITER_LOW,
+} as const;
 
-// Email notification job
-notificationQueue.process('send-email', async (job) => {
-  const { to, subject, html, text, from } = job.data;
+type QueueName = keyof typeof WORKER_CONCURRENCY;
 
-  logger.info(`Sending email to: ${to}`, { subject, jobId: job.id });
+function makeWorker(queueName: QueueName) {
+  const worker = new Worker(
+    queueName,
+    async (job: Job) => {
+      const { notificationId, userId, channels, traceId, priority, systemCritical } = job.data as {
+        notificationId: string;
+        userId: string;
+        channels: string[];
+        traceId: string;
+        priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+        systemCritical: boolean;
+      };
 
-  try {
-    const mailOptions = {
-      from: from || `${env.FROM_NAME} <${env.FROM_EMAIL}>`,
-      to,
-      subject,
-      html,
-      text,
-    };
+      logger.info('Notification delivery start', {
+        jobId: job.id,
+        notificationId,
+        channels,
+        traceId,
+        queue: queueName,
+      });
 
-    const result = await emailTransporter.sendMail(mailOptions);
+      for (const channel of channels) {
+        // Worker-level idempotency guard
+        if (await isAlreadySent(notificationId, channel)) {
+          logger.info('Skip — already sent (idempotency)', { notificationId, channel, traceId });
+          continue;
+        }
 
-    logger.info(`Email sent successfully: ${result.messageId}`);
+        // Re-check consent (may have changed since dispatch)
+        const consent = await checkConsent({
+          userId,
+          channel: channel as any,
+          priority,
+          systemCritical,
+        });
+        if (!consent.allowed) {
+          await updateDeliveryStatus(notificationId, channel as any, 'SKIPPED');
+          await recordEvent({
+            notificationId,
+            channel: channel as any,
+            event: 'SKIPPED',
+            errorCode: consent.reason,
+            traceId,
+            source: job.attemptsMade > 0 ? 'RETRY' : 'SYSTEM',
+          });
+          continue;
+        }
 
-    return { messageId: result.messageId, status: 'sent' };
-  } catch (error) {
-    logger.error(`Failed to send email to ${to}:`, error);
-    throw error;
-  }
-});
+        try {
+          const result = await channelRouter.send({
+            notificationId,
+            userId,
+            channel: channel as any,
+            traceId,
+            priority,
+          });
+          await markSent(notificationId, channel);
+          await updateDeliveryStatus(notificationId, channel as any, 'SENT');
+          await recordEvent({
+            notificationId,
+            channel: channel as any,
+            event: 'SENT',
+            provider: result.provider,
+            providerMessageId: result.messageId ?? undefined,
+            expoTicketId: result.expoTicketId ?? undefined,
+            traceId,
+            source: job.attemptsMade > 0 ? 'RETRY' : 'SYSTEM',
+          });
+        } catch (err) {
+          const errCode = (err as any)?.code ?? 'UNKNOWN';
+          const errMsg = (err as Error)?.message ?? String(err);
+          await updateDeliveryStatus(notificationId, channel as any, 'FAILED');
+          await recordEvent({
+            notificationId,
+            channel: channel as any,
+            event: 'FAILED',
+            errorCode: errCode,
+            errorMessage: errMsg,
+            traceId,
+            source: job.attemptsMade > 0 ? 'RETRY' : 'SYSTEM',
+          });
+          throw err; // trigger BullMQ retry
+        }
+      }
+    },
+    {
+      connection: bullmqConnection,
+      prefix: BULLMQ_PREFIX,
+      concurrency: WORKER_CONCURRENCY[queueName],
+      limiter: LIMITERS[queueName],
+    },
+  );
 
-// SMS notification job (placeholder - would integrate with SMS provider)
-notificationQueue.process('send-sms', async (job) => {
-  const { to, message } = job.data;
+  worker.on('completed', (job) => {
+    logger.info('Notification job completed', { id: job.id, queue: queueName });
+  });
 
-  logger.info(`Sending SMS to: ${to}`, { jobId: job.id });
-
-  try {
-    // TODO: Integrate with actual SMS provider (Twilio, AWS SNS, etc.)
-    if (!env.SMS_API_KEY) {
-      logger.warn('SMS API key not configured, skipping SMS send');
-      return { status: 'skipped', reason: 'SMS not configured' };
+  worker.on('failed', async (job, err) => {
+    logger.warn('Notification job failed', {
+      id: job?.id,
+      queue: queueName,
+      attempt: job?.attemptsMade,
+      error: err.message,
+    });
+    // Move to DLQ once all retry attempts exhausted
+    if (job && job.attemptsMade >= (job.opts.attempts ?? 3)) {
+      try {
+        await notifQueueDLQ.add('dead-letter', {
+          originalQueue: queueName,
+          jobId: job.id,
+          data: job.data,
+          error: err.message,
+          failedAt: new Date().toISOString(),
+        });
+      } catch (dlqErr) {
+        logger.error('Failed to write to DLQ', { error: dlqErr, jobId: job.id });
+      }
     }
+  });
 
-    // Simulate SMS sending
-    await new Promise(resolve => setTimeout(resolve, 500));
+  worker.on('error', (err) => {
+    logger.error('Worker error', { error: err, queue: queueName });
+  });
 
-    logger.info(`SMS sent successfully to: ${to}`);
+  return worker;
+}
 
-    return { status: 'sent' };
-  } catch (error) {
-    logger.error(`Failed to send SMS to ${to}:`, error);
-    throw error;
-  }
-});
+const workers = [
+  makeWorker('notifications:high'),
+  makeWorker('notifications:default'),
+  makeWorker('notifications:low'),
+];
 
-// Push notification job (placeholder - would integrate with FCM/APNs)
-notificationQueue.process('send-push', async (job) => {
-  const { userId, title, body, data } = job.data;
-
-  logger.info(`Sending push notification to user: ${userId}`, { title, jobId: job.id });
-
-  try {
-    // TODO: Integrate with Firebase Cloud Messaging or Apple Push Notification service
-    // For now, just log the notification
-
-    logger.info(`Push notification sent to user ${userId}: ${title}`);
-
-    return { status: 'sent' };
-  } catch (error) {
-    logger.error(`Failed to send push notification to user ${userId}:`, error);
-    throw error;
-  }
-});
-
-// Bulk notification job
-notificationQueue.process('send-bulk-email', async (job) => {
-  const { recipients, subject, html, text } = job.data;
-
-  logger.info(`Sending bulk email to ${recipients.length} recipients`, { subject, jobId: job.id });
-
-  try {
-    const results = [];
-
-    // Send emails in batches to avoid rate limits
-    const batchSize = 10;
-    for (let i = 0; i < recipients.length; i += batchSize) {
-      const batch = recipients.slice(i, i + batchSize);
-
-      const promises = batch.map((recipient: string) =>
-        notificationQueue.add('send-email', {
-          to: recipient,
-          subject,
-          html,
-          text,
-        })
-      );
-
-      await Promise.all(promises);
-      results.push(...batch);
-    }
-
-    logger.info(`Bulk email jobs queued for ${results.length} recipients`);
-
-    return { recipients: results.length, status: 'queued' };
-  } catch (error) {
-    logger.error(`Failed to queue bulk emails:`, error);
-    throw error;
-  }
-});
-
-// Queue event handlers
-notificationQueue.on('completed', (job, result) => {
-  logger.info(`Notification job completed: ${job.id}`, { type: job.name, result });
-});
-
-notificationQueue.on('failed', (job, err) => {
-  logger.error(`Notification job failed: ${job.id}`, { type: job.name, error: err.message });
-});
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('Notification worker shutting down...');
-  await notificationQueue.close();
-  if (emailTransporter) {
-    emailTransporter.close();
-  }
+async function shutdown(signal: string) {
+  logger.info(`${signal} received — shutting down notification workers`);
+  await Promise.all(workers.map((w) => w.close()));
   process.exit(0);
-});
+}
 
-process.on('SIGINT', async () => {
-  logger.info('Notification worker shutting down...');
-  await notificationQueue.close();
-  if (emailTransporter) {
-    emailTransporter.close();
-  }
-  process.exit(0);
-});
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
-logger.info('Notification worker started and listening for jobs...');
+logger.info('Notification workers started (3 priority queues)');
 
-// Export for testing
-export { notificationQueue };
+export { workers };

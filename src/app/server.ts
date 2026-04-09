@@ -55,6 +55,27 @@ async function startServer(): Promise<void> {
 
       // Register event listeners
       registerHRListeners();
+
+      // Schedule notification repeatable jobs (receipt poller + DLQ sweeper)
+      if (env.NOTIFICATIONS_ENABLED) {
+        void (async () => {
+          try {
+            const { ensureReceiptPollerScheduled, startReceiptPollerWorker } = await import(
+              '../core/notifications/workers/receipt-poller.worker'
+            );
+            const { ensureDlqSweeperScheduled, startDlqSweeperWorker } = await import(
+              '../core/notifications/workers/dlq-sweeper.worker'
+            );
+            await ensureReceiptPollerScheduled();
+            await ensureDlqSweeperScheduled();
+            startReceiptPollerWorker();
+            startDlqSweeperWorker();
+            logger.info('✅ Notification receipt poller + DLQ sweeper started');
+          } catch (err) {
+            logger.error('Failed to start notification workers', { error: err });
+          }
+        })();
+      }
     });
 
     // Handle server errors
