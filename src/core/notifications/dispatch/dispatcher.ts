@@ -11,6 +11,7 @@ import { enqueueWithBatching } from './enqueue';
 import { renderTemplate, type RenderedNotification } from '../templates/renderer';
 import { recordEvent } from '../events/event-emitter';
 import { emitSocketEvent } from '../events/socket-emitter';
+import { notificationMetrics } from '../metrics/notification-metrics';
 import type { DispatchInput, DispatchResult, QueueablePayload } from './types';
 import type { NotificationChannel, NotificationPriority, NotificationTemplate, Prisma } from '@prisma/client';
 
@@ -100,6 +101,7 @@ interface RecipientBucket {
  */
 export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   const traceId = input.traceId ?? nanoid(12);
+  const startTime = Date.now();
 
   if (!env.NOTIFICATIONS_ENABLED) {
     logger.info('NOTIFICATIONS_ENABLED=false — dispatch skipped', { traceId, trigger: input.triggerEvent });
@@ -336,9 +338,20 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       }
     }
 
+    notificationMetrics.histogram('notifications.dispatch_duration_ms', Date.now() - startTime, {
+      triggerEvent: input.triggerEvent,
+    });
+    notificationMetrics.increment('notifications.dispatched', {
+      triggerEvent: input.triggerEvent,
+      priority: input.priority ?? 'MEDIUM',
+    }, toEnqueue.length);
+
     return { traceId, enqueued: toEnqueue.length, notificationIds: createdNotificationIds };
   } catch (err) {
     logger.error('Dispatcher internal error', { error: err, traceId, trigger: input.triggerEvent });
+    notificationMetrics.increment('notifications.dispatch_error', {
+      triggerEvent: input.triggerEvent,
+    });
     return { traceId, enqueued: 0, notificationIds: [] };
   }
 }

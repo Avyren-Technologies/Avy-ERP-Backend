@@ -1,6 +1,7 @@
 import { cacheRedis } from '../../../config/redis';
 import { env } from '../../../config/env';
 import { logger } from '../../../config/logger';
+import { notificationMetrics } from '../metrics/notification-metrics';
 import type { NotificationPriority } from '@prisma/client';
 
 /**
@@ -27,6 +28,10 @@ export async function checkUserRateLimit(
         userId,
         count,
         max,
+        priority,
+      });
+      notificationMetrics.increment('notifications.rate_limited', {
+        scope: 'user',
         priority,
       });
       return false;
@@ -61,6 +66,10 @@ export async function checkTenantRateLimit(
         companyId,
         count,
         max,
+        priority,
+      });
+      notificationMetrics.increment('notifications.rate_limited', {
+        scope: 'tenant',
         priority,
       });
       return false;

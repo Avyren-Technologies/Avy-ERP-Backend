@@ -1,3 +1,5 @@
+import type { NotificationChannel } from '@prisma/client';
+
 export interface MaskablePayload {
   title: string;
   body: string;
@@ -5,23 +7,38 @@ export interface MaskablePayload {
 }
 
 /**
+ * Channels where sensitive fields are masked with `***`.
+ *
+ * PUSH — delivered to lock screens, visible to bystanders
+ * SMS — delivered as plaintext, often seen in notification previews
+ * WHATSAPP — delivered as plaintext, same concern
+ *
+ * IN_APP and EMAIL keep full content (in-app is the system of record;
+ * email is typically private to the recipient's inbox).
+ */
+const MASKED_CHANNELS: NotificationChannel[] = ['PUSH', 'SMS', 'WHATSAPP'];
+
+/**
  * Mask sensitive fields for the given channel.
  *
  * Semantics:
- *   - IN_APP / EMAIL / SMS / WHATSAPP: no masking (full text delivered)
- *   - PUSH: sensitiveFields are replaced with '***' in title, body, and data
+ *   - IN_APP / EMAIL: no masking (full text delivered)
+ *   - PUSH / SMS / WHATSAPP: sensitiveFields are replaced with '***' in
+ *     title, body, and data
  *
  * In-app rows are always unmasked (system of record). Users open the app
  * to see the actual values.
  */
 export function maskForChannel<T extends MaskablePayload>(
-  channel: 'PUSH' | 'EMAIL' | 'SMS' | 'WHATSAPP' | 'IN_APP',
+  channel: NotificationChannel,
   payload: T,
   sensitiveFields: string[],
 ): T {
-  if (channel !== 'PUSH' || sensitiveFields.length === 0) return payload;
+  if (!MASKED_CHANNELS.includes(channel) || sensitiveFields.length === 0) return payload;
 
-  const dataObj: Record<string, unknown> = { ...((payload.data as Record<string, unknown> | undefined) ?? {}) };
+  const dataObj: Record<string, unknown> = {
+    ...((payload.data as Record<string, unknown> | undefined) ?? {}),
+  };
 
   const maskInString = (s: string): string => {
     let out = s;
