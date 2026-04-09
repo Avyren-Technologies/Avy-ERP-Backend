@@ -3,6 +3,7 @@ import { platformPrisma } from '../../config/database';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../config/logger';
 import { dispatch } from './dispatch/dispatcher';
+import { dispatchBulk } from './dispatch/dispatch-bulk';
 
 /**
  * Typed mapping from legacy lowercase channel strings to the Prisma enum.
@@ -26,6 +27,12 @@ class NotificationService {
    * `notificationService.dispatch({...})`.
    */
   dispatch = dispatch;
+
+  /**
+   * Bulk dispatch API. REQUIRED for fanouts ≥20 recipients (payroll, cron, ALL role).
+   * Internally chunks + rate limits + dedups + batch-inserts.
+   */
+  dispatchBulk = dispatchBulk;
 
   /**
    * Initialize Firebase Admin SDK for FCM web push.
