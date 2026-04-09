@@ -118,6 +118,20 @@ const envSchema = z.object({
   MAIN_DOMAIN: z.string().default('avyren.in'),
   TENANT_CLIENT_CACHE_SIZE: z.coerce.number().default(50),
   SUPER_ADMIN_EMAIL: z.string().email().optional(),
+
+  // Notifications
+  FIREBASE_SERVICE_ACCOUNT_KEY: z.string().optional(),
+  EXPO_ACCESS_TOKEN: z.string().optional(),
+  NOTIFICATIONS_ENABLED: envBoolean.default(true),
+  NOTIFICATIONS_DEDUP_TTL_SEC: z.coerce.number().default(60),
+  NOTIFICATIONS_IDEMPOTENCY_TTL_SEC: z.coerce.number().default(86400),
+  NOTIFICATIONS_BATCH_THRESHOLD: z.coerce.number().default(5),
+  NOTIFICATIONS_BATCH_WINDOW_SEC: z.coerce.number().default(300),
+  NOTIFICATIONS_MAX_QUEUE_LOW: z.coerce.number().default(10000),
+  NOTIFICATIONS_MAX_QUEUE_DEFAULT: z.coerce.number().default(50000),
+  NOTIFICATIONS_RECEIPT_POLL_SEC: z.coerce.number().default(30),
+  NOTIFICATIONS_RECEIPT_MAX_AGE_MIN: z.coerce.number().default(15),
+  NOTIFICATIONS_DLQ_RETENTION_DAYS: z.coerce.number().default(7),
 });
 
 // Parse and validate environment variables
