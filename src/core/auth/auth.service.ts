@@ -31,6 +31,7 @@ import {
 import type { MfaChallengeResponse, MfaSetupResponse, MfaVerifyRequest, LoginResult } from './auth.types';
 import { sendPasswordResetCode } from '../../infrastructure/email/email.service';
 import { rbacService } from '../rbac/rbac.service';
+import { notificationService } from '../notifications/notification.service';
 
 const JWT_ALGORITHM: jwt.Algorithm = 'HS256';
 
@@ -533,12 +534,35 @@ export class AuthService {
       },
     });
 
-    // Send email
+    // Send email (legacy direct send kept for reliability even if the
+    // notification pipeline is unavailable — password reset is CRITICAL)
     try {
       await sendPasswordResetCode(user.email, code, user.firstName);
       logger.info(`Password reset code sent to: ${user.email}`);
     } catch (error) {
       logger.error(`Failed to send password reset email to ${user.email}:`, error);
+    }
+
+    // Also fan out via the notification pipeline so PUSH/IN_APP rules
+    // configured by admins apply (e.g. "also notify on mobile").
+    // CRITICAL + systemCritical bypasses quiet hours + user preferences.
+    try {
+      await notificationService.dispatch({
+        companyId: user.companyId ?? '',
+        triggerEvent: 'PASSWORD_RESET',
+        entityType: 'User',
+        entityId: user.id,
+        explicitRecipients: [user.id],
+        tokens: {
+          user_name: `${user.firstName} ${user.lastName ?? ''}`.trim(),
+          expires_in: '15 minutes',
+        },
+        priority: 'CRITICAL',
+        systemCritical: true,
+        type: 'AUTH',
+      });
+    } catch (err) {
+      logger.warn('Password reset dispatch failed (non-blocking)', { error: err, userId: user.id });
     }
   }
 
@@ -700,6 +724,20 @@ export class AuthService {
     const tokenHash = this.hashToken(refreshToken);
     const expiresAt = new Date(Date.now() + this.parseExpiresInToSeconds(env.JWT_REFRESH_EXPIRES_IN) * 1000);
 
+    // New-device detection — compare against the user's most recent session
+    // before creating the new one. "New" = no prior session, or a different
+    // deviceInfo string (most platforms send a stable UA/device fingerprint).
+    let isNewDevice = false;
+    try {
+      const lastSession = await platformPrisma.activeSession.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      });
+      isNewDevice = !lastSession || lastSession.deviceInfo !== (deviceInfo ?? null);
+    } catch {
+      // Detection is best-effort; don't fail login on a lookup error.
+    }
+
     await platformPrisma.activeSession.create({
       data: {
         userId,
@@ -709,6 +747,29 @@ export class AuthService {
         ...(ipAddress != null ? { ipAddress } : {}),
       },
     });
+
+    // NEW_DEVICE_LOGIN is CRITICAL + systemCritical — security event.
+    if (isNewDevice) {
+      try {
+        await notificationService.dispatch({
+          companyId: companyId ?? '',
+          triggerEvent: 'NEW_DEVICE_LOGIN',
+          entityType: 'User',
+          entityId: userId,
+          explicitRecipients: [userId],
+          tokens: {
+            device_info: deviceInfo ?? 'unknown device',
+            ip_address: ipAddress ?? 'unknown',
+            login_time: new Date().toISOString(),
+          },
+          priority: 'CRITICAL',
+          systemCritical: true,
+          type: 'AUTH',
+        });
+      } catch (err) {
+        logger.warn('New device login dispatch failed (non-blocking)', { error: err, userId });
+      }
+    }
 
     if (!companyId) return; // super-admin has no company-level limits
 
