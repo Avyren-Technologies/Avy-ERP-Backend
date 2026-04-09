@@ -2068,9 +2068,12 @@ export class AdvancedHRService {
       throw ApiError.badRequest('Only SUBMITTED or PENDING_APPROVAL claims can be approved or rejected');
     }
 
+    let updated;
+    let finalStatus: 'APPROVED' | 'REJECTED' | 'PARTIALLY_APPROVED';
+    let finalAmount = Number(claim.amount);
+
     if (data.action === 'reject') {
-      // Full rejection
-      const updated = await platformPrisma.expenseClaim.update({
+      updated = await platformPrisma.expenseClaim.update({
         where: { id },
         data: {
           status: 'REJECTED',
@@ -2080,18 +2083,15 @@ export class AdvancedHRService {
         },
         include: { items: true },
       });
-      // Mark all items as rejected
       if (claim.items.length > 0) {
         await platformPrisma.expenseClaimItem.updateMany({
           where: { claimId: id },
           data: { isApproved: false, rejectionReason: data.rejectionReason ?? 'Claim rejected' },
         });
       }
-      return updated;
-    }
-
-    // Approval (full or partial)
-    if (data.itemApprovals && data.itemApprovals.length > 0) {
+      finalStatus = 'REJECTED';
+      finalAmount = 0;
+    } else if (data.itemApprovals && data.itemApprovals.length > 0) {
       // Partial approval — process per-item decisions
       let totalApproved = 0;
       let hasRejections = false;
@@ -2119,7 +2119,7 @@ export class AdvancedHRService {
       }
 
       const newStatus = hasRejections ? 'PARTIALLY_APPROVED' : 'APPROVED';
-      return platformPrisma.expenseClaim.update({
+      updated = await platformPrisma.expenseClaim.update({
         where: { id },
         data: {
           status: newStatus,
@@ -2129,19 +2129,61 @@ export class AdvancedHRService {
         },
         include: { items: true },
       });
+      finalStatus = newStatus;
+      finalAmount = totalApproved;
+    } else {
+      // Full approval
+      const approvedAmount = data.approvedAmount ?? Number(claim.amount);
+      updated = await platformPrisma.expenseClaim.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          approvedAmount,
+          approvedBy: n(data.approvedBy),
+          approvedAt: new Date(),
+        },
+        include: { items: true },
+      });
+      finalStatus = 'APPROVED';
+      finalAmount = approvedAmount;
     }
 
-    // Full approval
-    return platformPrisma.expenseClaim.update({
-      where: { id },
-      data: {
-        status: 'APPROVED',
-        approvedAmount: data.approvedAmount ?? claim.amount,
-        approvedBy: n(data.approvedBy),
-        approvedAt: new Date(),
-      },
-      include: { items: true },
-    });
+    // Notify the employee who submitted the claim (non-blocking).
+    try {
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: claim.employeeId },
+        select: { firstName: true, lastName: true, user: { select: { id: true } } },
+      });
+      if (employee?.user?.id) {
+        const triggerEvent =
+          finalStatus === 'REJECTED'
+            ? 'EXPENSE_CLAIM_REJECTED'
+            : finalStatus === 'PARTIALLY_APPROVED'
+              ? 'EXPENSE_CLAIM_PARTIALLY_APPROVED'
+              : 'EXPENSE_CLAIM_APPROVED';
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent,
+          entityType: 'ExpenseClaim',
+          entityId: id,
+          explicitRecipients: [employee.user.id],
+          tokens: {
+            employee_name: `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim(),
+            submitted_amount: Number(claim.amount).toString(),
+            approved_amount: finalAmount.toString(),
+            rejection_reason: data.rejectionReason ?? '',
+          },
+          priority: 'HIGH',
+          systemCritical: true,
+          actionUrl: `/company/hr/my-expenses`,
+          type: 'REIMBURSEMENT',
+        });
+      }
+    } catch (err) {
+      logger.warn('Expense claim decision dispatch failed (non-blocking)', { error: err, claimId: id });
+    }
+
+    return updated;
   }
 
   async deleteExpenseClaim(companyId: string, id: string) {

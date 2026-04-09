@@ -4,6 +4,7 @@ import { ApiError } from '../../shared/errors';
 import { hashPassword } from '../../shared/utils';
 import { n } from '../../shared/utils/prisma-helpers';
 import { logger } from '../../config/logger';
+import { notificationService } from '../notifications/notification.service';
 import { MODULE_CATALOGUE, USER_TIERS, pricingService } from '../billing/pricing.service';
 import {
   invalidateCompanySettings,
@@ -1209,6 +1210,26 @@ export class CompanyAdminService {
     });
 
     logger.info(`User ${userId} status updated to ${isActive ? 'active' : 'inactive'} by company admin (company: ${companyId})`);
+
+    // Notify the affected user — HIGH + systemCritical because the
+    // account status change controls whether they can log in at all.
+    try {
+      await notificationService.dispatch({
+        companyId,
+        triggerEvent: isActive ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
+        entityType: 'User',
+        entityId: userId,
+        explicitRecipients: [userId],
+        tokens: {
+          user_name: `${updated.firstName ?? ''} ${updated.lastName ?? ''}`.trim(),
+        },
+        priority: 'HIGH',
+        systemCritical: true,
+        type: 'AUTH',
+      });
+    } catch (err) {
+      logger.warn('User status change dispatch failed (non-blocking)', { error: err, userId });
+    }
 
     // Include role info
     const tenantUser = await platformPrisma.tenantUser.findFirst({
