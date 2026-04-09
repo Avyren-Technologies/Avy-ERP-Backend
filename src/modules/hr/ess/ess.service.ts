@@ -7,6 +7,36 @@ import { invalidateESSConfig, getCachedCompanySettings } from '../../../shared/u
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
 import { n } from '../../../shared/utils/prisma-helpers';
+import type { NotificationPriority } from '@prisma/client';
+import { notificationService } from '../../../core/notifications/notification.service';
+import {
+  getCurrentStepApproverIds,
+  getRequesterUserId,
+} from '../../../core/notifications/dispatch/approver-resolver';
+
+/**
+ * Mapping from ApprovalRequest.entityType to the notification trigger events
+ * fired when the request is finalized. Used by `onApprovalComplete` to emit a
+ * single notification per (entity, decision) in a central place so that every
+ * entity type stays consistent.
+ */
+const TRIGGER_BY_ENTITY: Record<
+  string,
+  { approved: string; rejected: string; category: string; priority: NotificationPriority }
+> = {
+  LeaveRequest:       { approved: 'LEAVE_APPROVED',             rejected: 'LEAVE_REJECTED',             category: 'LEAVE',              priority: 'MEDIUM' },
+  AttendanceOverride: { approved: 'ATTENDANCE_REGULARIZED',     rejected: 'ATTENDANCE_REGULARIZATION_REJECTED', category: 'ATTENDANCE',  priority: 'MEDIUM' },
+  OvertimeRequest:    { approved: 'OVERTIME_CLAIM_APPROVED',    rejected: 'OVERTIME_CLAIM_REJECTED',    category: 'OVERTIME',           priority: 'MEDIUM' },
+  ShiftSwapRequest:   { approved: 'SHIFT_SWAP_APPROVED',        rejected: 'SHIFT_SWAP_REJECTED',        category: 'SHIFT',              priority: 'MEDIUM' },
+  WfhRequest:         { approved: 'WFH_APPROVED',               rejected: 'WFH_REJECTED',               category: 'WFH',                priority: 'MEDIUM' },
+  ExpenseClaim:       { approved: 'REIMBURSEMENT_APPROVED',     rejected: 'REIMBURSEMENT_REJECTED',     category: 'REIMBURSEMENT',      priority: 'MEDIUM' },
+  LoanRecord:         { approved: 'LOAN_APPROVED',              rejected: 'LOAN_REJECTED',              category: 'LOAN',               priority: 'HIGH'   },
+  ExitRequest:        { approved: 'RESIGNATION_ACCEPTED',       rejected: 'RESIGNATION_REJECTED',       category: 'RESIGNATION',        priority: 'HIGH'   },
+  EmployeeTransfer:   { approved: 'EMPLOYEE_TRANSFER_APPLIED',  rejected: 'EMPLOYEE_TRANSFER_REJECTED', category: 'EMPLOYEE_LIFECYCLE', priority: 'MEDIUM' },
+  EmployeePromotion:  { approved: 'EMPLOYEE_PROMOTION_APPLIED', rejected: 'EMPLOYEE_PROMOTION_REJECTED',category: 'EMPLOYEE_LIFECYCLE', priority: 'HIGH'   },
+  SalaryRevision:     { approved: 'SALARY_REVISION_APPROVED',   rejected: 'SALARY_REVISION_REJECTED',   category: 'PAYROLL',            priority: 'HIGH'   },
+  PayrollRun:         { approved: 'PAYROLL_APPROVED',           rejected: 'PAYROLL_REJECTED',           category: 'PAYROLL',            priority: 'HIGH'   },
+};
 
 /** ESS my-profile JSON: never expose full bank account — last 4 digits only (digits after stripping non-numeric). */
 function bankAccountLast4Only(raw: string | null | undefined): string | null {
@@ -746,6 +776,47 @@ export class ESSService {
       // The approval itself succeeded; entity update failure should be retryable
       logger.error(`Approval callback failed for ${entityType}/${entityId}:`, error);
     }
+
+    // Universal post-switch dispatch — fires one notification to the
+    // requester per (entityType, decision). Isolated in its own try/catch
+    // so that a notification bug never blocks the approval callback or
+    // leaks into other entity types. The business status updates in the
+    // switch above have already committed by the time we get here.
+    try {
+      const trigger = TRIGGER_BY_ENTITY[entityType];
+      if (trigger) {
+        const approvalRequest = await platformPrisma.approvalRequest.findFirst({
+          where: { entityType, entityId },
+          select: { requesterId: true, data: true },
+        });
+        const requesterUserId = await getRequesterUserId({
+          employeeId: approvalRequest?.requesterId,
+          userId: approvalRequest?.requesterId,
+        });
+        if (requesterUserId) {
+          const snapshotTokens =
+            approvalRequest?.data && typeof approvalRequest.data === 'object'
+              ? (approvalRequest.data as Record<string, unknown>)
+              : {};
+          await notificationService.dispatch({
+            companyId,
+            triggerEvent:
+              decision === 'APPROVED' ? trigger.approved : trigger.rejected,
+            entityType,
+            entityId,
+            explicitRecipients: [requesterUserId],
+            tokens: snapshotTokens,
+            priority: trigger.priority,
+            type: trigger.category,
+          });
+        }
+      }
+    } catch (dispatchErr) {
+      logger.error(`Approval dispatch failed for ${entityType}/${entityId} (non-fatal)`, {
+        error: dispatchErr,
+        decision,
+      });
+    }
   }
 
   /**
@@ -787,7 +858,7 @@ export class ESSService {
       );
     }
 
-    return platformPrisma.approvalRequest.create({
+    const created = await platformPrisma.approvalRequest.create({
       data: {
         companyId,
         workflowId: workflow.id,
@@ -800,6 +871,46 @@ export class ESSService {
         data: data.data ?? Prisma.JsonNull,
       },
     });
+
+    // Non-blocking submission notification. Because every ESS submission
+    // flows through this method, wiring the dispatch here covers all 13+
+    // request types in one place (leave, shift change/swap, WFH, profile,
+    // reimbursement, loan, IT declaration, travel, helpdesk, grievance,
+    // overtime, training, attendance regularization, etc.).
+    //
+    // Token enrichment is intentionally minimal — rule templates are
+    // responsible for reading from `data.data` (the submission payload
+    // snapshot stored on ApprovalRequest) if they need entity fields.
+    try {
+      const approverIds = await getCurrentStepApproverIds(data.entityType, data.entityId);
+      const requesterUserId = await getRequesterUserId({
+        employeeId: data.requesterId,
+        userId: data.requesterId,
+      });
+      await notificationService.dispatch({
+        companyId,
+        triggerEvent: data.triggerEvent,
+        entityType: data.entityType,
+        entityId: data.entityId,
+        recipientContext: {
+          ...(requesterUserId && { requesterId: requesterUserId }),
+          approverIds,
+        },
+        tokens: (data.data && typeof data.data === 'object'
+          ? (data.data as Record<string, unknown>)
+          : {}),
+        type: data.triggerEvent,
+      });
+    } catch (err) {
+      logger.warn('ESS submission dispatch failed (non-blocking)', {
+        error: err,
+        triggerEvent: data.triggerEvent,
+        entityType: data.entityType,
+        entityId: data.entityId,
+      });
+    }
+
+    return created;
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1177,58 +1288,22 @@ export class ESSService {
     return { message: 'Notification rule deleted' };
   }
 
-  async triggerNotification(companyId: string, event: string, data: any) {
-    // Find matching rules
-    const rules = await platformPrisma.notificationRule.findMany({
-      where: {
-        companyId,
-        triggerEvent: event,
-        isActive: true,
-      },
-      include: { template: true },
+  /**
+   * @deprecated Use `notificationService.dispatch()` directly.
+   *
+   * Legacy shim — delegates to the unified dispatcher so existing callers
+   * continue to work during migration. The body previously re-implemented
+   * rule loading + token rendering + per-channel delivery, duplicating the
+   * notification pipeline. Kept only for source-compatibility; remove all
+   * call sites and delete this method in a future cleanup.
+   */
+  async triggerNotification(companyId: string, event: string, data: Record<string, unknown>) {
+    logger.warn('ess.triggerNotification is deprecated — use notificationService.dispatch', { event });
+    return notificationService.dispatch({
+      companyId,
+      triggerEvent: event,
+      tokens: data,
     });
-
-    if (rules.length === 0) return;
-
-    // Resolve template tokens and queue notifications (placeholder — just log)
-    for (const rule of rules) {
-      let body = rule.template.body;
-      let subject = rule.template.subject ?? '';
-
-      // Replace tokens in body and subject
-      if (data && typeof data === 'object') {
-        for (const [key, value] of Object.entries(data)) {
-          const token = `{${key}}`;
-          body = body.replace(new RegExp(token.replace(/[{}]/g, '\\$&'), 'g'), String(value));
-          subject = subject.replace(new RegExp(token.replace(/[{}]/g, '\\$&'), 'g'), String(value));
-        }
-      }
-
-      // Deliver notification based on channel
-      try {
-        if (rule.channel === 'EMAIL') {
-          const recipientEmails = await this.resolveRecipientEmails(companyId, rule.recipientRole, data);
-          if (recipientEmails.length > 0) {
-            const { sendEmail } = await import('@/infrastructure/email/email.service');
-            for (const email of recipientEmails) {
-              await sendEmail(
-                email,
-                subject,
-                `<div style="font-family:sans-serif;padding:20px;max-width:600px;margin:0 auto">${body.replace(/\n/g, '<br>')}</div>`,
-                body
-              );
-            }
-            logger.info(`[Notification:EMAIL] ${event} → ${recipientEmails.length} recipient(s)`);
-          }
-        } else if (rule.channel === 'IN_APP') {
-          logger.info(`[Notification:IN_APP] ${event} → ${rule.recipientRole}: ${subject}`);
-        } else {
-          logger.info(`[Notification:${rule.channel}] ${event} → ${rule.recipientRole}: ${subject} (channel not yet implemented)`);
-        }
-      } catch (err) {
-        logger.error(`[Notification] Failed to deliver ${rule.channel} notification for ${event}:`, err);
-      }
-    }
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1624,28 +1699,27 @@ export class ESSService {
     // Deduct leave balance immediately on application
     await this.deductLeaveBalance(companyId, employeeId, data.leaveTypeId, Number(data.days), new Date(data.fromDate), new Date(data.toDate));
 
-    // Create approval request — workflow is guaranteed to exist
+    // Create approval request — workflow is guaranteed to exist. The
+    // createRequest helper itself emits the LEAVE_APPLICATION notification
+    // via the unified dispatcher, so no separate triggerNotification call
+    // is needed here.
     await this.createRequest(companyId, {
       requesterId: employeeId,
       entityType: 'LeaveRequest',
       entityId: leaveRequest.id,
       triggerEvent: 'LEAVE_APPLICATION',
       data: {
+        employee_name: employee.employeeId,
         employeeId: employee.employeeId,
         leaveTypeId: data.leaveTypeId,
         fromDate: data.fromDate,
         toDate: data.toDate,
+        from_date: data.fromDate,
+        to_date: data.toDate,
         days: data.days,
+        leave_days: data.days,
         reason: data.reason,
       },
-    });
-
-    // Trigger notification
-    await this.triggerNotification(companyId, 'LEAVE_APPLICATION', {
-      employee_name: employee.employeeId,
-      leave_days: data.days,
-      from_date: data.fromDate,
-      to_date: data.toDate,
     });
 
     return leaveRequest;
@@ -3681,43 +3755,6 @@ export class ESSService {
 
     await platformPrisma.policyDocument.delete({ where: { id: documentId } });
     return { deleted: true };
-  }
-
-  private async resolveRecipientEmails(companyId: string, recipientRole: string, data: any): Promise<string[]> {
-    if (recipientRole === 'EMPLOYEE' && data?.employeeEmail) {
-      return [data.employeeEmail];
-    }
-
-    if (recipientRole === 'MANAGER' && data?.employeeId) {
-      const employee = await platformPrisma.employee.findUnique({
-        where: { id: data.employeeId },
-        select: { reportingManager: { select: { officialEmail: true, personalEmail: true } } },
-      });
-      const mgr = employee?.reportingManager;
-      if (mgr?.officialEmail) return [mgr.officialEmail];
-      if (mgr?.personalEmail) return [mgr.personalEmail];
-      return [];
-    }
-
-    if (recipientRole === 'HR') {
-      const hrUsers = await platformPrisma.user.findMany({
-        where: { companyId, isActive: true, role: 'COMPANY_ADMIN' },
-        select: { email: true },
-        take: 5,
-      });
-      return hrUsers.map((u) => u.email);
-    }
-
-    if (recipientRole === 'ALL') {
-      const users = await platformPrisma.user.findMany({
-        where: { companyId, isActive: true },
-        select: { email: true },
-        take: 50,
-      });
-      return users.map((u) => u.email);
-    }
-
-    return [];
   }
 
   // ────────────────────────────────────────────────────────────────────
