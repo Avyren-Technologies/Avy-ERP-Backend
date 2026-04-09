@@ -9,6 +9,7 @@ import { initSocket } from '../lib/socket';
 import { analyticsCronService } from '../modules/hr/analytics/services/analytics-cron.service';
 import { startDemoResetCron } from '../workers/demo-reset-cron';
 import { notificationService } from '../core/notifications/notification.service';
+import { notificationCronService } from '../core/notifications/cron/notification-cron.service';
 import { registerHRListeners } from '../shared/events/listeners/hr-listeners';
 
 // Server startup function
@@ -46,6 +47,9 @@ async function startServer(): Promise<void> {
 
       // Start analytics cron jobs
       analyticsCronService.startAll();
+
+      // Start notification informational + operational crons
+      notificationCronService.startAll();
 
       // Start demo tenant reset cron (daily at 2 AM)
       startDemoResetCron();
