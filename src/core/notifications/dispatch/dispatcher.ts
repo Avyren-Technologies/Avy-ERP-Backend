@@ -5,6 +5,7 @@ import { env } from '../../../config/env';
 import { loadActiveRules, type LoadedRule } from './rule-loader';
 import { resolveRecipients } from './recipient-resolver';
 import { checkDedup } from './dedup';
+import { checkUserRateLimit, checkTenantRateLimit } from './rate-limiter';
 import { guardBackpressure } from './backpressure';
 import { enqueueWithBatching } from './enqueue';
 import { renderTemplate, type RenderedNotification } from '../templates/renderer';
@@ -105,6 +106,21 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     return { traceId, enqueued: 0, notificationIds: [] };
   }
 
+  // Tenant-level rate limit check — single INCR, fast, bypasses CRITICAL.
+  // Protects the whole system from a runaway tenant bug/cron.
+  const tenantAllowed = await checkTenantRateLimit(
+    input.companyId,
+    input.priority ?? 'MEDIUM',
+  );
+  if (!tenantAllowed) {
+    logger.warn('Dispatch dropped — tenant rate limit', {
+      traceId,
+      companyId: input.companyId,
+      trigger: input.triggerEvent,
+    });
+    return { traceId, enqueued: 0, notificationIds: [] };
+  }
+
   try {
     // Load rules (or synthesize ad-hoc/fallback)
     let rules: LoadedRule[] = [];
@@ -178,9 +194,20 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       return { traceId, enqueued: 0, notificationIds: [] };
     }
 
-    // Dedup + backpressure filter
+    // Dedup + per-user rate limit + backpressure filter
     const acceptedBuckets: RecipientBucket[] = [];
     for (const bucket of buckets.values()) {
+      // Per-user rate limit — CRITICAL bypasses
+      const userAllowed = await checkUserRateLimit(bucket.userId, bucket.priority);
+      if (!userAllowed) {
+        logger.warn('Dispatcher drop — user rate limit', {
+          traceId,
+          userId: bucket.userId,
+          trigger: input.triggerEvent,
+        });
+        continue;
+      }
+
       const dup = await checkDedup({
         companyId: input.companyId,
         triggerEvent: input.triggerEvent,
