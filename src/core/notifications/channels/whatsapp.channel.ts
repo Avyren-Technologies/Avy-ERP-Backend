@@ -67,7 +67,8 @@ export const whatsappChannel = {
     );
 
     const to = normalizeToE164(user.phone);
-    const bodyText = `${masked.title}\n\n${masked.body}`;
+    // Guard against empty title producing leading "\n\n" in the body.
+    const bodyText = [masked.title, masked.body].filter(Boolean).join('\n\n');
 
     const result = await metaCloudProvider.send(
       { to, body: bodyText, templateName: template.whatsappTemplateName },

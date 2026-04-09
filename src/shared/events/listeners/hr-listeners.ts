@@ -99,7 +99,7 @@ export function registerHRListeners() {
           interview_date: (payload as any).interviewDate ?? '',
         },
         actionUrl: `/company/hr/requisitions`,
-        type: 'INTERVIEW_SCHEDULED',
+        type: 'RECRUITMENT',
       });
     }
   });
@@ -122,7 +122,7 @@ export function registerHRListeners() {
           training_name: (payload as any).trainingName ?? 'a training program',
         },
         actionUrl: `/company/hr/my-training`,
-        type: 'TRAINING_NOMINATION',
+        type: 'TRAINING',
       });
     },
   );
@@ -139,7 +139,7 @@ export function registerHRListeners() {
         training_name: payload.trainingName,
       },
       actionUrl: `/company/hr/my-training`,
-      type: 'TRAINING_COMPLETED',
+      type: 'TRAINING',
     });
   });
 
@@ -156,7 +156,7 @@ export function registerHRListeners() {
         expiry_date: payload.expiryDate,
       },
       actionUrl: `/company/hr/my-training`,
-      type: 'CERTIFICATE_EXPIRING',
+      type: 'TRAINING',
     });
   });
 

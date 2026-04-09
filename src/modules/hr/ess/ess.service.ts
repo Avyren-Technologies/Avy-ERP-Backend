@@ -14,6 +14,7 @@ import {
   getRequesterUserId,
 } from '../../../core/notifications/dispatch/approver-resolver';
 import { invalidateRuleCache } from '../../../core/notifications/dispatch/rule-loader';
+import { categoryForTrigger } from '../../../shared/constants/notification-categories';
 
 /**
  * Mapping from ApprovalRequest.entityType to the notification trigger events
@@ -900,7 +901,7 @@ export class ESSService {
         tokens: (data.data && typeof data.data === 'object'
           ? (data.data as Record<string, unknown>)
           : {}),
-        type: data.triggerEvent,
+        type: categoryForTrigger(data.triggerEvent),
       });
     } catch (err) {
       logger.warn('ESS submission dispatch failed (non-blocking)', {

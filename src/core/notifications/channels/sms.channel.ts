@@ -65,7 +65,11 @@ export const smsChannel = {
     );
 
     const to = normalizeToE164(user.phone);
-    const smsBody = `${masked.title}: ${masked.body}`.slice(0, 1600);
+    // Guard against empty title producing ": body" output.
+    const smsBody = (masked.title
+      ? `${masked.title}: ${masked.body}`
+      : masked.body
+    ).slice(0, 1600);
 
     const result = await twilioProvider.send({ to, body: smsBody, priority }, traceId);
     return { provider: 'twilio', messageId: result.messageId };

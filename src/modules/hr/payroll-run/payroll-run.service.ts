@@ -1584,6 +1584,7 @@ export class PayrollRunService {
           priority: 'CRITICAL',
           systemCritical: true,
           actionUrl: '/company/hr/my-payslips',
+          type: 'PAYROLL',
         });
       }
     } catch (err) {
@@ -1908,6 +1909,7 @@ export class PayrollRunService {
           },
           priority: 'HIGH',
           actionUrl: '/company/hr/my-payslips',
+          type: 'PAYROLL',
         });
       }
     } catch (err) {
