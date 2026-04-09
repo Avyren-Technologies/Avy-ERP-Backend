@@ -176,12 +176,9 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       return { traceId, enqueued: 0, notificationIds: [] };
     }
 
-    // Dedup + create rows + emit sockets + enqueue, all per recipient
-    const createdNotificationIds: string[] = [];
-    const toEnqueue: QueueablePayload[] = [];
-
+    // Dedup + backpressure filter
+    const acceptedBuckets: RecipientBucket[] = [];
     for (const bucket of buckets.values()) {
-      // Dedup on (companyId, triggerEvent, entityType, entityId, userId, payloadHash)
       const dup = await checkDedup({
         companyId: input.companyId,
         triggerEvent: input.triggerEvent,
@@ -201,55 +198,68 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
         });
         continue;
       }
+      acceptedBuckets.push(bucket);
+    }
 
-      // Build deliveryStatus: IN_APP always SENT, rest PENDING
+    if (acceptedBuckets.length === 0) {
+      return { traceId, enqueued: 0, notificationIds: [] };
+    }
+
+    // Batch-create all Notification rows in a single round trip.
+    const createInputs: Prisma.NotificationCreateManyInput[] = acceptedBuckets.map((bucket) => {
       const deliveryStatus: Record<string, string> = { inApp: 'SENT' };
       for (const channel of bucket.channels) {
         if (channel !== 'IN_APP') {
           deliveryStatus[channel.toLowerCase()] = 'PENDING';
         }
       }
+      return {
+        userId: bucket.userId,
+        companyId: input.companyId,
+        title: bucket.rendered.title,
+        body: bucket.rendered.body,
+        type: input.type ?? input.triggerEvent,
+        category: bucket.category,
+        entityType: input.entityType ?? null,
+        entityId: input.entityId ?? null,
+        data: bucket.rendered.data as Prisma.InputJsonValue,
+        actionUrl: input.actionUrl ?? null,
+        priority: bucket.priority,
+        status: 'UNREAD',
+        isRead: false,
+        deliveryStatus: deliveryStatus as Prisma.InputJsonValue,
+        traceId,
+        ruleId: bucket.ruleId,
+        ruleVersion: bucket.ruleVersion,
+        templateId: bucket.templateId,
+        templateVersion: bucket.templateVersion,
+        dedupHash: bucket.rendered.dedupHash,
+      };
+    });
 
-      let row: { id: string; userId: string };
-      try {
-        row = await platformPrisma.notification.create({
-          data: {
-            userId: bucket.userId,
-            companyId: input.companyId,
-            title: bucket.rendered.title,
-            body: bucket.rendered.body,
-            type: input.type ?? input.triggerEvent,
-            category: bucket.category,
-            entityType: input.entityType ?? null,
-            entityId: input.entityId ?? null,
-            data: bucket.rendered.data as Prisma.InputJsonValue,
-            actionUrl: input.actionUrl ?? null,
-            priority: bucket.priority,
-            status: 'UNREAD',
-            isRead: false,
-            deliveryStatus: deliveryStatus as Prisma.InputJsonValue,
-            traceId,
-            ruleId: bucket.ruleId,
-            ruleVersion: bucket.ruleVersion,
-            templateId: bucket.templateId,
-            templateVersion: bucket.templateVersion,
-            dedupHash: bucket.rendered.dedupHash,
-          },
-          select: { id: true, userId: true },
-        });
-      } catch (err) {
-        logger.error('Failed to create Notification row', {
-          error: err,
-          userId: bucket.userId,
-          traceId,
-        });
-        continue;
-      }
+    let createdRows: Array<{ id: string; userId: string }>;
+    try {
+      createdRows = await platformPrisma.notification.createManyAndReturn({
+        data: createInputs,
+        select: { id: true, userId: true },
+      });
+    } catch (err) {
+      logger.error('Failed to batch-create Notification rows', { error: err, traceId });
+      return { traceId, enqueued: 0, notificationIds: [], error: String(err) };
+    }
 
-      createdNotificationIds.push(row.id);
+    const createdNotificationIds: string[] = createdRows.map((r) => r.id);
+    const toEnqueue: QueueablePayload[] = [];
+
+    // Emit socket events + build queue payloads (iterate in the same order
+    // as createInputs so we can correlate each row back to its bucket).
+    for (let i = 0; i < createdRows.length; i++) {
+      const row = createdRows[i];
+      const bucket = acceptedBuckets[i];
+      if (!row || !bucket) continue;
+
       emitSocketEvent(row.userId, { notificationId: row.id, traceId });
 
-      // Enqueue one job for all non-IN_APP channels (IN_APP is already delivered)
       const deliveryChannels = bucket.channels.filter((c) => c !== 'IN_APP');
       if (deliveryChannels.length > 0) {
         toEnqueue.push({

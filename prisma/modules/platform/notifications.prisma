@@ -30,12 +30,12 @@ model Notification {
   deliveryStatus  Json                 @default("{}")
 
   // Provenance
-  traceId         String               @default("")
+  traceId         String
   ruleId          String?
   ruleVersion     Int?
   templateId      String?
   templateVersion Int?
-  dedupHash       String               @default("")
+  dedupHash       String
 
   // Relations
   user            User                 @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)

@@ -12,8 +12,8 @@ export function initSocket(server: HttpServer) {
         },
     });
 
-    // ── Auth middleware: verify JWT before allowing connection ──
-    io.use((socket, next) => {
+    // ── Auth middleware: verify JWT + confirm user still exists & is active ──
+    io.use(async (socket, next) => {
         const token = socket.handshake.auth?.token as string | undefined;
         if (!token) {
             return next(new Error('Authentication required'));
@@ -21,11 +21,22 @@ export function initSocket(server: HttpServer) {
         try {
             const secret = process.env.JWT_SECRET || 'dev-secret';
             const payload = jwt.verify(token, secret) as any;
-            // Attach user info to socket for room authorization
+
+            // Verify the user still exists and is active — prevents revoked users
+            // from continuing to receive realtime events via a still-valid JWT.
+            const { platformPrisma } = await import('../config/database');
+            const user = await platformPrisma.user.findUnique({
+                where: { id: payload.userId },
+                select: { id: true, isActive: true, role: true, companyId: true },
+            });
+            if (!user || !user.isActive) {
+                return next(new Error('User not found or inactive'));
+            }
+
             (socket as any).user = {
-                userId: payload.userId,
-                role: payload.roleId ?? payload.role,
-                companyId: payload.companyId,
+                userId: user.id,
+                role: user.role,
+                companyId: user.companyId,
                 tenantId: payload.tenantId,
             };
             next();

@@ -155,16 +155,28 @@ function makeWorker(queueName: QueueName) {
       attempt: job?.attemptsMade,
       error: err.message,
     });
-    // Move to DLQ once all retry attempts exhausted
+    // Move to DLQ once all retry attempts exhausted.
+    // BullMQ v5 does not automatically remove failed jobs from the source queue,
+    // so we add an audit entry to the DLQ *and* remove the original from the
+    // source to prevent unbounded growth of the source queue's failed set.
     if (job && job.attemptsMade >= (job.opts.attempts ?? 3)) {
       try {
         await notifQueueDLQ.add('dead-letter', {
           originalQueue: queueName,
           jobId: job.id,
           data: job.data,
-          error: err.message,
+          error: truncate(err.message, 500),
           failedAt: new Date().toISOString(),
         });
+        // Remove from source queue to keep the failed set bounded
+        try {
+          await job.remove();
+        } catch (removeErr) {
+          logger.warn('Failed to remove exhausted job from source queue', {
+            error: removeErr,
+            jobId: job.id,
+          });
+        }
       } catch (dlqErr) {
         logger.error('Failed to write to DLQ', { error: dlqErr, jobId: job.id });
       }
