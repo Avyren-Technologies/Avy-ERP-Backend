@@ -4,6 +4,7 @@ import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
 import { essService } from '../ess/ess.service';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { notificationService } from '../../../core/notifications/notification.service';
 
 interface ListOptions {
   page?: number;
@@ -284,6 +285,47 @@ export class TransferPromotionService {
       .catch((err) => logger.warn(`Failed to generate transfer letter for ${id}: ${err.message}`));
 
     logger.info(`Transfer ${id} applied for employee ${transfer.employeeId}`);
+
+    // Dispatch EMPLOYEE_TRANSFER_APPLIED to the employee and the new manager.
+    try {
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: transfer.employeeId },
+        select: { user: { select: { id: true } } },
+      });
+      const recipients: string[] = [];
+      if (employee?.user?.id) recipients.push(employee.user.id);
+      if (transfer.toManagerId) {
+        const newManager = await platformPrisma.employee.findUnique({
+          where: { id: transfer.toManagerId },
+          select: { user: { select: { id: true } } },
+        });
+        if (newManager?.user?.id) recipients.push(newManager.user.id);
+      }
+      if (recipients.length > 0) {
+        const employeeName = `${transfer.employee?.firstName ?? ''} ${transfer.employee?.lastName ?? ''}`.trim();
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'EMPLOYEE_TRANSFER_APPLIED',
+          entityType: 'EmployeeTransfer',
+          entityId: id,
+          explicitRecipients: recipients,
+          tokens: {
+            employee_name: employeeName,
+            transfer_type: transfer.transferType,
+            from_department: transfer.fromDepartment?.name ?? '',
+            to_department: transfer.toDepartment?.name ?? '',
+            from_location: transfer.fromLocation?.name ?? '',
+            to_location: transfer.toLocation?.name ?? '',
+            effective_date: transfer.effectiveDate.toISOString().slice(0, 10),
+          },
+          priority: 'MEDIUM',
+          type: 'EMPLOYEE_LIFECYCLE',
+        });
+      }
+    } catch (err) {
+      logger.warn('Transfer applied dispatch failed (non-blocking)', { error: err, transferId: id });
+    }
+
     return result;
   }
 
@@ -635,6 +677,37 @@ export class TransferPromotionService {
       .catch((err) => logger.warn(`Failed to generate promotion letter for ${id}: ${err.message}`));
 
     logger.info(`Promotion ${id} applied for employee ${promotion.employeeId}`);
+
+    // Dispatch EMPLOYEE_PROMOTION_APPLIED to the employee.
+    try {
+      const employee = await platformPrisma.employee.findUnique({
+        where: { id: promotion.employeeId },
+        select: { user: { select: { id: true } } },
+      });
+      if (employee?.user?.id) {
+        const employeeName = `${promotion.employee?.firstName ?? ''} ${promotion.employee?.lastName ?? ''}`.trim();
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'EMPLOYEE_PROMOTION_APPLIED',
+          entityType: 'EmployeePromotion',
+          entityId: id,
+          explicitRecipients: [employee.user.id],
+          tokens: {
+            employee_name: employeeName,
+            from_designation: promotion.fromDesignation?.name ?? '',
+            to_designation: promotion.toDesignation?.name ?? '',
+            from_grade: promotion.fromGrade?.name ?? '',
+            to_grade: promotion.toGrade?.name ?? '',
+            effective_date: promotion.effectiveDate.toISOString().slice(0, 10),
+          },
+          priority: 'HIGH',
+          type: 'EMPLOYEE_LIFECYCLE',
+        });
+      }
+    } catch (err) {
+      logger.warn('Promotion applied dispatch failed (non-blocking)', { error: err, promotionId: id });
+    }
+
     return result;
   }
 

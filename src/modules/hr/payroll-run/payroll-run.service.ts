@@ -6,6 +6,8 @@ import { generateNextNumber } from '../../../shared/utils/number-series';
 import { getCachedCompanySettings } from '../../../shared/utils/config-cache';
 import { essService } from '../ess/ess.service';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { logger } from '../../../config/logger';
+import { notificationService } from '../../../core/notifications/notification.service';
 
 /** Round to 2 decimal places. */
 function round(v: number): number {
@@ -1536,6 +1538,58 @@ export class PayrollRunService {
       },
     });
 
+    // Fanout — notify every employee whose salary was credited. Uses
+    // dispatchBulk (chunked + backpressure aware) because a single run
+    // can touch 500+ employees. CRITICAL + systemCritical so the alert
+    // bypasses quiet hours and per-user preferences (regulatory).
+    try {
+      const entries = await platformPrisma.payrollEntry.findMany({
+        where: { payrollRunId: runId },
+        select: { employeeId: true, netPay: true },
+      });
+      const employeeIds = entries.map((e) => e.employeeId);
+      const employees = await platformPrisma.employee.findMany({
+        where: { id: { in: employeeIds } },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          user: { select: { id: true } },
+        },
+      });
+      const empMap = new Map(employees.map((e) => [e.id, e]));
+      const recipients = entries
+        .map((entry) => {
+          const emp = empMap.get(entry.employeeId);
+          if (!emp?.user?.id) return null;
+          return {
+            userId: emp.user.id,
+            tokens: {
+              employee_name: `${emp.firstName ?? ''} ${emp.lastName ?? ''}`.trim(),
+              amount: entry.netPay != null ? Number(entry.netPay).toString() : '',
+            },
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+      if (recipients.length > 0) {
+        await notificationService.dispatchBulk({
+          companyId,
+          triggerEvent: 'SALARY_CREDITED',
+          entityType: 'PayrollRun',
+          entityId: runId,
+          recipients,
+          sharedTokens: {
+            month_year: `${run.month}/${run.year}`,
+          },
+          priority: 'CRITICAL',
+          systemCritical: true,
+          actionUrl: '/company/hr/my-payslips',
+        });
+      }
+    } catch (err) {
+      logger.warn('Salary credited bulk dispatch failed (non-blocking)', { error: err, runId });
+    }
+
     return updatedRun;
   }
 
@@ -1819,6 +1873,45 @@ export class PayrollRunService {
 
     if (payslipData.length > 0) {
       await platformPrisma.payslip.createMany({ data: payslipData, skipDuplicates: true });
+    }
+
+    // Fanout — notify every employee whose payslip was generated. Uses
+    // dispatchBulk for efficient chunked delivery. HIGH priority so users
+    // see it promptly but still respects quiet hours.
+    try {
+      const employeeLookup = await platformPrisma.employee.findMany({
+        where: { id: { in: entries.map((e) => e.employeeId) } },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          user: { select: { id: true } },
+        },
+      });
+      const recipients = employeeLookup
+        .filter((e) => e.user?.id)
+        .map((e) => ({
+          userId: e.user!.id,
+          tokens: {
+            employee_name: `${e.firstName ?? ''} ${e.lastName ?? ''}`.trim(),
+          },
+        }));
+      if (recipients.length > 0) {
+        await notificationService.dispatchBulk({
+          companyId,
+          triggerEvent: 'PAYSLIP_PUBLISHED',
+          entityType: 'PayrollRun',
+          entityId: runId,
+          recipients,
+          sharedTokens: {
+            month_year: `${run.month}/${run.year}`,
+          },
+          priority: 'HIGH',
+          actionUrl: '/company/hr/my-payslips',
+        });
+      }
+    } catch (err) {
+      logger.warn('Payslip published bulk dispatch failed (non-blocking)', { error: err, runId });
     }
 
     return { generated: payslipData.length };

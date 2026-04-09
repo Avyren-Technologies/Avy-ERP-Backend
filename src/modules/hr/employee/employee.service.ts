@@ -12,6 +12,7 @@ import {
   parseHrDateInput,
 } from '../../../shared/utils/employee-probation-notice';
 import { n } from '../../../shared/utils/prisma-helpers';
+import { notificationService } from '../../../core/notifications/notification.service';
 
 export class EmployeeService {
 
@@ -517,6 +518,41 @@ export class EmployeeService {
       logger.info(`Auto-created IT declaration (${financialYear}) for employee ${employee.id}`);
     } catch (err) {
       logger.warn(`Failed to auto-create IT declaration for employee ${employee.id}`, err);
+    }
+
+    // 4. Dispatch onboarding notification to the new employee (non-blocking)
+    try {
+      const enriched = await platformPrisma.employee.findUnique({
+        where: { id: employee.id },
+        select: {
+          firstName: true,
+          lastName: true,
+          employeeId: true,
+          joiningDate: true,
+          designation: { select: { name: true } },
+          department: { select: { name: true } },
+          user: { select: { id: true } },
+        },
+      });
+      if (enriched?.user?.id) {
+        await notificationService.dispatch({
+          companyId,
+          triggerEvent: 'EMPLOYEE_ONBOARDED',
+          entityType: 'Employee',
+          entityId: employee.id,
+          explicitRecipients: [enriched.user.id],
+          tokens: {
+            employee_name: `${enriched.firstName ?? ''} ${enriched.lastName ?? ''}`.trim(),
+            employee_id: enriched.employeeId,
+            designation: enriched.designation?.name ?? '',
+            department: enriched.department?.name ?? '',
+            joining_date: enriched.joiningDate.toISOString().slice(0, 10),
+          },
+          type: 'EMPLOYEE_LIFECYCLE',
+        });
+      }
+    } catch (err) {
+      logger.warn('Employee onboarded dispatch failed (non-blocking)', { error: err, employeeId: employee.id });
     }
 
     return employee;

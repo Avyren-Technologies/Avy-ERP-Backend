@@ -13,6 +13,7 @@ import {
   getCurrentStepApproverIds,
   getRequesterUserId,
 } from '../../../core/notifications/dispatch/approver-resolver';
+import { invalidateRuleCache } from '../../../core/notifications/dispatch/rule-loader';
 
 /**
  * Mapping from ApprovalRequest.entityType to the notification trigger events
@@ -1141,7 +1142,7 @@ export class ESSService {
   }
 
   async createTemplate(companyId: string, data: any) {
-    return platformPrisma.notificationTemplate.create({
+    const created = await platformPrisma.notificationTemplate.create({
       data: {
         companyId,
         name: data.name,
@@ -1151,6 +1152,9 @@ export class ESSService {
         isActive: data.isActive ?? true,
       },
     });
+    // Invalidate company-wide rule cache since rules reference templates.
+    await invalidateRuleCache(companyId);
+    return created;
   }
 
   async updateTemplate(companyId: string, id: string, data: any) {
@@ -1159,7 +1163,7 @@ export class ESSService {
       throw ApiError.notFound('Notification template not found');
     }
 
-    return platformPrisma.notificationTemplate.update({
+    const updated = await platformPrisma.notificationTemplate.update({
       where: { id },
       data: {
         ...(data.name !== undefined && { name: data.name }),
@@ -1169,6 +1173,8 @@ export class ESSService {
         ...(data.isActive !== undefined && { isActive: data.isActive }),
       },
     });
+    await invalidateRuleCache(companyId);
+    return updated;
   }
 
   async deleteTemplate(companyId: string, id: string) {
@@ -1179,6 +1185,7 @@ export class ESSService {
 
     // Cascade delete will remove associated rules
     await platformPrisma.notificationTemplate.delete({ where: { id } });
+    await invalidateRuleCache(companyId);
     return { message: 'Notification template deleted' };
   }
 
@@ -1232,7 +1239,7 @@ export class ESSService {
       throw ApiError.badRequest('Notification template not found in this company');
     }
 
-    return platformPrisma.notificationRule.create({
+    const created = await platformPrisma.notificationRule.create({
       data: {
         companyId,
         triggerEvent: data.triggerEvent,
@@ -1245,6 +1252,8 @@ export class ESSService {
         template: { select: { id: true, name: true, channel: true } },
       },
     });
+    await invalidateRuleCache(companyId, created.triggerEvent);
+    return created;
   }
 
   async updateRule(companyId: string, id: string, data: any) {
@@ -1263,7 +1272,7 @@ export class ESSService {
       }
     }
 
-    return platformPrisma.notificationRule.update({
+    const updated = await platformPrisma.notificationRule.update({
       where: { id },
       data: {
         ...(data.triggerEvent !== undefined && { triggerEvent: data.triggerEvent }),
@@ -1276,6 +1285,12 @@ export class ESSService {
         template: { select: { id: true, name: true, channel: true } },
       },
     });
+    // Invalidate both the old and new trigger event keys in case it changed.
+    await invalidateRuleCache(companyId, rule.triggerEvent);
+    if (updated.triggerEvent !== rule.triggerEvent) {
+      await invalidateRuleCache(companyId, updated.triggerEvent);
+    }
+    return updated;
   }
 
   async deleteRule(companyId: string, id: string) {
@@ -1285,6 +1300,7 @@ export class ESSService {
     }
 
     await platformPrisma.notificationRule.delete({ where: { id } });
+    await invalidateRuleCache(companyId, rule.triggerEvent);
     return { message: 'Notification rule deleted' };
   }
 
