@@ -7,7 +7,10 @@ import { ApiError } from '../../shared/errors';
 import { platformPrisma } from '../../config/database';
 import { dispatch } from './dispatch/dispatcher';
 import { preferencesService } from './preferences/preferences.service';
-import { updatePreferencesSchema } from './preferences/preferences.validators';
+import {
+  updatePreferencesSchema,
+  updateCategoryPreferencesSchema,
+} from './preferences/preferences.validators';
 
 // ── Validators ────────────────────────────────────────────────────────
 
@@ -164,6 +167,20 @@ class NotificationController {
     }
     const result = await preferencesService.update(userId, parsed.data);
     res.json(createSuccessResponse(result, 'Preferences updated'));
+  });
+
+  updateMyCategoryPreferences = asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.unauthorized();
+    const parsed = updateCategoryPreferencesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+    const result = await preferencesService.updateCategoryPreferences(
+      userId,
+      parsed.data.categoryPreferences,
+    );
+    res.json(createSuccessResponse(result, 'Category preferences updated'));
   });
 }
 

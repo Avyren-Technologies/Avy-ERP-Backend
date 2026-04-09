@@ -1,6 +1,11 @@
+import type { NotificationChannel } from '@prisma/client';
 import { platformPrisma } from '../../../config/database';
+import { ApiError } from '../../../shared/errors';
 import { invalidateUserConsent } from '../dispatch/consent-gate';
-import { NOTIFICATION_CATEGORIES } from '../../../shared/constants/notification-categories';
+import {
+  NOTIFICATION_CATEGORIES,
+  isCategoryLocked,
+} from '../../../shared/constants/notification-categories';
 import type { UpdatePreferencesInput } from './preferences.validators';
 
 export const preferencesService = {
@@ -55,5 +60,47 @@ export const preferencesService = {
     // O(1) consent cache invalidation — bumps user version.
     await invalidateUserConsent(userId);
     return result;
+  },
+
+  /**
+   * Batch-upsert per-category × channel preferences. Locked categories
+   * (AUTH) cannot be modified — throws 400 if any locked entry is present.
+   * Invalidates the user consent cache once at the end.
+   */
+  async updateCategoryPreferences(
+    userId: string,
+    updates: Array<{ category: string; channel: NotificationChannel; enabled: boolean }>,
+  ) {
+    for (const u of updates) {
+      if (isCategoryLocked(u.category)) {
+        throw ApiError.badRequest(
+          `Category ${u.category} is locked and cannot be modified`,
+        );
+      }
+    }
+
+    await platformPrisma.$transaction(
+      updates.map((u) =>
+        platformPrisma.userNotificationCategoryPreference.upsert({
+          where: {
+            userId_category_channel: {
+              userId,
+              category: u.category,
+              channel: u.channel,
+            },
+          },
+          create: {
+            userId,
+            category: u.category,
+            channel: u.channel,
+            enabled: u.enabled,
+          },
+          update: { enabled: u.enabled },
+        }),
+      ),
+    );
+
+    await invalidateUserConsent(userId);
+    return this.getForUser(userId);
   },
 };
