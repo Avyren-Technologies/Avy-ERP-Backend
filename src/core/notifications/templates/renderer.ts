@@ -12,22 +12,33 @@ export interface RenderedNotification {
 export type TemplateLike = Pick<NotificationTemplate, 'name' | 'subject' | 'body' | 'variables'>;
 
 /**
- * Render a template with the given tokens. Variable allowlist (if set on
- * the template) is enforced — only listed variables are passed to handlebars.
- * Unknown variables render as empty strings.
+ * Render a template with the given tokens.
+ *
+ * Variable allowlist (if set on the template) is enforced — only listed
+ * variables are passed to handlebars AND are written into the persisted
+ * Notification.data payload. This prevents callers from accidentally
+ * leaking sensitive fields (that weren't declared in `sensitiveFields` for
+ * masking) into the in-app row and push payload.
+ *
+ * If a template has no allowlist, all tokens are passed through (fallback
+ * for ad-hoc dispatches and legacy callers).
  */
 export function renderTemplate(
   template: TemplateLike,
   tokens: Record<string, unknown>,
 ): RenderedNotification {
   const allowlist = Array.isArray(template.variables) ? (template.variables as string[]) : [];
-  const safeTokens = allowlist.length > 0
-    ? Object.fromEntries(allowlist.map((k) => [k, tokens[k] ?? '']))
-    : tokens;
+  const safeTokens: Record<string, unknown> =
+    allowlist.length > 0
+      ? Object.fromEntries(allowlist.map((k) => [k, tokens[k] ?? '']))
+      : { ...tokens };
 
   const title = template.subject ? compile(template.subject)(safeTokens) : template.name;
   const body = compile(template.body)(safeTokens);
-  const data = { ...tokens };
+
+  // data payload honors the allowlist — sensitive fields not listed in the
+  // template variables never make it into the Notification row or push data.
+  const data = { ...safeTokens };
 
   return {
     title,

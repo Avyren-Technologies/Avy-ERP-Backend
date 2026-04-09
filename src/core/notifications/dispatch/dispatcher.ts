@@ -251,12 +251,26 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     const createdNotificationIds: string[] = createdRows.map((r) => r.id);
     const toEnqueue: QueueablePayload[] = [];
 
-    // Emit socket events + build queue payloads (iterate in the same order
-    // as createInputs so we can correlate each row back to its bucket).
-    for (let i = 0; i < createdRows.length; i++) {
-      const row = createdRows[i];
-      const bucket = acceptedBuckets[i];
-      if (!row || !bucket) continue;
+    // Correlate created rows back to buckets via userId lookup.
+    // Prisma's createManyAndReturn does NOT guarantee row order — positional
+    // indexing is unsafe. Since each RecipientBucket has a unique userId
+    // (one bucket per recipient), a Map keyed by userId is both correct
+    // and O(1) per row.
+    const bucketByUserId = new Map<string, RecipientBucket>();
+    for (const bucket of acceptedBuckets) {
+      bucketByUserId.set(bucket.userId, bucket);
+    }
+
+    for (const row of createdRows) {
+      const bucket = bucketByUserId.get(row.userId);
+      if (!bucket) {
+        logger.warn('Created row has no matching bucket — skipping', {
+          traceId,
+          notificationId: row.id,
+          userId: row.userId,
+        });
+        continue;
+      }
 
       emitSocketEvent(row.userId, { notificationId: row.id, traceId });
 

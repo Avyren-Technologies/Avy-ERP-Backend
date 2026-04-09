@@ -15,13 +15,25 @@ import {
 } from '../core/notifications/queue/rate-limiter-config';
 import { channelRouter } from '../core/notifications/channels/channel-router';
 import { claimSendSlot, releaseSendSlot } from '../core/notifications/idempotency/worker-idempotency';
-import { checkConsent } from '../core/notifications/dispatch/consent-gate';
+import { loadConsentCache, evaluateConsent } from '../core/notifications/dispatch/consent-gate';
 import { recordEvent, updateDeliveryStatus } from '../core/notifications/events/event-emitter';
 import { logger } from '../config/logger';
 import { notificationService } from '../core/notifications/notification.service';
 
-// Initialise Firebase Admin so the FCM provider can dispatch web pushes.
-void notificationService.initFirebase();
+// Initialise Firebase Admin BEFORE starting workers so the first job doesn't
+// race with async init and fail with FIREBASE_NOT_INITIALIZED. Node CommonJS
+// doesn't support top-level await, so we await inside the bootstrap IIFE.
+let workers: Worker[] = [];
+
+async function bootstrap() {
+  await notificationService.initFirebase();
+  workers = [
+    makeWorker('notifications:high'),
+    makeWorker('notifications:default'),
+    makeWorker('notifications:low'),
+  ];
+  logger.info('Notification workers started (3 priority queues)');
+}
 
 const LIMITERS = {
   'notifications:high': WORKER_LIMITER_HIGH,
@@ -54,6 +66,11 @@ function makeWorker(queueName: QueueName) {
 
       const source: NotificationSource = job.attemptsMade > 0 ? 'RETRY' : 'SYSTEM';
 
+      // Load consent cache ONCE per job (user, companySettings, preference).
+      // The per-channel consent check below is now a pure function, avoiding
+      // N+1 DB lookups when a job has multiple channels.
+      const consentCache = await loadConsentCache(userId);
+
       // Track which channels this worker run successfully claimed, so we can
       // release them on throw (to allow retries). Channels already claimed by
       // a previous attempt are NOT released.
@@ -70,8 +87,10 @@ function makeWorker(queueName: QueueName) {
           }
           claimedThisRun.push(channel);
 
-          // 2. Re-check consent (may have changed since dispatch)
-          const consent = await checkConsent({ userId, channel, priority, systemCritical });
+          // 2. Re-check consent from cache (may have changed since dispatch,
+          //    but changing within the same job's consent cache is a negligible
+          //    risk — prefs are infrequent and we reload on every new job).
+          const consent = evaluateConsent(consentCache, channel, priority, systemCritical);
           if (!consent.allowed) {
             await updateDeliveryStatus(notificationId, channel, 'SKIPPED');
             await recordEvent({
@@ -190,12 +209,6 @@ function makeWorker(queueName: QueueName) {
   return worker;
 }
 
-const workers = [
-  makeWorker('notifications:high'),
-  makeWorker('notifications:default'),
-  makeWorker('notifications:low'),
-];
-
 async function shutdown(signal: string) {
   logger.info(`${signal} received — shutting down notification workers`);
   await Promise.all(workers.map((w) => w.close()));
@@ -205,6 +218,9 @@ async function shutdown(signal: string) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-logger.info('Notification workers started (3 priority queues)');
+bootstrap().catch((err) => {
+  logger.error('Worker bootstrap failed', { error: err });
+  process.exit(1);
+});
 
 export { workers };
