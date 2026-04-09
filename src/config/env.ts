@@ -132,6 +132,40 @@ const envSchema = z.object({
   NOTIFICATIONS_RECEIPT_POLL_SEC: z.coerce.number().default(30),
   NOTIFICATIONS_RECEIPT_MAX_AGE_MIN: z.coerce.number().default(15),
   NOTIFICATIONS_DLQ_RETENTION_DAYS: z.coerce.number().default(7),
+
+  // Twilio (SMS provider)
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
+  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
+
+  // Meta Cloud API (WhatsApp provider)
+  META_WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  META_WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  META_WHATSAPP_API_VERSION: z.string().default('v21.0'),
+
+  // Notification feature flags (Phase 1A)
+  NOTIFICATIONS_CRON_ENABLED: envBoolean.default(true),
+  NOTIFICATIONS_SMS_ENABLED: envBoolean.default(true),
+  NOTIFICATIONS_WHATSAPP_ENABLED: envBoolean.default(true),
+  NOTIFICATIONS_SMS_DRY_RUN: envBoolean.default(false),
+  NOTIFICATIONS_WHATSAPP_DRY_RUN: envBoolean.default(false),
+
+  // Operational safeguards (Phase 1A)
+  NOTIFICATIONS_USER_RATE_LIMIT_PER_MIN: z.coerce.number().default(20),
+  NOTIFICATIONS_TENANT_RATE_LIMIT_PER_MIN: z.coerce.number().default(1000),
+  NOTIFICATIONS_BULK_CHUNK_SIZE: z.coerce.number().default(50),
+  NOTIFICATIONS_BULK_MIN_RECIPIENTS: z.coerce.number().default(20),
+  NOTIFICATIONS_BULK_QUEUE_HIGH_WATER: z.coerce.number().default(5000),
+  NOTIFICATIONS_CONSENT_CACHE_TTL_SEC: z.coerce.number().default(300),
+  NOTIFICATIONS_SMS_DAILY_CAP_PER_TENANT: z.coerce.number().default(500),
+  NOTIFICATIONS_SMS_DAILY_CAP_PER_USER: z.coerce.number().default(10),
+  NOTIFICATIONS_WHATSAPP_DAILY_CAP_PER_TENANT: z.coerce.number().default(500),
+  NOTIFICATIONS_WHATSAPP_DAILY_CAP_PER_USER: z.coerce.number().default(10),
+  NOTIFICATIONS_EVENT_RETENTION_DAYS: z.coerce.number().default(90),
+  NOTIFICATIONS_CRON_COMPANY_CONCURRENCY: z.coerce.number().default(5),
+  NOTIFICATIONS_CRON_JITTER_MS: z.coerce.number().default(60000),
+  NOTIFICATIONS_METRICS_ENABLED: envBoolean.default(true),
 });
 
 // Parse and validate environment variables
