@@ -27,6 +27,9 @@ model CompanySettings {
   razorpayEnabled       Boolean @default(false)
   emailNotifications    Boolean @default(true)
   whatsappNotifications Boolean @default(false)
+  pushNotifications     Boolean @default(true)
+  smsNotifications      Boolean @default(false)
+  inAppNotifications    Boolean @default(true)
   biometricIntegration  Boolean @default(false)
   eSignIntegration      Boolean @default(false)
 
