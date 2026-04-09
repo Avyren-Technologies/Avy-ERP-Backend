@@ -125,6 +125,11 @@ model NotificationTemplate {
   compiledBody    String?                             // pre-compiled cache
   compiledSubject String?
 
+  // Meta Business Manager pre-approved template name — REQUIRED when channel=WHATSAPP
+  // (Meta rejects free-form text outside the 24h session window). Enforced via
+  // Zod .refine() in ess.validators.ts and at runtime in whatsapp.channel.ts.
+  whatsappTemplateName String?
+
   isSystem        Boolean              @default(false) // seeded by platform, editable by tenant
   isActive        Boolean              @default(true)
 
