@@ -37,12 +37,10 @@ export async function withRetry<T>(
   const cap = opts.maxDelayMs ?? 10_000;
   const isRetryable = opts.isRetryable ?? (() => true);
 
-  let lastError: unknown;
   for (let attempt = 1; attempt <= max; attempt++) {
     try {
       return await operation();
     } catch (err) {
-      lastError = err;
       if (attempt === max || !isRetryable(err)) {
         throw err;
       }
@@ -56,6 +54,6 @@ export async function withRetry<T>(
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
-  // Unreachable — loop always either returns or throws. Re-throw for TS.
-  throw lastError ?? new Error('withRetry: unreachable');
+  // Unreachable — loop always either returns or throws. Satisfies TS control-flow.
+  throw new Error('withRetry: unreachable');
 }
