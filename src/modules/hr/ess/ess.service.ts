@@ -1667,7 +1667,7 @@ export class ESSService {
     // Verify employee
     const employee = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
-      select: { id: true, companyId: true, employeeId: true },
+      select: { id: true, companyId: true, employeeId: true, firstName: true, lastName: true },
     });
     if (!employee || employee.companyId !== companyId) {
       throw ApiError.notFound('Employee not found');
@@ -1705,7 +1705,7 @@ export class ESSService {
       entityId: leaveRequest.id,
       triggerEvent: 'LEAVE_APPLICATION',
       data: {
-        employee_name: employee.employeeId,
+        employee_name: `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim(),
         employeeId: employee.employeeId,
         leaveTypeId: data.leaveTypeId,
         fromDate: data.fromDate,
