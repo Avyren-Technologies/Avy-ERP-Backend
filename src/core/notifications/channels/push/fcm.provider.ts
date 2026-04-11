@@ -26,6 +26,8 @@ export interface FcmSendPayload {
   body: string;
   data: Record<string, unknown>;
   priority: NotificationPriority;
+  /** Optional image URL for rich push (Android BigPictureStyle / iOS media). */
+  imageUrl?: string | undefined;
 }
 
 export interface FcmSendResult {
@@ -58,17 +60,34 @@ export const fcmProvider = {
 
     try {
       const response = await messaging.sendEachForMulticast({
-        notification: { title: payload.title, body: payload.body },
+        notification: {
+          title: payload.title,
+          body: payload.body,
+          // FCM supports imageUrl for rich push on Android + iOS
+          ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {}),
+        },
         data: stringData,
         tokens,
         android: {
           priority: payload.priority === 'CRITICAL' || payload.priority === 'HIGH' ? 'high' : 'normal',
+          notification: {
+            // Android-specific: imageUrl shows as BigPictureStyle
+            ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {}),
+          },
         },
         apns: {
-          payload: { aps: { sound: 'default', badge: 1 } },
+          payload: { aps: { sound: 'default', badge: 1, 'mutable-content': 1 } },
+          // iOS rich push requires a Notification Service Extension to
+          // download the image. mutable-content=1 enables it.
+          ...(payload.imageUrl ? { fcmOptions: { imageUrl: payload.imageUrl } } : {}),
         },
         webpush: {
-          notification: { title: payload.title, body: payload.body, icon: '/favicon.ico' },
+          notification: {
+            title: payload.title,
+            body: payload.body,
+            icon: '/favicon.ico',
+            ...(payload.imageUrl ? { image: payload.imageUrl } : {}),
+          },
         },
       });
 
