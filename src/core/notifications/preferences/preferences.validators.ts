@@ -20,14 +20,16 @@ export const updatePreferencesSchema = z.object({
     .nullable(),
 }).refine(
   (data) => {
-    // If quiet hours enabled, both start and end must be present and distinct
-    if (data.quietHoursEnabled === true) {
-      if (!data.quietHoursStart || !data.quietHoursEnd) return false;
+    // Only validate times when BOTH are provided in the same request.
+    // This allows toggling quietHoursEnabled ON first, then setting
+    // the times in a follow-up PATCH (the consent gate ignores quiet
+    // hours if start/end are null even when enabled=true).
+    if (data.quietHoursStart && data.quietHoursEnd) {
       if (data.quietHoursStart === data.quietHoursEnd) return false;
     }
     return true;
   },
-  { message: 'Quiet hours start and end must be set and different when enabled' },
+  { message: 'Quiet hours start and end must be different' },
 );
 
 export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;
