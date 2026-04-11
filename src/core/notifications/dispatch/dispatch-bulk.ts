@@ -84,20 +84,27 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
         recipients: input.recipients.length,
       });
       rules = [buildFallbackRule(input)];
-    } else if (rules.length > 1) {
-      // Bulk path only uses the first rule (single primary channel). Multi-rule
-      // trigger events will silently drop secondary channels — warn so operators
-      // notice and either switch to per-recipient dispatch() or consolidate rules.
-      logger.warn('dispatchBulk: multiple rules — only primary channel will be used', {
+    }
+
+    // 2. Aggregate ALL channels from all rules. The first rule provides
+    //    the template for rendering; additional rules contribute their
+    //    channels to the delivery set. This mirrors what the single
+    //    dispatch() does per-recipient with its RecipientBucket merge.
+    const primaryRule = rules[0]!;
+    const allChannels = Array.from(new Set(rules.map((r) => r.channel)));
+    const nonInAppChannels = allChannels.filter((c) => c !== 'IN_APP');
+    const effectivePriority: NotificationPriority =
+      priority ?? primaryRule.priority ?? primaryRule.template.priority ?? 'MEDIUM';
+
+    if (allChannels.length > 1) {
+      logger.info('dispatchBulk: aggregated channels from multiple rules', {
         traceId,
         triggerEvent: input.triggerEvent,
-        ruleCount: rules.length,
-        primaryChannel: rules[0]!.channel,
-        droppedChannels: rules.slice(1).map((r) => r.channel),
+        channels: allChannels,
       });
     }
 
-    // 2. Rate-limit filter (per-recipient)
+    // 3. Rate-limit filter (per-recipient)
     const allowedRecipients: typeof input.recipients = [];
     for (const r of input.recipients) {
       const ok = await checkUserRateLimit(r.userId, priority);
@@ -108,14 +115,6 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
     if (allowedRecipients.length === 0) {
       return { traceId, enqueued: 0, skipped: rateDropped, notificationIds: [] };
     }
-
-    // 3. Use the FIRST active rule only (bulk mode = primary channel).
-    //    If multiple rules exist for the same trigger event, per-rule fanout
-    //    is out of scope for bulk — callers that need multi-channel should
-    //    use individual dispatch() calls.
-    const primaryRule = rules[0]!;
-    const effectivePriority: NotificationPriority =
-      priority ?? primaryRule.priority ?? primaryRule.template.priority ?? 'MEDIUM';
 
     // 4. Build per-recipient Notification rows with dedup filter
     const createInputs: Prisma.NotificationCreateManyInput[] = [];
@@ -137,9 +136,11 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
         continue;
       }
 
+      // Build deliveryStatus reflecting ALL channels: IN_APP=SENT (instant),
+      // every other channel=PENDING (delivered async by the worker).
       const deliveryStatus: Record<string, string> = { inApp: 'SENT' };
-      if (primaryRule.channel !== 'IN_APP') {
-        deliveryStatus[primaryRule.channel.toLowerCase()] = 'PENDING';
+      for (const ch of nonInAppChannels) {
+        deliveryStatus[ch.toLowerCase()] = 'PENDING';
       }
 
       createInputs.push({
@@ -187,8 +188,9 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
       emitSocketEvent(row.userId, { notificationId: row.id, traceId });
     }
 
-    // 7. Chunk into BullMQ bulk-delivery jobs with backpressure throttling
-    if (primaryRule.channel !== 'IN_APP') {
+    // 7. Chunk into BullMQ bulk-delivery jobs with backpressure throttling.
+    //    Only enqueue if there are non-IN_APP channels to deliver on.
+    if (nonInAppChannels.length > 0) {
       const queue = pickQueueByPriority(effectivePriority);
       const highWater = env.NOTIFICATIONS_BULK_QUEUE_HIGH_WATER;
       const isThrottlable =
@@ -222,7 +224,7 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
           isBulk: true,
           notificationIds: chunk.map((r) => r.id),
           userIds: chunk.map((r) => r.userId),
-          channels: [primaryRule.channel],
+          channels: nonInAppChannels,
           traceId,
           priority: effectivePriority,
           category: primaryRule.category ?? null,
@@ -235,15 +237,17 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
       }
     }
 
-    // 8. Record ENQUEUED events
+    // 8. Record ENQUEUED events — one per (notification, channel).
     for (const row of createdRows) {
-      await recordEvent({
-        notificationId: row.id,
-        channel: primaryRule.channel,
-        event: 'ENQUEUED',
-        traceId,
-        source: 'SYSTEM',
-      });
+      for (const ch of nonInAppChannels) {
+        await recordEvent({
+          notificationId: row.id,
+          channel: ch,
+          event: 'ENQUEUED',
+          traceId,
+          source: 'SYSTEM',
+        });
+      }
     }
 
     notificationMetrics.increment('notifications.dispatched', {
