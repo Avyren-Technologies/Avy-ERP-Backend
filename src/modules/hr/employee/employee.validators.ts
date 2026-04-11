@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+/** Empty string → undefined; optional email when omitted (e.g. employee without login). */
+const optionalEmailField = z.preprocess(
+  (v) => (v === '' || v === null || v === undefined ? undefined : v),
+  z.string().email('Invalid email address').optional(),
+);
+
 // ── Shared address schema ─────────────────────────────────────────────
 const addressSchema = z.object({
   line1: z.string().min(1, 'Address line 1 is required'),
@@ -31,8 +37,8 @@ export const createEmployeeSchema = z.object({
   // Contact Info
   personalMobile: z.string().min(10, 'Mobile number must be at least 10 digits'),
   alternativeMobile: z.string().optional(),
-  personalEmail: z.string().email('Invalid email address'),
-  officialEmail: z.string().email().optional(),
+  personalEmail: optionalEmailField,
+  officialEmail: optionalEmailField,
   currentAddress: addressSchema.optional(),
   permanentAddress: addressSchema.optional(),
   emergencyContactName: z.string().min(1, 'Emergency contact name is required'),
@@ -105,10 +111,15 @@ export const createEmployeeWithUserSchema = createEmployeeSchema.refine(
   { message: 'Password is required when creating a user account', path: ['userPassword'] },
 ).refine(
   (data) => {
-    if (data.createUserAccount && !data.officialEmail) return false;
-    return true;
+    if (!data.createUserAccount) return true;
+    const official = data.officialEmail?.trim();
+    const personal = data.personalEmail?.trim();
+    return Boolean(official || personal);
   },
-  { message: 'Official email is required when creating a user account', path: ['officialEmail'] },
+  {
+    message: 'Personal or work email is required when enabling login for this employee',
+    path: ['officialEmail'],
+  },
 );
 
 // ── Update Employee (all fields optional) ─────────────────────────────

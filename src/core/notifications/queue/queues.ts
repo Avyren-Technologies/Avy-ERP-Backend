@@ -13,21 +13,21 @@ const baseOpts = {
 };
 
 // Priority-partitioned delivery queues
-export const notifQueueHigh    = new Queue('notifications:high',    baseOpts);
-export const notifQueueDefault = new Queue('notifications:default', baseOpts);
-export const notifQueueLow     = new Queue('notifications:low',     baseOpts);
+export const notifQueueHigh    = new Queue('notifications-high',    baseOpts);
+export const notifQueueDefault = new Queue('notifications-default', baseOpts);
+export const notifQueueLow     = new Queue('notifications-low',     baseOpts);
 
 // Dead-letter queue
-export const notifQueueDLQ = new Queue('notifications:dlq', {
+export const notifQueueDLQ = new Queue('notifications-dlq', {
   ...baseOpts,
   defaultJobOptions: { removeOnComplete: false, removeOnFail: false },
 });
 
 // Expo receipt polling queue (repeatable)
-export const notifQueueReceipts = new Queue('notifications:receipts', baseOpts);
+export const notifQueueReceipts = new Queue('notifications-receipts', baseOpts);
 
 // DLQ sweeper queue (repeatable)
-export const notifQueueDlqSweep = new Queue('notifications:dlq-sweep', baseOpts);
+export const notifQueueDlqSweep = new Queue('notifications-dlq-sweep', baseOpts);
 
 export const ALL_DELIVERY_QUEUES = [notifQueueHigh, notifQueueDefault, notifQueueLow] as const;
 

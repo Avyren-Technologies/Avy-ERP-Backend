@@ -701,8 +701,9 @@ export class BulkImportService {
           uan: row.uan,
           esiIpNumber: row.esiIpNumber,
 
-          // User account
-          createUserAccount: row.createAccount === true && !!row.officialEmail,
+          // User account (login email = work or personal)
+          createUserAccount:
+            row.createAccount === true && !!(row.officialEmail || row.personalEmail),
           userPassword: defaultPassword,
           userRole: row.userRole,
         };
@@ -716,7 +717,7 @@ export class BulkImportService {
           employeeId: employee.employeeId,
           firstName: employee.firstName,
           lastName: employee.lastName,
-          email: employee.officialEmail ?? employee.personalEmail,
+          email: employee.officialEmail ?? employee.personalEmail ?? '',
           accountCreated: !!(createData.createUserAccount),
         });
       } catch (err: any) {
