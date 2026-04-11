@@ -260,7 +260,7 @@ export class EmployeeService {
               // Contact
               personalMobile: data.personalMobile,
               alternativeMobile: n(data.alternativeMobile),
-              personalEmail: data.personalEmail,
+              personalEmail: n(data.personalEmail),
               officialEmail: n(data.officialEmail),
               currentAddress: data.currentAddress ? (data.currentAddress as any) : Prisma.JsonNull,
               permanentAddress: data.permanentAddress ? (data.permanentAddress as any) : Prisma.JsonNull,
@@ -344,11 +344,18 @@ export class EmployeeService {
             }
           }
 
-          // Auto-link to User if officialEmail matches an existing User in the same company
-          if (data.officialEmail) {
+          // Auto-link to User if work or personal email matches an existing User in the same company
+          const linkEmails = [
+            ...new Set(
+              [data.officialEmail, data.personalEmail]
+                .map((e) => (typeof e === 'string' ? e.trim() : ''))
+                .filter((e) => e.length > 0),
+            ),
+          ];
+          for (const email of linkEmails) {
             const matchingUser = await tx.user.findFirst({
               where: {
-                email: data.officialEmail,
+                email,
                 companyId,
                 employeeId: null, // not already linked
               },
@@ -359,15 +366,20 @@ export class EmployeeService {
                 where: { id: matchingUser.id },
                 data: { employeeId: employee.id },
               });
-              logger.info(`Auto-linked employee ${employee.id} to user ${matchingUser.id}`);
+              logger.info(`Auto-linked employee ${employee.id} to user ${matchingUser.id} (${email})`);
+              break;
             }
           }
 
-          // Optionally create a User (login) account for this employee
-          if (data.createUserAccount && data.officialEmail && data.userPassword) {
+          // Optionally create a User (login) account — login email prefers work, then personal
+          const loginEmail =
+            (data.officialEmail && String(data.officialEmail).trim()) ||
+            (data.personalEmail && String(data.personalEmail).trim()) ||
+            '';
+          if (data.createUserAccount && loginEmail && data.userPassword) {
             // Check if a user with this email already exists
             const existingUser = await tx.user.findUnique({
-              where: { email: data.officialEmail },
+              where: { email: loginEmail },
               select: { id: true },
             });
 
@@ -382,7 +394,7 @@ export class EmployeeService {
               const hashedPassword = await hashPassword(data.userPassword);
               const newUser = await tx.user.create({
                 data: {
-                  email: data.officialEmail,
+                  email: loginEmail,
                   password: hashedPassword,
                   firstName: data.firstName,
                   lastName: data.lastName,

@@ -47,7 +47,7 @@ export async function ensureReceiptPollerScheduled(): Promise<void> {
  */
 export function startReceiptPollerWorker() {
   return new Worker(
-    'notifications:receipts',
+    'notifications-receipts',
     async () => {
       const maxAgeMs = env.NOTIFICATIONS_RECEIPT_MAX_AGE_MIN * 60 * 1000;
       const cutoff = new Date(Date.now() - maxAgeMs);

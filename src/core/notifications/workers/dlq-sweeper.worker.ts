@@ -23,7 +23,7 @@ export async function ensureDlqSweeperScheduled(): Promise<void> {
  */
 export function startDlqSweeperWorker() {
   return new Worker(
-    'notifications:dlq-sweep',
+    'notifications-dlq-sweep',
     async () => {
       const retentionMs = env.NOTIFICATIONS_DLQ_RETENTION_DAYS * 24 * 60 * 60 * 1000;
       try {

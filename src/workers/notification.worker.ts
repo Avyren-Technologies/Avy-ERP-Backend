@@ -12,6 +12,7 @@ import {
   WORKER_LIMITER_HIGH,
   WORKER_LIMITER_DEFAULT,
   WORKER_LIMITER_LOW,
+  type NotificationDeliveryQueueName,
 } from '../core/notifications/queue/rate-limiter-config';
 import { channelRouter } from '../core/notifications/channels/channel-router';
 import { claimSendSlot, releaseSendSlot } from '../core/notifications/idempotency/worker-idempotency';
@@ -28,20 +29,20 @@ let workers: Worker[] = [];
 async function bootstrap() {
   await notificationService.initFirebase();
   workers = [
-    makeWorker('notifications:high'),
-    makeWorker('notifications:default'),
-    makeWorker('notifications:low'),
+    makeWorker('notifications-high'),
+    makeWorker('notifications-default'),
+    makeWorker('notifications-low'),
   ];
   logger.info('Notification workers started (3 priority queues)');
 }
 
 const LIMITERS = {
-  'notifications:high': WORKER_LIMITER_HIGH,
-  'notifications:default': WORKER_LIMITER_DEFAULT,
-  'notifications:low': WORKER_LIMITER_LOW,
+  'notifications-high': WORKER_LIMITER_HIGH,
+  'notifications-default': WORKER_LIMITER_DEFAULT,
+  'notifications-low': WORKER_LIMITER_LOW,
 } as const;
 
-type QueueName = keyof typeof WORKER_CONCURRENCY;
+type QueueName = NotificationDeliveryQueueName;
 
 /**
  * Shared per-notification processing. Used by both the single-notification
