@@ -353,6 +353,21 @@ export const DEFAULT_CATALOGUE: DefaultTemplateEntry[] = [
     recipientRole: 'REQUESTER',
   },
 
+  // ── Announcements ───────────────────────────────────────────────────
+  {
+    code: 'ANNOUNCEMENT',
+    name: 'Company Announcement',
+    subject: '{{title}}',
+    body: '{{body}}',
+    channels: ['IN_APP', 'PUSH', 'EMAIL'],
+    priority: 'MEDIUM',
+    variables: ['title', 'body', 'sent_by', 'image_url'],
+    sensitiveFields: [],
+    category: 'ANNOUNCEMENTS',
+    triggerEvent: 'ANNOUNCEMENT',
+    recipientRole: 'ALL',
+  },
+
   // ── Cron-driven informational templates ─────────────────────────────
   {
     code: 'BIRTHDAY',
