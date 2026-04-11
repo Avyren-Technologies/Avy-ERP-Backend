@@ -57,8 +57,17 @@ export async function getCurrentStepApproverIds(
       if (role === 'MANAGER') {
         return await resolveManagerUserIds(request.requesterId);
       }
+      if (role === 'DEPARTMENT_HEAD') {
+        return await resolveDepartmentHeadUserIds(request.requesterId);
+      }
       if (role === 'HR') {
         return await resolveHrUserIds(request.companyId);
+      }
+      if (role === 'FINANCE') {
+        return await resolveFinanceUserIds(request.companyId);
+      }
+      if (role === 'CEO' || role === 'COMPANY_ADMIN') {
+        return await resolveCompanyAdminUserIds(request.companyId);
       }
       // Unknown role — log and fall through to empty result
       logger.warn('Unknown approverRole in workflow step', {
@@ -172,6 +181,90 @@ async function resolveHrUserIds(companyId: string): Promise<string[]> {
     return result;
   } catch (err) {
     logger.warn('Failed to resolve HR user IDs', { error: err, companyId });
+    return [];
+  }
+}
+
+/**
+ * Resolve the department head user ID for a given requester's department.
+ */
+async function resolveDepartmentHeadUserIds(requesterId: string): Promise<string[]> {
+  try {
+    const requester = await platformPrisma.employee.findFirst({
+      where: { OR: [{ id: requesterId }, { user: { id: requesterId } }] },
+      select: { departmentId: true },
+    });
+    if (!requester?.departmentId) return [];
+
+    const dept = await platformPrisma.department.findUnique({
+      where: { id: requester.departmentId },
+      select: { headEmployeeId: true },
+    });
+    if (!dept?.headEmployeeId) return [];
+
+    const head = await platformPrisma.employee.findUnique({
+      where: { id: dept.headEmployeeId },
+      select: { user: { select: { id: true } } },
+    });
+    return head?.user?.id ? [head.user.id] : [];
+  } catch (err) {
+    logger.warn('Failed to resolve department head user IDs', { error: err, requesterId });
+    return [];
+  }
+}
+
+/**
+ * Resolve users with finance-level permissions in a company.
+ */
+async function resolveFinanceUserIds(companyId: string): Promise<string[]> {
+  try {
+    const users = await platformPrisma.user.findMany({
+      where: { companyId, isActive: true },
+      select: {
+        id: true,
+        role: true,
+        tenantUsers: {
+          include: { role: { select: { permissions: true } } },
+        },
+      },
+    });
+
+    const result: string[] = [];
+    for (const u of users) {
+      if (u.role === 'COMPANY_ADMIN') {
+        result.push(u.id);
+        continue;
+      }
+      const hasFinance = u.tenantUsers.some((tu) => {
+        const perms = tu.role?.permissions as unknown;
+        return (
+          Array.isArray(perms) &&
+          perms.some(
+            (p) => typeof p === 'string' && (p === '*' || p.startsWith('finance:')),
+          )
+        );
+      });
+      if (hasFinance) result.push(u.id);
+    }
+    return result;
+  } catch (err) {
+    logger.warn('Failed to resolve finance user IDs', { error: err, companyId });
+    return [];
+  }
+}
+
+/**
+ * Resolve company admin (CEO/Director) user IDs.
+ */
+async function resolveCompanyAdminUserIds(companyId: string): Promise<string[]> {
+  try {
+    const users = await platformPrisma.user.findMany({
+      where: { companyId, isActive: true, role: 'COMPANY_ADMIN' },
+      select: { id: true },
+    });
+    return users.map((u) => u.id);
+  } catch (err) {
+    logger.warn('Failed to resolve company admin user IDs', { error: err, companyId });
     return [];
   }
 }
