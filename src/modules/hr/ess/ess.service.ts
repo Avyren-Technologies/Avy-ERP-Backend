@@ -4302,12 +4302,16 @@ export class ESSService {
       });
       const categoryMap = new Map(categories.map((c) => [c.code, c]));
 
+      // Check claim-level receipts as fallback when item-level receipts are missing
+      const claimReceipts = claim.receipts as any[] | null;
+      const hasClaimLevelReceipts = claimReceipts && claimReceipts.length > 0;
+
       for (const item of claim.items) {
         const cat = categoryMap.get(item.categoryCode);
         if (!cat) continue;
 
-        const receipts = item.receipts as any[] | null;
-        const hasReceipts = receipts && receipts.length > 0;
+        const itemReceipts = item.receipts as any[] | null;
+        const hasReceipts = (itemReceipts && itemReceipts.length > 0) || hasClaimLevelReceipts;
 
         if (cat.requiresReceipt && !hasReceipts) {
           throw ApiError.badRequest(
