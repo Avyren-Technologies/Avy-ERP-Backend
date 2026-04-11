@@ -51,11 +51,20 @@ export const pushChannel = {
       sensitiveFields,
     );
 
+    // Extract image URL from notification data for rich push.
+    // Callers pass it as `image_url` in tokens (e.g., announcements, payslip PDFs).
+    const dataObj = (masked.data ?? {}) as Record<string, unknown>;
+    const imageUrl =
+      typeof dataObj.image_url === 'string' && dataObj.image_url.startsWith('http')
+        ? dataObj.image_url
+        : undefined;
+
     const payload = {
       title: masked.title,
       body: masked.body,
-      data: (masked.data ?? {}) as Record<string, unknown>,
+      data: dataObj,
       priority,
+      imageUrl,
     };
 
     const results = await Promise.allSettled([
