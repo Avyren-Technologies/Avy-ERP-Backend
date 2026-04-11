@@ -19,6 +19,25 @@ const coerceOptionalNullableNumber = (min = 0) =>
     z.coerce.number().min(min).nullable().optional(),
   );
 
+/** Prisma Decimal serializes as string in JSON — accept number | numeric string */
+const jsonDecimal = (val: unknown): unknown => {
+  if (val === null || val === undefined) return val;
+  if (typeof val === 'string' && val.trim() !== '') {
+    const n = parseFloat(val);
+    return Number.isFinite(n) ? n : val;
+  }
+  return val;
+};
+
+const otMultiplierField = () =>
+  z.preprocess(jsonDecimal, z.number().min(0.01).max(10).optional());
+
+const otMultiplierNullableField = () =>
+  z.preprocess(jsonDecimal, z.union([z.number().min(0.01).max(10), z.null()]).optional());
+
+const otCapHoursNullableField = () =>
+  z.preprocess(jsonDecimal, z.union([z.number().min(0), z.null()]).optional());
+
 // ── Attendance Records ────────────────────────────────────────────────
 
 export const createAttendanceSchema = z.object({
@@ -221,22 +240,22 @@ export const overtimeRulesSchema = z.object({
 
   // Calculation Basis
   calculationBasis: z.nativeEnum(OTCalculationBasis).optional(),
-  thresholdMinutes: z.number().int().min(0).optional(),
-  minimumOtMinutes: z.number().int().min(0).optional(),
+  thresholdMinutes: z.preprocess(jsonDecimal, z.number().int().min(0).optional()),
+  minimumOtMinutes: z.preprocess(jsonDecimal, z.number().int().min(0).optional()),
   includeBreaksInOT: z.boolean().optional(),
 
   // Rate Multipliers
-  weekdayMultiplier: z.number().min(0.01).max(10).optional(),
-  weekendMultiplier: z.number().min(0.01).max(10).nullable().optional(),
-  holidayMultiplier: z.number().min(0.01).max(10).nullable().optional(),
-  nightShiftMultiplier: z.number().min(0.01).max(10).nullable().optional(),
+  weekdayMultiplier: otMultiplierField(),
+  weekendMultiplier: otMultiplierNullableField(),
+  holidayMultiplier: otMultiplierNullableField(),
+  nightShiftMultiplier: otMultiplierNullableField(),
 
   // Caps
-  dailyCapHours: z.number().min(0).nullable().optional(),
-  weeklyCapHours: z.number().min(0).nullable().optional(),
-  monthlyCapHours: z.number().min(0).nullable().optional(),
+  dailyCapHours: otCapHoursNullableField(),
+  weeklyCapHours: otCapHoursNullableField(),
+  monthlyCapHours: otCapHoursNullableField(),
   enforceCaps: z.boolean().optional(),
-  maxContinuousOtHours: z.number().min(0).nullable().optional(),
+  maxContinuousOtHours: otCapHoursNullableField(),
 
   // Approval & Payroll
   approvalRequired: z.boolean().optional(),
@@ -244,7 +263,10 @@ export const overtimeRulesSchema = z.object({
 
   // Comp-Off
   compOffEnabled: z.boolean().optional(),
-  compOffExpiryDays: z.number().int().min(1).nullable().optional(),
+  compOffExpiryDays: z.preprocess(
+    jsonDecimal,
+    z.union([z.number().int().min(1), z.null()]).optional(),
+  ),
 
   // Rounding
   roundingStrategy: z.nativeEnum(RoundingStrategy).optional(),

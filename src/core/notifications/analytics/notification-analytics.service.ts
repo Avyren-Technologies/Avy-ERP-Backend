@@ -21,10 +21,38 @@ export const notificationAnalyticsService = {
   async getSummary(companyId: string, days: number = 30) {
     const start = DateTime.now().minus({ days }).startOf('day').toJSDate();
 
-    const rows = await platformPrisma.notificationEventAggregateDaily.findMany({
+    // Pre-aggregated rows for days older than today
+    const aggregateRows = await platformPrisma.notificationEventAggregateDaily.findMany({
       where: { companyId, date: { gte: start } },
       select: { channel: true, event: true, count: true },
     });
+
+    // Today's raw events (not yet aggregated by the nightly cron).
+    // Group them in-memory so the dashboard isn't empty on the first day.
+    const todayStart = DateTime.now().startOf('day').toJSDate();
+    const rawToday = await platformPrisma.$queryRaw<
+      Array<{ channel: string; event: string; count: bigint }>
+    >`
+      SELECT
+        ne.channel::text AS channel,
+        ne.event::text AS event,
+        COUNT(*)::bigint AS count
+      FROM notification_events ne
+      JOIN notifications n ON n.id = ne."notificationId"
+      WHERE n."companyId" = ${companyId}
+        AND ne."occurredAt" >= ${todayStart}
+      GROUP BY ne.channel, ne.event
+    `;
+
+    // Merge both sources into a single stream
+    const rows = [
+      ...aggregateRows,
+      ...rawToday.map((r) => ({
+        channel: r.channel,
+        event: r.event,
+        count: Number(r.count),
+      })),
+    ];
 
     let sent = 0;
     let delivered = 0;

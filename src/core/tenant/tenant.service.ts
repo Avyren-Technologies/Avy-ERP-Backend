@@ -13,6 +13,7 @@ import { createRedisPattern, createTenantCacheKey, hashPassword } from '../../sh
 import { n } from '../../shared/utils/prisma-helpers';
 import { logger } from '../../config/logger';
 import { seedCompanyConfigs } from '../../shared/services/config-seeder.service';
+import { seedDefaultTemplatesForCompany } from '../notifications/templates/seed-defaults';
 import type {
   OnboardTenantPayload,
   CompanySectionKey,
@@ -539,28 +540,50 @@ export class TenantService {
       }
 
       // Notification Templates + Rules
+      // Each template needs a distinct `code` per (companyId, channel) — see @@unique([companyId, code, channel])
       for (const tmpl of DEFAULT_NOTIFICATION_TEMPLATES) {
-        const template = await tx.notificationTemplate.create({
-          data: {
+        const template = await tx.notificationTemplate.upsert({
+          where: {
+            companyId_code_channel: {
+              companyId: company.id,
+              code: tmpl.code,
+              channel: tmpl.channel,
+            },
+          },
+          create: {
             companyId: company.id,
+            code: tmpl.code,
             name: tmpl.name,
             subject: tmpl.subject,
             body: tmpl.body,
             channel: tmpl.channel,
           },
+          update: {
+            name: tmpl.name,
+            subject: tmpl.subject,
+            body: tmpl.body,
+          },
         });
-        // Link notification rule if one exists for this template
-        const rule = DEFAULT_NOTIFICATION_RULES.find(r => r.templateName === tmpl.name);
+        const rule = DEFAULT_NOTIFICATION_RULES.find((r) => r.templateName === tmpl.name);
         if (rule) {
-          await tx.notificationRule.create({
-            data: {
+          const existingRule = await tx.notificationRule.findFirst({
+            where: {
               companyId: company.id,
               triggerEvent: rule.triggerEvent,
               templateId: template.id,
-              recipientRole: rule.recipientRole,
-              channel: rule.channel,
             },
           });
+          if (!existingRule) {
+            await tx.notificationRule.create({
+              data: {
+                companyId: company.id,
+                triggerEvent: rule.triggerEvent,
+                templateId: template.id,
+                recipientRole: rule.recipientRole,
+                channel: rule.channel,
+              },
+            });
+          }
         }
       }
 
@@ -688,6 +711,17 @@ export class TenantService {
     // OvertimeRule, ESSConfig) with industry-appropriate defaults.
     // Uses upsert — idempotent and safe to re-run.
     await seedCompanyConfigs(result.company.id, result.company.businessType ?? undefined);
+
+    // Seed default notification templates + rules so push/email/in-app
+    // channels fire out of the box for every standard trigger event.
+    try {
+      const seedResult = await seedDefaultTemplatesForCompany(result.company.id);
+      logger.info(`Seeded notification templates for company ${result.company.id}`, seedResult);
+    } catch (err) {
+      // Non-fatal — tenant creation succeeds even if the seed fails.
+      // Admin can re-run via the seed script.
+      logger.warn('Notification template seeding failed (non-fatal)', { error: err, companyId: result.company.id });
+    }
 
     // Cache
     await this.cacheTenantData(result.tenant.id, result);
