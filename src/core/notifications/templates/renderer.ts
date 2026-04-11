@@ -33,8 +33,14 @@ export function renderTemplate(
       ? Object.fromEntries(allowlist.map((k) => [k, tokens[k] ?? '']))
       : { ...tokens };
 
-  const title = template.subject ? compile(template.subject)(safeTokens) : template.name;
-  const body = compile(template.body)(safeTokens);
+  // Normalize legacy single-brace `{var}` to Handlebars double-brace `{{var}}`.
+  // The old company-defaults seeder used single braces; Handlebars ignores them.
+  // This regex converts `{word}` → `{{word}}` but skips already-doubled `{{word}}`.
+  const normalize = (s: string) =>
+    s.replace(/(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})/g, '{{$1}}');
+
+  const title = template.subject ? compile(normalize(template.subject))(safeTokens) : template.name;
+  const body = compile(normalize(template.body))(safeTokens);
 
   // data payload honors the allowlist — sensitive fields not listed in the
   // template variables never make it into the Notification row or push data.
