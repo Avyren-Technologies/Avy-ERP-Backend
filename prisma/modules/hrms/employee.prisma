@@ -27,7 +27,7 @@ model Employee {
   // Contact Info
   personalMobile           String
   alternativeMobile        String?
-  personalEmail            String
+  personalEmail            String?
   officialEmail            String?
   currentAddress           Json?
   permanentAddress         Json?
