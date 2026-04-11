@@ -555,6 +555,7 @@ export class AuthService {
         explicitRecipients: [user.id],
         tokens: {
           user_name: `${user.firstName} ${user.lastName ?? ''}`.trim(),
+          reset_code: code,
           expires_in: '15 minutes',
         },
         priority: 'CRITICAL',

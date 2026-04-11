@@ -65,6 +65,24 @@ interface ITDeclarationListOptions extends ListOptions {
   status?: string;
 }
 
+/** One-line message for dashboard widget logs (avoids multi-line Prisma stack for P1001). */
+function formatDashboardWidgetError(reason: unknown): string {
+  const anyErr = reason as { code?: string; message?: string };
+  if (anyErr?.code === 'P1001') {
+    return 'Database unreachable — start PostgreSQL or fix DATABASE_URL.';
+  }
+  const msg = typeof anyErr?.message === 'string' ? anyErr.message : String(reason);
+  if (msg.includes("Can't reach database server")) {
+    return 'Database unreachable — start PostgreSQL or fix DATABASE_URL.';
+  }
+  const first = msg
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  const line = first ?? msg;
+  return line.length > 220 ? `${line.slice(0, 220)}…` : line;
+}
+
 export class ESSService {
   // ────────────────────────────────────────────────────────────────────
   // ESS Config (singleton upsert)
@@ -2229,7 +2247,7 @@ export class ESSService {
    */
   private settledValue<T>(result: PromiseSettledResult<T>, label: string): T | null {
     if (result.status === 'fulfilled') return result.value;
-    logger.warn(`Dashboard widget "${label}" failed: ${(result.reason as Error)?.message ?? result.reason}`);
+    logger.warn(`Dashboard widget "${label}" failed: ${formatDashboardWidgetError(result.reason)}`);
     return null;
   }
 
