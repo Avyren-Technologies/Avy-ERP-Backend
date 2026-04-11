@@ -15,6 +15,8 @@ export interface ExpoSendPayload {
   body: string;
   data: Record<string, unknown>;
   priority: NotificationPriority;
+  /** Optional image URL for rich push (Android BigPicture / iOS media attachment). */
+  imageUrl?: string | undefined;
 }
 
 export interface ExpoSendResult {
@@ -43,6 +45,10 @@ export const expoProvider = {
       sound: 'default',
       channelId: payload.priority === 'CRITICAL' ? 'critical' : 'default',
       badge: 1,
+      // Rich content — shows a large image in the expanded notification
+      // on both Android (BigPictureStyle) and iOS (media attachment).
+      // expo-server-sdk v6+ supports richContent.image.
+      ...(payload.imageUrl ? { richContent: { image: payload.imageUrl } } : {}),
     }));
 
     const chunks = expo.chunkPushNotifications(messages);

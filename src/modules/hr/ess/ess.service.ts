@@ -435,94 +435,55 @@ export class ESSService {
   }
 
   /**
-   * Validates that the approver has the correct role for the current workflow step.
-   * - MANAGER: approver must be the requester's reporting manager (or an active delegate)
-   * - HR: approver must have an HR-related role/permission
-   * - If no matching role found, falls back to allowing (backwards compatible)
+   * Validates that the approver is assigned to the RBAC Role specified in the
+   * current workflow step. The `approverRole` field stores a dynamic Role ID
+   * (cuid) from the Roles & Permissions system.
+   *
+   * COMPANY_ADMIN users are always allowed to approve any step.
    */
   private async validateApproverRole(
     companyId: string,
-    requesterId: string,
+    _requesterId: string,
     approverId: string,
     approverRole: string,
   ) {
-    const normalizedRole = approverRole.toUpperCase();
-
-    if (normalizedRole === 'MANAGER') {
-      // Check if the approver is the requester's reporting manager
-      const requester = await platformPrisma.employee.findFirst({
-        where: {
-          OR: [{ id: requesterId }, { user: { id: requesterId } }],
-          companyId,
+    // Resolve the approver to a user record
+    const approverUser = await platformPrisma.user.findFirst({
+      where: {
+        OR: [{ id: approverId }, { employee: { id: approverId } }],
+        companyId,
+      },
+      select: {
+        id: true,
+        role: true,
+        tenantUsers: {
+          where: { isActive: true },
+          select: { roleId: true },
         },
-        select: { id: true, reportingManagerId: true },
-      });
+      },
+    });
 
-      if (requester && requester.reportingManagerId) {
-        // Get the approver's employee record
-        const approverEmployee = await platformPrisma.employee.findFirst({
-          where: {
-            OR: [{ id: approverId }, { user: { id: approverId } }],
-            companyId,
-          },
-          select: { id: true },
-        });
-
-        if (approverEmployee) {
-          // Direct manager check
-          if (approverEmployee.id === requester.reportingManagerId) {
-            return; // Valid — approver is the reporting manager
-          }
-
-          // Check if approver is an active delegate for the reporting manager
-          const activeDelegates = await this.getActiveDelegates(companyId, requester.reportingManagerId);
-          if (activeDelegates.includes(approverEmployee.id) || activeDelegates.includes(approverId)) {
-            return; // Valid — approver is a delegate for the manager
-          }
-        }
-
-        throw ApiError.badRequest(
-          'This approval step requires the reporting manager. You are not authorized to approve this request.'
-        );
-      }
-      // If no requester found or no manager set, fall through (backwards compatible)
-      logger.warn(`Approval role validation: could not verify MANAGER role for requester ${requesterId}, allowing fallback`);
-    } else if (normalizedRole === 'HR') {
-      // Check if the approver's user has HR-related permissions via TenantUser -> Role
-      const approverUser = await platformPrisma.user.findFirst({
-        where: {
-          OR: [{ id: approverId }, { employee: { id: approverId } }],
-        },
-        select: {
-          id: true,
-          role: true,
-          tenantUsers: {
-            include: {
-              role: { select: { permissions: true } },
-            },
-          },
-        },
-      });
-
-      if (approverUser) {
-        // Check tenant-scoped roles for HR permissions
-        for (const tu of approverUser.tenantUsers) {
-          const permissions = tu.role.permissions as string[];
-          const hasHrPermission = Array.isArray(permissions) && permissions.some(
-            (p: string) => p === '*' || p.startsWith('hr:') || p === 'hr'
-          );
-          if (hasHrPermission) return; // Valid
-        }
-
-        // Also allow if user's base role is COMPANY_ADMIN (they implicitly have HR access)
-        if (approverUser.role === 'COMPANY_ADMIN') return;
-      }
-
-      throw ApiError.badRequest(
-        'This approval step requires HR personnel. You are not authorized to approve this request.'
-      );
+    if (!approverUser) {
+      throw ApiError.badRequest('Approver user not found');
     }
-    // For any other approverRole value (or no match), allow (backwards compatible)
+
+    // COMPANY_ADMIN can always approve
+    if (approverUser.role === 'COMPANY_ADMIN') return;
+
+    // Check if the approver is assigned to the required RBAC role
+    const hasRole = approverUser.tenantUsers.some((tu) => tu.roleId === approverRole);
+    if (hasRole) return;
+
+    // Fetch role name for a user-friendly error message
+    const role = await platformPrisma.role.findUnique({
+      where: { id: approverRole },
+      select: { name: true },
+    });
+    const roleName = role?.name ?? approverRole;
+
+    throw ApiError.badRequest(
+      `This approval step requires the "${roleName}" role. You are not authorized to approve this request.`
+    );
   }
 
   async rejectRequest(companyId: string, requestId: string, userId: string, note: string) {
@@ -782,7 +743,7 @@ export class ESSService {
             where: { id: entityId },
             data: {
               status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
-              ...(decision === 'APPROVED' && { approvedAt: new Date() }),
+              ...(decision === 'APPROVED' && { approvedBy: 'system' }),
             },
           });
           break;

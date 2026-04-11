@@ -5,8 +5,9 @@ import { logger } from '../../../config/logger';
  * Shape of a single step inside `ApprovalWorkflow.steps` (stored as JSON).
  * Kept local here because Prisma exposes the field as unstructured JSON.
  *
+ * `approverRole` stores a dynamic RBAC Role ID (cuid) from the Roles &
+ * Permissions system, NOT a predefined string like "MANAGER" or "HR".
  * At most one of `approverId` / `approverRole` is expected to be set.
- * `approverRole` is the normalized uppercase string (e.g. "MANAGER", "HR").
  */
 interface WorkflowStep {
   stepOrder: number;
@@ -21,8 +22,8 @@ interface WorkflowStep {
  *
  * Handles both approver shapes used by the ESS workflow engine:
  *   - `approverId` set on the step → returns `[approverId]`
- *   - `approverRole: 'MANAGER'`   → resolves requester's reportingManager user ID
- *   - `approverRole: 'HR'`        → resolves all company users with hr:* permission
+ *   - `approverRole` set on the step → resolves all active users assigned
+ *     to that RBAC Role via TenantUser
  *
  * Always returns user IDs (never employee IDs) so the dispatcher can
  * enqueue notifications directly. Returns an empty array on any failure
@@ -51,30 +52,9 @@ export async function getCurrentStepApproverIds(
       return userId ? [userId] : [];
     }
 
-    // Case 2: role-based approver — resolve per-requester
+    // Case 2: role-based approver — resolve all users assigned to this RBAC role
     if (currentStep.approverRole) {
-      const role = currentStep.approverRole.toUpperCase();
-      if (role === 'MANAGER') {
-        return await resolveManagerUserIds(request.requesterId);
-      }
-      if (role === 'DEPARTMENT_HEAD') {
-        return await resolveDepartmentHeadUserIds(request.requesterId);
-      }
-      if (role === 'HR') {
-        return await resolveHrUserIds(request.companyId);
-      }
-      if (role === 'FINANCE') {
-        return await resolveFinanceUserIds(request.companyId);
-      }
-      if (role === 'CEO' || role === 'COMPANY_ADMIN') {
-        return await resolveCompanyAdminUserIds(request.companyId);
-      }
-      // Unknown role — log and fall through to empty result
-      logger.warn('Unknown approverRole in workflow step', {
-        entityType,
-        entityId,
-        approverRole: currentStep.approverRole,
-      });
+      return await resolveRoleUserIds(currentStep.approverRole, request.companyId);
     }
 
     return [];
@@ -116,155 +96,35 @@ export async function resolveToUserId(idOrEmployeeId: string): Promise<string | 
 }
 
 /**
- * Resolve the reporting-manager user ID for a given requester.
- * Falls back to active delegates if the manager has any configured.
+ * Resolve all active user IDs assigned to a given RBAC Role ID.
+ *
+ * The approverRole stored in workflow steps is a dynamic Role ID (cuid)
+ * from the Roles & Permissions system. We look up all TenantUser records
+ * with that roleId where both the TenantUser and the linked User are active.
+ *
+ * Also includes COMPANY_ADMIN users as a fallback — they can always approve.
  */
-async function resolveManagerUserIds(requesterId: string): Promise<string[]> {
+async function resolveRoleUserIds(roleId: string, companyId: string): Promise<string[]> {
   try {
-    const requester = await platformPrisma.employee.findFirst({
-      where: { OR: [{ id: requesterId }, { user: { id: requesterId } }] },
-      select: {
-        reportingManagerId: true,
-      },
-    });
-    if (!requester?.reportingManagerId) return [];
-
-    const manager = await platformPrisma.employee.findUnique({
-      where: { id: requester.reportingManagerId },
-      select: { user: { select: { id: true } } },
-    });
-    return manager?.user?.id ? [manager.user.id] : [];
-  } catch (err) {
-    logger.warn('Failed to resolve manager user IDs', { error: err, requesterId });
-    return [];
-  }
-}
-
-/**
- * Resolve all users in a company who have HR-level permissions.
- * Returns user IDs of active users with `hr:*`, any `hr:*` permission, or
- * `COMPANY_ADMIN` base role.
- */
-async function resolveHrUserIds(companyId: string): Promise<string[]> {
-  try {
-    const users = await platformPrisma.user.findMany({
+    // Find all active users assigned to this specific role
+    const tenantUsers = await platformPrisma.tenantUser.findMany({
       where: {
-        companyId,
+        roleId,
         isActive: true,
+        user: { isActive: true, companyId },
       },
-      select: {
-        id: true,
-        role: true,
-        tenantUsers: {
-          include: { role: { select: { permissions: true } } },
-        },
-      },
+      select: { userId: true },
     });
 
-    const result: string[] = [];
-    for (const u of users) {
-      if (u.role === 'COMPANY_ADMIN') {
-        result.push(u.id);
-        continue;
-      }
-      const hasHr = u.tenantUsers.some((tu) => {
-        const perms = tu.role?.permissions as unknown;
-        return (
-          Array.isArray(perms) &&
-          perms.some(
-            (p) => typeof p === 'string' && (p === '*' || p === 'hr' || p.startsWith('hr:')),
-          )
-        );
-      });
-      if (hasHr) result.push(u.id);
+    const userIds = tenantUsers.map((tu) => tu.userId);
+
+    if (userIds.length === 0) {
+      logger.warn('No active users found for approver role', { roleId, companyId });
     }
-    return result;
+
+    return userIds;
   } catch (err) {
-    logger.warn('Failed to resolve HR user IDs', { error: err, companyId });
-    return [];
-  }
-}
-
-/**
- * Resolve the department head user ID for a given requester's department.
- */
-async function resolveDepartmentHeadUserIds(requesterId: string): Promise<string[]> {
-  try {
-    const requester = await platformPrisma.employee.findFirst({
-      where: { OR: [{ id: requesterId }, { user: { id: requesterId } }] },
-      select: { departmentId: true },
-    });
-    if (!requester?.departmentId) return [];
-
-    const dept = await platformPrisma.department.findUnique({
-      where: { id: requester.departmentId },
-      select: { headEmployeeId: true },
-    });
-    if (!dept?.headEmployeeId) return [];
-
-    const head = await platformPrisma.employee.findUnique({
-      where: { id: dept.headEmployeeId },
-      select: { user: { select: { id: true } } },
-    });
-    return head?.user?.id ? [head.user.id] : [];
-  } catch (err) {
-    logger.warn('Failed to resolve department head user IDs', { error: err, requesterId });
-    return [];
-  }
-}
-
-/**
- * Resolve users with finance-level permissions in a company.
- */
-async function resolveFinanceUserIds(companyId: string): Promise<string[]> {
-  try {
-    const users = await platformPrisma.user.findMany({
-      where: { companyId, isActive: true },
-      select: {
-        id: true,
-        role: true,
-        tenantUsers: {
-          include: { role: { select: { permissions: true } } },
-        },
-      },
-    });
-
-    const result: string[] = [];
-    for (const u of users) {
-      if (u.role === 'COMPANY_ADMIN') {
-        result.push(u.id);
-        continue;
-      }
-      const hasFinance = u.tenantUsers.some((tu) => {
-        const perms = tu.role?.permissions as unknown;
-        return (
-          Array.isArray(perms) &&
-          perms.some(
-            (p) => typeof p === 'string' && (p === '*' || p.startsWith('finance:')),
-          )
-        );
-      });
-      if (hasFinance) result.push(u.id);
-    }
-    return result;
-  } catch (err) {
-    logger.warn('Failed to resolve finance user IDs', { error: err, companyId });
-    return [];
-  }
-}
-
-/**
- * Resolve company admin (CEO/Director) user IDs.
- */
-async function resolveCompanyAdminUserIds(companyId: string): Promise<string[]> {
-  try {
-    const users = await platformPrisma.user.findMany({
-      where: { companyId, isActive: true, role: 'COMPANY_ADMIN' },
-      select: { id: true },
-    });
-    return users.map((u) => u.id);
-  } catch (err) {
-    logger.warn('Failed to resolve company admin user IDs', { error: err, companyId });
+    logger.warn('Failed to resolve role-based user IDs', { error: err, roleId, companyId });
     return [];
   }
 }

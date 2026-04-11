@@ -17,7 +17,6 @@ import {
   type ShiftInfo,
 } from '../../../shared/services/attendance-status-resolver.service';
 import { TRIGGER_EVENTS } from '../../../shared/constants/trigger-events';
-import { APPROVER_ROLES } from '../../../shared/constants/approver-roles';
 import {
   essConfigSchema,
   createWorkflowSchema,
