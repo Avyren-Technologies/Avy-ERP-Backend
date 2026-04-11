@@ -220,6 +220,7 @@ export const TRIGGER_TO_CATEGORY: Record<string, string> = {
 
   // Announcements
   HOLIDAY_REMINDER: 'ANNOUNCEMENTS',
+  ANNOUNCEMENT: 'ANNOUNCEMENTS',
 };
 
 /**
