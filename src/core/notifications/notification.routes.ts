@@ -2,12 +2,13 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { notificationController as controller } from './notification.controller';
 import { notificationAnalyticsRoutes } from './analytics/notification-analytics.routes';
+import { announcementRoutes } from './announcements/announcement.routes';
 
 const notificationRoutes = Router();
 
-// Analytics sub-routes — mounted first so /analytics/* doesn't collide
-// with the dynamic /:id routes below.
+// Sub-routes — mounted first so they don't collide with /:id routes.
 notificationRoutes.use('/analytics', notificationAnalyticsRoutes);
+notificationRoutes.use('/announcements', announcementRoutes);
 
 // Preferences (must come before /:id/read routes to avoid matching)
 notificationRoutes.get('/preferences', controller.getMyPreferences);
