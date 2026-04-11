@@ -60,10 +60,17 @@ async function startServer(): Promise<void> {
       // Register event listeners
       registerHRListeners();
 
-      // Schedule notification repeatable jobs (receipt poller + DLQ sweeper)
+      // Start notification delivery workers + repeatable jobs
       if (env.NOTIFICATIONS_ENABLED) {
         void (async () => {
           try {
+            // Import the main delivery worker module — its bootstrap()
+            // IIFE creates Worker instances for the 3 priority queues
+            // (high/default/low) that process PUSH/EMAIL/SMS/WHATSAPP
+            // delivery jobs enqueued by the dispatcher.
+            await import('../workers/notification.worker');
+            logger.info('✅ Notification delivery workers started (high/default/low)');
+
             const { ensureReceiptPollerScheduled, startReceiptPollerWorker } = await import(
               '../core/notifications/workers/receipt-poller.worker'
             );
