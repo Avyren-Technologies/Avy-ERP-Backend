@@ -1348,6 +1348,7 @@ export class CompanyAdminService {
     const catalogue = MODULE_CATALOGUE.map((mod) => ({
       id: mod.id,
       name: mod.name,
+      description: (mod as any).description ?? '',
       pricePerMonth: mod.price,
       isActive: companyModuleIds.includes(mod.id),
     }));

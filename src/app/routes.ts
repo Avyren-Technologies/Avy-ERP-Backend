@@ -110,6 +110,7 @@ router.get('/modules/catalogue', authMiddleware({ requireTenant: false }), async
   const catalogue = MODULE_CATALOGUE.map((mod: any) => ({
     id: mod.id,
     name: mod.name,
+    description: mod.description ?? '',
     pricePerMonth: mod.price,
     isActive: true, // super admin sees all as available
   }));
