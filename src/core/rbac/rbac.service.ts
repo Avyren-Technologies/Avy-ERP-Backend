@@ -63,12 +63,16 @@ export class RbacService {
   async listRoles(tenantId: string): Promise<RoleResponse[]> {
     const roles = await platformPrisma.role.findMany({
       where: { tenantId, isActive: true },
+      include: {
+        _count: { select: { tenantUsers: true } },
+      },
       orderBy: { name: 'asc' },
     });
 
     return roles.map((r) => ({
       ...r,
       permissions: r.permissions as string[],
+      userCount: (r as any)._count?.tenantUsers ?? 0,
     }));
   }
 

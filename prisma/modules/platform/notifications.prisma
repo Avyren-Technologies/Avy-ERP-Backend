@@ -7,7 +7,7 @@
 model Notification {
   id              String               @id @default(cuid())
   userId          String
-  companyId       String
+  companyId       String?
 
   // Content
   title           String
@@ -39,7 +39,7 @@ model Notification {
 
   // Relations
   user            User                 @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)
-  company         Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company         Company?             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   events          NotificationEvent[]
 
   createdAt       DateTime             @default(now())

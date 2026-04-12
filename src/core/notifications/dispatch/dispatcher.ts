@@ -252,7 +252,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       }
       return {
         userId: bucket.userId,
-        companyId: input.companyId,
+        companyId: input.companyId ?? null,
         title: bucket.rendered.title,
         body: bucket.rendered.body,
         type: input.type ?? input.triggerEvent,
