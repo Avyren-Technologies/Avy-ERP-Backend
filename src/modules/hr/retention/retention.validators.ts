@@ -12,9 +12,18 @@ export const upsertPolicySchema = z.object({
     'DISCIPLINE',
     'DOCUMENTS',
     'AUDIT_LOG',
+    'FINANCIAL_DATA',
+    'PERSONAL_INFO',
+    'MEDICAL_RECORDS',
+    'ATTENDANCE_DATA',
+    'PERFORMANCE_DATA',
+    'COMMUNICATION_LOGS',
+    'EXIT_DATA',
   ]),
   retentionYears: z.number().int().min(1).max(99),
-  actionAfter: z.enum(['ARCHIVE', 'DELETE', 'ANONYMISE']).default('ARCHIVE'),
+  actionAfter: z.enum(['ARCHIVE', 'DELETE', 'ANONYMISE', 'ANONYMIZE']).transform(
+    (val) => val === 'ANONYMIZE' ? 'ANONYMISE' as const : val
+  ).default('ARCHIVE'),
 });
 
 export const createDataAccessRequestSchema = z.object({
