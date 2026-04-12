@@ -3047,6 +3047,7 @@ export class ESSService {
     emergencyContactMobile?: string | undefined;
     maritalStatus?: 'SINGLE' | 'MARRIED' | 'DIVORCED' | 'WIDOWED' | undefined;
     bloodGroup?: string | undefined;
+    profilePhotoUrl?: string | undefined;
   }) {
     // Resolve employee from user
     const user = await platformPrisma.user.findUnique({
@@ -3104,6 +3105,7 @@ export class ESSService {
         ...(data.emergencyContactMobile !== undefined && { emergencyContactMobile: data.emergencyContactMobile }),
         ...(data.maritalStatus !== undefined && { maritalStatus: data.maritalStatus as MaritalStatus }),
         ...(data.bloodGroup !== undefined && { bloodGroup: data.bloodGroup }),
+        ...(data.profilePhotoUrl !== undefined && { profilePhotoUrl: data.profilePhotoUrl }),
       },
       select: {
         id: true,
@@ -3120,6 +3122,7 @@ export class ESSService {
         emergencyContactMobile: true,
         maritalStatus: true,
         bloodGroup: true,
+        profilePhotoUrl: true,
       },
     });
 

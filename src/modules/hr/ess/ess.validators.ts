@@ -166,7 +166,7 @@ export const updateNotificationRuleSchema = createNotificationRuleSchema.partial
 export const createITDeclarationSchema = z.object({
   employeeId: z.string().optional(), // Auto-set by controller for non-HR users
   financialYear: z.string().min(1, 'Financial year is required'), // "2025-26"
-  regime: z.enum(['OLD', 'NEW']).optional().default('NEW'),
+  regime: z.string().transform(v => v.toUpperCase()).pipe(z.enum(['OLD', 'NEW'])).optional().default('NEW'),
   section80C: z.record(z.string(), z.unknown()).optional(),
   section80CCD: z.record(z.string(), z.unknown()).optional(),
   section80D: z.record(z.string(), z.unknown()).optional(),
@@ -368,4 +368,5 @@ export const updateProfileSchema = z.object({
   emergencyContactMobile: z.string().min(1).optional(),
   maritalStatus: z.enum(['SINGLE', 'MARRIED', 'DIVORCED', 'WIDOWED']).optional(),
   bloodGroup: z.string().optional(),
+  profilePhotoUrl: z.string().min(1).optional(),
 });
