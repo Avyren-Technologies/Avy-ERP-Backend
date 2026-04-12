@@ -6,16 +6,16 @@ import { roundToDecimal } from '../../shared/utils';
 // ────────────────────────────────────────────────────────────────────
 
 export const MODULE_CATALOGUE = [
-  { id: 'hr', name: 'HR', price: 2999 },
-  { id: 'security', name: 'Security', price: 1499 },
-  { id: 'production', name: 'Production', price: 3499 },
-  { id: 'machine-maintenance', name: 'Machine Maintenance', price: 2499 },
-  { id: 'inventory', name: 'Inventory', price: 1999 },
-  { id: 'vendor', name: 'Vendor', price: 2499 },
-  { id: 'sales', name: 'Sales & Invoicing', price: 2999 },
-  { id: 'finance', name: 'Finance', price: 2999 },
-  { id: 'visitor', name: 'Visitor', price: 999 },
-  { id: 'masters', name: 'Masters', price: 499 },
+  { id: 'hr', name: 'HR', price: 2999, description: 'Complete human resource management including employee records, attendance, leave, payroll, performance reviews, and ESS portal.' },
+  { id: 'security', name: 'Security', price: 1499, description: 'Gate pass management, visitor tracking, contractor access control, and premises security monitoring.' },
+  { id: 'production', name: 'Production', price: 3499, description: 'Production planning, work orders, bill of materials, shop floor tracking, quality control, and output reporting.' },
+  { id: 'machine-maintenance', name: 'Machine Maintenance', price: 2499, description: 'Preventive and breakdown maintenance scheduling, spare parts tracking, AMC management, and downtime analysis.' },
+  { id: 'inventory', name: 'Inventory', price: 1999, description: 'Stock management, warehouse operations, material receipts, issue tracking, reorder levels, and inventory valuation.' },
+  { id: 'vendor', name: 'Vendor', price: 2499, description: 'Vendor registration, purchase orders, quotation comparison, payment tracking, and supplier performance evaluation.' },
+  { id: 'sales', name: 'Sales & Invoicing', price: 2999, description: 'Sales orders, invoicing, dispatch management, customer management, and revenue tracking with GST compliance.' },
+  { id: 'finance', name: 'Finance', price: 2999, description: 'General ledger, accounts payable/receivable, bank reconciliation, budgeting, and financial reporting.' },
+  { id: 'visitor', name: 'Visitor', price: 999, description: 'Visitor pre-registration, check-in/out, badge printing, host notifications, and visitor analytics.' },
+  { id: 'masters', name: 'Masters', price: 499, description: 'Centralized master data management for items, units, categories, locations, and shared configuration across all modules.' },
 ];
 
 export const USER_TIERS: { key: string; label: string; basePrice: number; perUserPrice: number }[] = [

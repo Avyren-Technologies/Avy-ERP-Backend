@@ -48,7 +48,7 @@ export const whatsappChannel = {
       );
     }
 
-    const caps = await checkWhatsappCaps(notif.companyId, userId);
+    const caps = await checkWhatsappCaps(notif.companyId ?? '', userId);
     if (!caps.allowed) {
       throw Object.assign(new Error(caps.reason ?? 'WHATSAPP_CAP_HIT'), {
         code: caps.reason ?? 'WHATSAPP_CAP_HIT',

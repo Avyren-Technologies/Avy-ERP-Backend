@@ -293,7 +293,10 @@ export class ESSService {
       platformPrisma.approvalRequest.count({ where }),
     ]);
 
-    return { requests, total, page, limit };
+    // Enrich with employee names from requesterId
+    const enriched = await this.enrichRequestsWithEmployeeNames(requests);
+
+    return { requests: enriched, total, page, limit };
   }
 
   async getRequest(companyId: string, id: string) {
@@ -336,14 +339,38 @@ export class ESSService {
       select: { managerId: true },
     });
 
+    // Enrich with employee names
+    const enriched = await this.enrichRequestsWithEmployeeNames(directRequests);
+
     // Mark requests with delegation info
     const delegateManagerIds = new Set(delegations.map(d => d.managerId));
 
-    return directRequests.map(req => ({
+    return enriched.map(req => ({
       ...req,
       isDelegated: false,
       delegatedFromManagerIds: delegateManagerIds.size > 0 ? Array.from(delegateManagerIds) : undefined,
     }));
+  }
+
+  /**
+   * Batch-resolve employee names from requesterId for approval request cards.
+   */
+  private async enrichRequestsWithEmployeeNames(requests: any[]) {
+    if (requests.length === 0) return requests;
+    const requesterIds = [...new Set(requests.map(r => r.requesterId).filter(Boolean))];
+    const employees = await platformPrisma.employee.findMany({
+      where: { id: { in: requesterIds } },
+      select: { id: true, firstName: true, lastName: true, employeeId: true },
+    });
+    const employeeMap = new Map(employees.map(e => [e.id, e]));
+    return requests.map(req => {
+      const emp = employeeMap.get(req.requesterId);
+      const dataObj = req.data as Record<string, any> | null;
+      const employeeName = emp
+        ? `${emp.firstName ?? ''} ${emp.lastName ?? ''}`.trim()
+        : dataObj?.employee_name ?? dataObj?.employeeName ?? 'Employee';
+      return { ...req, employeeName, employee: emp ?? undefined };
+    });
   }
 
   async approveStep(companyId: string, requestId: string, userId: string, note?: string) {

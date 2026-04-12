@@ -40,7 +40,7 @@ export const smsChannel = {
       throw Object.assign(new Error('NO_USER_PHONE'), { code: 'NO_USER_PHONE' });
     }
 
-    const caps = await checkSmsCaps(notif.companyId, userId);
+    const caps = await checkSmsCaps(notif.companyId ?? '', userId);
     if (!caps.allowed) {
       throw Object.assign(new Error(caps.reason ?? 'SMS_CAP_HIT'), {
         code: caps.reason ?? 'SMS_CAP_HIT',
