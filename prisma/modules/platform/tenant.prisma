@@ -261,6 +261,19 @@ model Company {
   analyticsAlerts       AnalyticsAlert[]
   reportHistory         ReportHistory[]
 
+  // Visitor Management
+  visitorTypes              VisitorType[]
+  visitorGates              VisitorGate[]
+  safetyInductions          SafetyInduction[]
+  visits                    Visit[]
+  visitorWatchlists         VisitorWatchlist[]
+  groupVisits               GroupVisit[]
+  recurringVisitorPasses    RecurringVisitorPass[]
+  vehicleGatePasses         VehicleGatePass[]
+  materialGatePasses        MaterialGatePass[]
+  visitorManagementConfig   VisitorManagementConfig?
+  deniedEntries             DeniedEntry[]
+
   @@map("companies")
 }
 

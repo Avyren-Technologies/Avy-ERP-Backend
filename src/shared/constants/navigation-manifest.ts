@@ -194,6 +194,25 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'ops-production', label: 'Production', icon: 'factory', requiredPerm: 'production:read', path: '/app/production', module: 'production', group: 'Operations', roleScope: 'company', sortOrder: 701 },
   { id: 'ops-maintenance', label: 'Maintenance', icon: 'wrench', requiredPerm: 'maintenance:read', path: '/app/maintenance', module: 'machine-maintenance', group: 'Operations', roleScope: 'company', sortOrder: 702, children: [{ label: 'Work Orders', path: '/app/maintenance/orders' }, { label: 'Machine Registry', path: '/app/maintenance/machines' }] },
 
+  // ═══════ VISITOR MANAGEMENT ═══════
+  { id: 'vms-dashboard', label: 'Visitors Dashboard', icon: 'eye', requiredPerm: 'visitors:read', path: '/app/company/visitors/dashboard', module: 'visitor', group: 'Visitor Management', moduleSeparator: 'Visitor Management', roleScope: 'company', sortOrder: 750 },
+  { id: 'vms-gate-checkin', label: 'Gate Check-In', icon: 'scan-line', requiredPerm: 'visitors:create', path: '/app/company/visitors/gate-check-in', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 751 },
+  { id: 'vms-visitor-list', label: 'All Visits', icon: 'list', requiredPerm: 'visitors:read', path: '/app/company/visitors/list', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 752 },
+  { id: 'vms-pre-register', label: 'Pre-Register Visitor', icon: 'user-plus', requiredPerm: 'visitors:create', path: '/app/company/visitors/pre-register', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 753 },
+  { id: 'vms-recurring-passes', label: 'Recurring Passes', icon: 'repeat', requiredPerm: 'visitors:read', path: '/app/company/visitors/recurring-passes', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 754 },
+  { id: 'vms-group-visits', label: 'Group Visits', icon: 'users', requiredPerm: 'visitors:read', path: '/app/company/visitors/group-visits', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 755 },
+  { id: 'vms-vehicle-passes', label: 'Vehicle Passes', icon: 'truck', requiredPerm: 'visitors:read', path: '/app/company/visitors/vehicle-passes', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 756 },
+  { id: 'vms-material-passes', label: 'Material Passes', icon: 'package', requiredPerm: 'visitors:read', path: '/app/company/visitors/material-passes', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 757 },
+  { id: 'vms-watchlist', label: 'Watchlist & Blocklist', icon: 'shield-alert', requiredPerm: 'visitors:configure', path: '/app/company/visitors/watchlist', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 758 },
+  { id: 'vms-denied-entries', label: 'Denied Entries', icon: 'shield-ban', requiredPerm: 'visitors:read', path: '/app/company/visitors/denied-entries', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 759 },
+  { id: 'vms-emergency', label: 'Emergency Muster', icon: 'siren', requiredPerm: 'visitors:read', path: '/app/company/visitors/emergency', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 760 },
+  { id: 'vms-reports', label: 'Visitor Reports', icon: 'bar-chart-2', requiredPerm: 'visitors:export', path: '/app/company/visitors/reports', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 761 },
+  { id: 'vms-history', label: 'Visit History', icon: 'history', requiredPerm: 'visitors:read', path: '/app/company/visitors/history', module: 'visitor', group: 'Visitor Management', roleScope: 'company', sortOrder: 762 },
+  { id: 'vms-types', label: 'Visitor Types', icon: 'tag', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings/types', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 763 },
+  { id: 'vms-gates', label: 'Gates', icon: 'door-open', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings/gates', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 764 },
+  { id: 'vms-inductions', label: 'Safety Inductions', icon: 'shield-check', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings/inductions', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 765 },
+  { id: 'vms-settings', label: 'VMS Settings', icon: 'settings', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 765 },
+
   // ═══════ REPORTS ═══════
   { id: 'rpt-audit', label: 'Audit Logs', icon: 'shield-check', requiredPerm: 'audit:read', path: '/app/reports/audit', module: null, group: 'Reports', roleScope: 'company', sortOrder: 800 },
 ];

@@ -30,7 +30,7 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type ModuleKey = 'attendance' | 'leave' | 'payroll' | 'ess' | 'performance' | 'recruitment' | 'training';
+type ModuleKey = 'attendance' | 'leave' | 'payroll' | 'ess' | 'performance' | 'recruitment' | 'training' | 'visitor';
 
 /**
  * Map from module key to the corresponding boolean field on SystemControls.
@@ -44,6 +44,7 @@ const MODULE_TO_FIELD: Record<ModuleKey, keyof SystemControls> = {
   performance: 'performanceEnabled',
   recruitment: 'recruitmentEnabled',
   training: 'trainingEnabled',
+  visitor: 'visitorEnabled',
 };
 
 // ─── Module Enforcement ─────────────────────────────────────────────────────

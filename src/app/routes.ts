@@ -28,6 +28,7 @@ import { visitorsRoutes } from '../modules/visitors/routes';
 import { maintenanceRoutes } from '../modules/maintenance/routes';
 import { reportsRoutes } from '../modules/reports/routes';
 import { uploadRoutes, uploadPlatformRoutes } from '../modules/upload/upload.routes';
+import { visitorPublicRoutes } from '../modules/visitors/public/public.routes';
 
 // Create main router
 const router = Router();
@@ -126,6 +127,9 @@ router.get(
 
 // Notification routes (platform-level, auth required but no tenant context)
 router.use('/notifications', authMiddleware({ requireTenant: false }), notificationRoutes);
+
+// Visitor public routes (no auth — visitor-facing self-service pages)
+router.use('/public', visitorPublicRoutes);
 
 // Apply authentication and tenant validation to business routes
 router.use(

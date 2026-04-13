@@ -130,7 +130,7 @@ export const PERMISSION_MODULES = {
   },
   visitors: {
     label: 'Visitor Management',
-    actions: ['read', 'create', 'update', 'delete', 'export', 'configure'],
+    actions: ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'],
   },
   masters: {
     label: 'Masters',

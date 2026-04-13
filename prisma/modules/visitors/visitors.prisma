@@ -1,0 +1,603 @@
+// ══════════════════════════════════════════════════════════════════════
+// VISITOR MANAGEMENT MODULE — All models and enums
+// ══════════════════════════════════════════════════════════════════════
+
+// ── Enums ──────────────────────────────────────────────────────────
+
+enum VisitPurpose {
+  MEETING
+  DELIVERY
+  MAINTENANCE
+  AUDIT
+  INTERVIEW
+  SITE_TOUR
+  PERSONAL
+  OTHER
+}
+
+enum RegistrationMethod {
+  PRE_REGISTERED
+  QR_SELF_REG
+  WALK_IN
+}
+
+enum VisitApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AUTO_APPROVED
+}
+
+enum VisitStatus {
+  EXPECTED
+  ARRIVED
+  CHECKED_IN
+  CHECKED_OUT
+  NO_SHOW
+  CANCELLED
+  REJECTED
+  AUTO_CHECKED_OUT
+}
+
+enum BadgeFormat {
+  DIGITAL
+  PRINTED
+}
+
+enum InductionStatus {
+  NOT_REQUIRED
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum CheckOutMethod {
+  SECURITY_DESK
+  HOST_INITIATED
+  MOBILE_LINK
+  AUTO_CHECKOUT
+}
+
+enum SafetyInductionType {
+  VIDEO
+  SLIDES
+  QUESTIONNAIRE
+  DECLARATION
+}
+
+enum GateType {
+  MAIN
+  SERVICE
+  LOADING_DOCK
+  VIP
+}
+
+enum WatchlistType {
+  BLOCKLIST
+  WATCHLIST
+}
+
+enum WatchlistDuration {
+  PERMANENT
+  UNTIL_DATE
+}
+
+enum GroupVisitStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum GroupMemberStatus {
+  EXPECTED
+  CHECKED_IN
+  CHECKED_OUT
+  NO_SHOW
+}
+
+enum RecurringPassType {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+enum RecurringPassStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum VehicleType {
+  CAR
+  TWO_WHEELER
+  AUTO
+  TRUCK
+  VAN
+  TEMPO
+  BUS
+}
+
+enum MaterialGatePassType {
+  INWARD
+  OUTWARD
+  RETURNABLE
+}
+
+enum MaterialReturnStatus {
+  NOT_APPLICABLE
+  PENDING_RETURN
+  PARTIAL
+  FULLY_RETURNED
+}
+
+enum ConfigRequirement {
+  ALWAYS
+  PER_VISITOR_TYPE
+  NEVER
+}
+
+enum DenialReason {
+  BLOCKLIST_MATCH
+  HOST_REJECTED
+  INDUCTION_FAILED
+  GATE_CLOSED
+  WRONG_DATE
+  WRONG_GATE
+  PASS_EXPIRED
+  APPROVAL_TIMEOUT
+  MANUAL_DENIAL
+  VISIT_CANCELLED
+}
+
+// ── Models ─────────────────────────────────────────────────────────
+
+model VisitorType {
+  id                        String   @id @default(cuid())
+  companyId                 String
+  name                      String
+  code                      String
+  badgeColour               String   @default("#3B82F6")
+  isDefault                 Boolean  @default(false)
+  isActive                  Boolean  @default(true)
+
+  requirePhoto              Boolean  @default(true)
+  requireIdVerification     Boolean  @default(true)
+  requireSafetyInduction    Boolean  @default(false)
+  requireNda                Boolean  @default(false)
+  requireHostApproval       Boolean  @default(true)
+  requireEscort             Boolean  @default(false)
+
+  defaultMaxDurationMinutes Int?     @default(480)
+
+  safetyInductionId         String?
+
+  sortOrder                 Int      @default(0)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  company                   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  safetyInduction           SafetyInduction? @relation(fields: [safetyInductionId], references: [id])
+  visits                    Visit[]
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+  @@map("visitor_types")
+}
+
+model VisitorGate {
+  id                       String   @id @default(cuid())
+  companyId                String
+  plantId                  String
+  name                     String
+  code                     String
+  type                     GateType @default(MAIN)
+  openTime                 String?
+  closeTime                String?
+  allowedVisitorTypeIds    String[]
+  qrPosterUrl              String?
+  isActive                 Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  company                  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  visitsCheckIn            Visit[]  @relation("CheckInGate")
+  visitsCheckOut           Visit[]  @relation("CheckOutGate")
+  visitsAssigned           Visit[]  @relation("AssignedGate")
+  vehiclePassEntry         VehicleGatePass[] @relation("VehicleEntryGate")
+  vehiclePassExit          VehicleGatePass[] @relation("VehicleExitGate")
+  materialPasses           MaterialGatePass[]
+
+  @@unique([companyId, code])
+  @@index([companyId, plantId, isActive])
+  @@map("visitor_gates")
+}
+
+model SafetyInduction {
+  id                String              @id @default(cuid())
+  companyId         String
+  name              String
+  type              SafetyInductionType
+  contentUrl        String?
+  questions         Json?
+  passingScore      Int?                @default(80)
+  durationSeconds   Int?                @default(120)
+  validityDays      Int?                @default(30)
+  isActive          Boolean             @default(true)
+  plantId           String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  visitorTypes      VisitorType[]
+
+  @@index([companyId, isActive])
+  @@map("safety_inductions")
+}
+
+model Visit {
+  id                        String              @id @default(cuid())
+  companyId                 String
+  visitNumber               String              @unique
+  visitCode                 String              @unique
+  qrCodeUrl                 String?
+
+  // Visitor details
+  visitorName               String
+  visitorMobile             String
+  visitorEmail              String?
+  visitorCompany            String?
+  visitorDesignation        String?
+  visitorPhoto              String?
+  governmentIdType          String?
+  governmentIdNumber        String?
+  idDocumentPhoto           String?
+
+  // Visit details
+  visitorTypeId             String
+  purpose                   VisitPurpose
+  purposeNotes              String?
+  expectedDate              DateTime
+  expectedTime              String?
+  expectedDurationMinutes   Int?
+
+  // Host & location
+  hostEmployeeId            String
+  plantId                   String
+  gateId                    String?
+
+  // Registration
+  registrationMethod        RegistrationMethod
+
+  // Approval
+  approvalStatus            VisitApprovalStatus @default(PENDING)
+  approvedBy                String?
+  approvalTimestamp          DateTime?
+  approvalNotes             String?
+
+  // Check-in
+  checkInTime               DateTime?
+  checkInGateId             String?
+  checkInGuardId            String?
+
+  // Badge
+  badgeNumber               String?
+  badgeFormat               BadgeFormat?
+
+  // Safety & compliance
+  safetyInductionStatus     InductionStatus     @default(NOT_REQUIRED)
+  safetyInductionScore      Int?
+  safetyInductionTimestamp  DateTime?
+  ndaSigned                 Boolean             @default(false)
+  ndaDocumentUrl            String?
+  ppeIssued                 Json?
+
+  // Check-out
+  checkOutTime              DateTime?
+  checkOutGateId            String?
+  checkOutMethod            CheckOutMethod?
+  badgeReturned             Boolean?
+  materialOut               String?
+
+  // Duration
+  visitDurationMinutes      Int?
+
+  // Extension tracking
+  originalDurationMinutes   Int?
+  extensionCount            Int                 @default(0)
+  lastExtendedAt            DateTime?
+  lastExtendedBy            String?
+
+  // Status
+  status                    VisitStatus         @default(EXPECTED)
+
+  // Vehicle
+  vehicleRegNumber          String?
+  vehicleType               String?
+
+  // Material & misc
+  materialCarriedIn         String?
+  specialInstructions       String?
+  emergencyContact          String?
+
+  // Links
+  groupVisitId              String?
+  recurringPassId           String?
+  purchaseOrderRef          String?
+  meetingRef                String?
+
+  // Audit
+  createdBy                 String
+  createdAt                 DateTime            @default(now())
+  updatedBy                 String?
+  updatedAt                 DateTime            @updatedAt
+
+  company                   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  visitorType               VisitorType         @relation(fields: [visitorTypeId], references: [id])
+  checkInGate               VisitorGate?        @relation("CheckInGate", fields: [checkInGateId], references: [id])
+  checkOutGate              VisitorGate?        @relation("CheckOutGate", fields: [checkOutGateId], references: [id])
+  assignedGate              VisitorGate?        @relation("AssignedGate", fields: [gateId], references: [id])
+  groupVisit                GroupVisit?         @relation(fields: [groupVisitId], references: [id])
+  recurringPass             RecurringVisitorPass? @relation(fields: [recurringPassId], references: [id])
+  groupVisitMember          GroupVisitMember?
+  deniedEntries             DeniedEntry[]
+
+  @@index([companyId, status])
+  @@index([companyId, expectedDate])
+  @@index([companyId, hostEmployeeId])
+  @@index([companyId, visitorMobile])
+  @@index([visitCode])
+  @@map("visits")
+}
+
+model VisitorWatchlist {
+  id                  String            @id @default(cuid())
+  companyId           String
+  type                WatchlistType
+  personName          String
+  mobileNumber        String?
+  email               String?
+  idNumber            String?
+  photo               String?
+  reason              String
+  actionRequired      String?
+  blockDuration       WatchlistDuration
+  expiryDate          DateTime?
+  appliesToAllPlants  Boolean           @default(true)
+  plantIds            String[]
+  createdBy           String
+  isActive            Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  company             Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deniedEntries       DeniedEntry[]
+
+  @@index([companyId, type, isActive])
+  @@index([companyId, mobileNumber])
+  @@index([companyId, idNumber])
+  @@map("visitor_watchlists")
+}
+
+model GroupVisit {
+  id                String           @id @default(cuid())
+  companyId         String
+  groupName         String
+  visitCode         String           @unique
+  qrCode            String?
+  hostEmployeeId    String
+  purpose           String
+  expectedDate      DateTime
+  expectedTime      String?
+  plantId           String
+  gateId            String?
+  totalMembers      Int
+  status            GroupVisitStatus  @default(PLANNED)
+  createdBy         String
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  company           Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  members           GroupVisitMember[]
+  visits            Visit[]
+
+  @@index([companyId, status])
+  @@index([companyId, expectedDate])
+  @@map("group_visits")
+}
+
+model GroupVisitMember {
+  id              String            @id @default(cuid())
+  groupVisitId    String
+  visitorName     String
+  visitorMobile   String
+  visitorEmail    String?
+  visitorCompany  String?
+  visitId         String?           @unique
+  status          GroupMemberStatus  @default(EXPECTED)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  groupVisit      GroupVisit        @relation(fields: [groupVisitId], references: [id], onDelete: Cascade)
+  visit           Visit?            @relation(fields: [visitId], references: [id])
+
+  @@index([groupVisitId, status])
+  @@map("group_visit_members")
+}
+
+model RecurringVisitorPass {
+  id                           String              @id @default(cuid())
+  companyId                    String
+  passNumber                   String              @unique
+  qrCode                       String?
+
+  visitorName                  String
+  visitorCompany               String
+  visitorMobile                String
+  visitorEmail                 String?
+  visitorPhoto                 String?
+  visitorIdType                String?
+  visitorIdNumber              String?
+
+  passType                     RecurringPassType
+  validFrom                    DateTime
+  validUntil                   DateTime
+  allowedDays                  Int[]
+  allowedTimeFrom              String?
+  allowedTimeTo                String?
+  allowedGateIds               String[]
+
+  hostEmployeeId               String
+  purpose                      String
+  plantId                      String
+
+  status                       RecurringPassStatus  @default(ACTIVE)
+  revokedAt                    DateTime?
+  revokedBy                    String?
+  revokeReason                 String?
+
+  safetyInductionCompletedAt   DateTime?
+  safetyInductionValidUntil    DateTime?
+
+  createdBy                    String
+  createdAt                    DateTime             @default(now())
+  updatedAt                    DateTime             @updatedAt
+
+  company                      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  visits                       Visit[]
+
+  @@index([companyId, status])
+  @@index([companyId, visitorMobile])
+  @@map("recurring_visitor_passes")
+}
+
+model VehicleGatePass {
+  id                 String      @id @default(cuid())
+  companyId          String
+  passNumber         String      @unique
+  vehicleRegNumber   String
+  vehicleType        VehicleType
+  driverName         String
+  driverMobile       String?
+  purpose            String
+  visitId            String?
+  materialDescription String?
+  vehiclePhoto       String?
+  entryGateId        String
+  exitGateId         String?
+  entryTime          DateTime    @default(now())
+  exitTime           DateTime?
+  plantId            String
+  createdBy          String
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  company            Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entryGate          VisitorGate @relation("VehicleEntryGate", fields: [entryGateId], references: [id])
+  exitGate           VisitorGate? @relation("VehicleExitGate", fields: [exitGateId], references: [id])
+
+  @@index([companyId, entryTime])
+  @@index([companyId, vehicleRegNumber])
+  @@map("vehicle_gate_passes")
+}
+
+model MaterialGatePass {
+  id                  String              @id @default(cuid())
+  companyId           String
+  passNumber          String              @unique
+  type                MaterialGatePassType
+  description         String
+  quantityIssued      String?
+  quantityReturned    String?
+  visitId             String?
+  authorizedBy        String
+  purpose             String
+  expectedReturnDate  DateTime?
+  returnedAt          DateTime?
+  returnStatus        MaterialReturnStatus @default(NOT_APPLICABLE)
+  gateId              String
+  plantId             String
+  createdBy           String
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  company             Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  gate                VisitorGate         @relation(fields: [gateId], references: [id])
+
+  @@index([companyId, type])
+  @@index([companyId, returnStatus])
+  @@map("material_gate_passes")
+}
+
+model VisitorManagementConfig {
+  id                          String            @id @default(cuid())
+  companyId                   String            @unique
+
+  preRegistrationEnabled      Boolean           @default(true)
+  qrSelfRegistrationEnabled   Boolean           @default(true)
+  walkInAllowed               Boolean           @default(true)
+
+  photoCapture                ConfigRequirement @default(PER_VISITOR_TYPE)
+  idVerification              ConfigRequirement @default(PER_VISITOR_TYPE)
+  safetyInduction             ConfigRequirement @default(PER_VISITOR_TYPE)
+  ndaRequired                 ConfigRequirement @default(PER_VISITOR_TYPE)
+
+  badgePrintingEnabled        Boolean           @default(true)
+  digitalBadgeEnabled         Boolean           @default(true)
+
+  walkInApprovalRequired      Boolean           @default(true)
+  qrSelfRegApprovalRequired   Boolean           @default(true)
+  approvalTimeoutMinutes      Int               @default(15)
+  autoRejectAfterMinutes      Int               @default(30)
+
+  overstayAlertEnabled        Boolean           @default(true)
+  defaultMaxDurationMinutes   Int               @default(480)
+  autoCheckOutEnabled         Boolean           @default(false)
+  autoCheckOutTime            String            @default("20:00")
+
+  vehicleGatePassEnabled      Boolean           @default(true)
+  materialGatePassEnabled     Boolean           @default(true)
+  recurringPassEnabled        Boolean           @default(true)
+  groupVisitEnabled           Boolean           @default(true)
+  emergencyMusterEnabled      Boolean           @default(true)
+
+  privacyConsentText          String?
+  checkInStepsOrder           Json?
+
+  createdAt                   DateTime          @default(now())
+  updatedAt                   DateTime          @updatedAt
+
+  company                     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("visitor_management_configs")
+}
+
+model DeniedEntry {
+  id              String        @id @default(cuid())
+  companyId       String
+  visitorName     String
+  visitorMobile   String?
+  visitorCompany  String?
+  visitorPhoto    String?
+  denialReason    DenialReason
+  denialDetails   String?
+  visitId         String?
+  watchlistId     String?
+  gateId          String?
+  plantId         String
+  deniedAt        DateTime      @default(now())
+  deniedBy        String
+  matchedField    String?
+  matchedValue    String?
+  createdAt       DateTime      @default(now())
+
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  visit           Visit?        @relation(fields: [visitId], references: [id])
+  watchlistEntry  VisitorWatchlist? @relation(fields: [watchlistId], references: [id])
+
+  @@index([companyId, deniedAt])
+  @@index([companyId, denialReason])
+  @@map("denied_entries")
+}

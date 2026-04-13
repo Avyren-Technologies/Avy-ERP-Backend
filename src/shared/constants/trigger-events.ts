@@ -157,6 +157,20 @@ export const TRIGGER_EVENTS: readonly TriggerEventOption[] = [
     module: 'Training',
     description: 'Triggered when a training nomination is submitted',
   },
+
+  // ── Visitor Management ──────────────────────────────────────────────
+  {
+    value: 'VISITOR_WALK_IN_APPROVAL',
+    label: 'Walk-In Visitor Approval',
+    module: 'Visitor Management',
+    description: 'Triggered when a walk-in visitor requires host approval before check-in',
+  },
+  {
+    value: 'VISITOR_SELF_REG_APPROVAL',
+    label: 'QR Self-Registration Approval',
+    module: 'Visitor Management',
+    description: 'Triggered when a QR self-registered visitor requires host approval',
+  },
 ] as const;
 
 /** Set of all valid triggerEvent values — used for fast validation */
