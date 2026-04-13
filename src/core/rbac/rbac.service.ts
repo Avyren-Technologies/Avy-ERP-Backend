@@ -313,6 +313,62 @@ export class RbacService {
     logger.info(`Default roles seeded for tenant ${tenantId}`);
   }
 
+  /**
+   * Sync Company Admin role permissions across ALL existing tenants.
+   * This ensures that when new permission modules are added (e.g., visitors),
+   * existing Company Admin roles get the updated permissions.
+   * Called from a platform admin endpoint or during deployment.
+   */
+  async syncCompanyAdminPermissions(): Promise<{ updated: number; skipped: number }> {
+    // The canonical Company Admin permission set (must match tenant.service.ts)
+    const COMPANY_ADMIN_PERMISSIONS = [
+      'company:*', 'hr:*', 'ess:*', 'attendance:*', 'production:*', 'inventory:*', 'sales:*',
+      'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
+      'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
+      'billing:*', 'analytics:*',
+    ];
+
+    const companyAdminRoles = await platformPrisma.role.findMany({
+      where: { name: 'Company Admin', isSystem: true },
+    });
+
+    let updated = 0;
+    let skipped = 0;
+
+    for (const role of companyAdminRoles) {
+      const currentPerms = (role.permissions as string[]) || [];
+      const missingPerms = COMPANY_ADMIN_PERMISSIONS.filter(p => !currentPerms.includes(p));
+
+      if (missingPerms.length === 0) {
+        skipped++;
+        continue;
+      }
+
+      const mergedPerms = [...new Set([...currentPerms, ...COMPANY_ADMIN_PERMISSIONS])];
+      await platformPrisma.role.update({
+        where: { id: role.id },
+        data: { permissions: mergedPerms },
+      });
+
+      // Invalidate permission cache for all users with this role
+      const tenantUsers = await platformPrisma.tenantUser.findMany({
+        where: { roleId: role.id },
+        select: { userId: true, tenantId: true },
+      });
+      for (const tu of tenantUsers) {
+        const cacheKey = createUserPermissionsCacheKey(tu.userId, tu.tenantId);
+        await cacheRedis.del(cacheKey);
+        const userCacheKey = createUserCacheKey(tu.userId);
+        await cacheRedis.del(userCacheKey);
+      }
+
+      logger.info(`Updated Company Admin role for tenant ${role.tenantId}: added ${missingPerms.join(', ')}`);
+      updated++;
+    }
+
+    return { updated, skipped };
+  }
+
   async getNavigationManifest(params: {
     userPermissions: string[];
     userRole: string;

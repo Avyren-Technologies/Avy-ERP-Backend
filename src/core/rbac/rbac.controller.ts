@@ -124,6 +124,12 @@ export class RbacController {
 
     res.json(createSuccessResponse(manifest, 'Navigation manifest retrieved'));
   });
+
+  // Sync Company Admin permissions across all tenants (platform admin only)
+  syncCompanyAdminPermissions = asyncHandler(async (_req: Request, res: Response) => {
+    const result = await rbacService.syncCompanyAdminPermissions();
+    res.json(createSuccessResponse(result, `Company Admin permissions synced: ${result.updated} updated, ${result.skipped} already current`));
+  });
 }
 
 export const rbacController = new RbacController();

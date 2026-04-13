@@ -21,10 +21,8 @@ class EmergencyController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const { plantId } = req.query;
-    if (!plantId) throw ApiError.badRequest('Plant ID is required');
-
-    const musterList = await emergencyService.getMusterList(companyId, plantId as string);
+    const plantId = req.query.plantId as string | undefined;
+    const musterList = await emergencyService.getMusterList(companyId, plantId);
     res.json(createSuccessResponse(musterList, 'Muster list retrieved'));
   });
 
