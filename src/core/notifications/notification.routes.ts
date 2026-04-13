@@ -23,6 +23,10 @@ notificationRoutes.delete('/register-device', controller.unregisterDevice);
 const testLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
+  keyGenerator: (req: any) => {
+    const userId = req.user?.id ?? 'anon';
+    return `${req.ip}:${userId}`;
+  },
   message: { success: false, message: 'Too many test notifications, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,

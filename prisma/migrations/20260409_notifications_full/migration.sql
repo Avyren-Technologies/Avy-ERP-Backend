@@ -41,11 +41,14 @@ ADD COLUMN     "variables" JSONB NOT NULL DEFAULT '[]',
 ADD COLUMN     "version" INTEGER NOT NULL DEFAULT 1,
 ADD COLUMN     "whatsappTemplateName" TEXT;
 
+-- Backfill: assign distinct code values so the unique index won't collide.
+UPDATE "notification_templates" SET "code" = "id" WHERE "code" = '';
+
 -- AlterTable
 ALTER TABLE "notifications" ADD COLUMN     "actionUrl" TEXT,
 ADD COLUMN     "archivedAt" TIMESTAMP(3),
 ADD COLUMN     "category" TEXT,
-ADD COLUMN     "dedupHash" TEXT NOT NULL,
+ADD COLUMN     "dedupHash" TEXT,
 ADD COLUMN     "deliveryStatus" JSONB NOT NULL DEFAULT '{}',
 ADD COLUMN     "priority" "NotificationPriority" NOT NULL DEFAULT 'MEDIUM',
 ADD COLUMN     "readAt" TIMESTAMP(3),
@@ -54,8 +57,16 @@ ADD COLUMN     "ruleVersion" INTEGER,
 ADD COLUMN     "status" "NotificationStatus" NOT NULL DEFAULT 'UNREAD',
 ADD COLUMN     "templateId" TEXT,
 ADD COLUMN     "templateVersion" INTEGER,
-ADD COLUMN     "traceId" TEXT NOT NULL,
+ADD COLUMN     "traceId" TEXT,
 ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- Backfill: assign defaults for existing rows so NOT NULL can be enforced.
+UPDATE "notifications" SET "dedupHash" = "id" WHERE "dedupHash" IS NULL;
+UPDATE "notifications" SET "traceId" = "id" WHERE "traceId" IS NULL;
+
+-- Now enforce NOT NULL after backfill.
+ALTER TABLE "notifications" ALTER COLUMN "dedupHash" SET NOT NULL;
+ALTER TABLE "notifications" ALTER COLUMN "traceId" SET NOT NULL;
 
 -- AlterTable
 ALTER TABLE "user_devices" ADD COLUMN     "appVersion" TEXT,
