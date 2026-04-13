@@ -23,6 +23,8 @@ export const updateVmsConfigSchema = z.object({
   recurringPassEnabled: z.boolean().optional(),
   groupVisitEnabled: z.boolean().optional(),
   emergencyMusterEnabled: z.boolean().optional(),
-  privacyConsentText: z.string().max(5000).optional(),
-  checkInStepsOrder: z.array(z.string()).optional(),
-}).strict();
+  privacyConsentText: z.string().max(5000).nullable().optional(),
+  checkInStepsOrder: z.array(z.string()).nullable().optional(),
+});
+// Note: NOT strict — frontend may send extra fields (id, companyId, timestamps)
+// that are stripped in the controller before passing to the service.

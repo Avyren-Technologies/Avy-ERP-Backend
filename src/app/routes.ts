@@ -88,6 +88,9 @@ router.use('/platform/support', supportPlatformRoutes);
 router.use('/platform/registrations', registrationPlatformRoutes);
 router.use('/platform/upload', uploadPlatformRoutes);
 
+// Platform RBAC utilities (super-admin only)
+router.post('/platform/rbac/sync-admin-permissions', rbacController.syncCompanyAdminPermissions);
+
 // Tenant-scoped routes (require tenant context)
 router.use(
   '/tenants/:tenantId',

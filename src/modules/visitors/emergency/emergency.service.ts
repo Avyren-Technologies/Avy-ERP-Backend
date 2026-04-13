@@ -62,9 +62,11 @@ class EmergencyService {
     };
   }
 
-  async getMusterList(companyId: string, plantId: string) {
+  async getMusterList(companyId: string, plantId?: string | undefined) {
+    const where: any = { companyId, status: 'CHECKED_IN' };
+    if (plantId) where.plantId = plantId;
     const visitors = await platformPrisma.visit.findMany({
-      where: { companyId, plantId, status: 'CHECKED_IN' },
+      where,
       include: { visitorType: true, checkInGate: true },
     });
 
