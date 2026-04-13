@@ -222,6 +222,41 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
     description: 'Reference numbers for visitor registrations',
     defaultPrefix: 'VIS-',
   },
+  {
+    value: 'Visitor Badge',
+    label: 'Visitor Badge',
+    module: 'Visitors',
+    description: 'Reference numbers for visitor badges',
+    defaultPrefix: 'B-',
+  },
+  {
+    value: 'Recurring Visitor Pass',
+    label: 'Recurring Visitor Pass',
+    module: 'Visitors',
+    description: 'Reference numbers for recurring visitor passes',
+    defaultPrefix: 'RP-',
+  },
+  {
+    value: 'Vehicle Gate Pass',
+    label: 'Vehicle Gate Pass',
+    module: 'Visitors',
+    description: 'Reference numbers for vehicle gate passes',
+    defaultPrefix: 'VGP-',
+  },
+  {
+    value: 'Material Gate Pass',
+    label: 'Material Gate Pass',
+    module: 'Visitors',
+    description: 'Reference numbers for material gate passes',
+    defaultPrefix: 'MGP-',
+  },
+  {
+    value: 'Group Visit',
+    label: 'Group Visit',
+    module: 'Visitors',
+    description: 'Reference numbers for group visits',
+    defaultPrefix: 'GV-',
+  },
 
   // ── Maintenance ───────────────────────────────────────────────────
   {

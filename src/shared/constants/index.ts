@@ -207,11 +207,14 @@ export const APP_CONSTANTS = {
 
   // Visitor management
   VISITOR_STATUSES: {
-    EXPECTED: 'expected',
-    CHECKED_IN: 'checked_in',
-    CHECKED_OUT: 'checked_out',
-    WALK_IN: 'walk_in',
-    CANCELLED: 'cancelled',
+    EXPECTED: 'EXPECTED',
+    ARRIVED: 'ARRIVED',
+    CHECKED_IN: 'CHECKED_IN',
+    CHECKED_OUT: 'CHECKED_OUT',
+    NO_SHOW: 'NO_SHOW',
+    CANCELLED: 'CANCELLED',
+    REJECTED: 'REJECTED',
+    AUTO_CHECKED_OUT: 'AUTO_CHECKED_OUT',
   },
 
   // Report types

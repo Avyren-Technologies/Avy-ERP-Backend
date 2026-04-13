@@ -55,6 +55,7 @@ model SystemControls {
   performanceEnabled Boolean @default(false)
   recruitmentEnabled Boolean @default(true)
   trainingEnabled    Boolean @default(true)
+  visitorEnabled     Boolean @default(true)
   mobileAppEnabled   Boolean @default(true)
   aiChatbotEnabled   Boolean @default(false)
 
