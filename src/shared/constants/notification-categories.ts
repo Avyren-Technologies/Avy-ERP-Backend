@@ -88,8 +88,8 @@ export function isCategoryLocked(code: string): boolean {
  * per-category preference filtering.
  *
  * Keep in sync whenever a new trigger event is added. Unknown events
- * fall through to `null` and the dispatcher's `type` becomes the raw
- * trigger event (same behavior as before this table existed).
+ * fall through to the raw trigger-event string so the dispatcher always
+ * sets a non-null `type` on the Notification row.
  */
 export const TRIGGER_TO_CATEGORY: Record<string, string> = {
   // Leave

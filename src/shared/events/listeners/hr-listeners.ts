@@ -2,8 +2,18 @@ import { eventBus } from '../event-bus';
 import { HR_EVENTS, HREvent } from '../hr-events';
 import { notificationService } from '../../../core/notifications/notification.service';
 import { logger } from '../../../config/logger';
+import { platformPrisma } from '../../../config/database';
 
 type EventPayload<T extends HREvent['type']> = Extract<HREvent, { type: T }>;
+
+/** Resolve an Employee ID to its linked User ID (returns undefined if none). */
+async function resolveEmployeeUserId(employeeId: string): Promise<string | undefined> {
+  const employee = await platformPrisma.employee.findUnique({
+    where: { id: employeeId },
+    select: { user: { select: { id: true } } },
+  });
+  return employee?.user?.id;
+}
 
 /**
  * Register HR event listeners that translate domain events into
@@ -112,12 +122,17 @@ export function registerHRListeners() {
   eventBus.onEvent<EventPayload<'training.nomination.created'>>(
     HR_EVENTS.TRAINING_NOMINATION_CREATED,
     async (payload) => {
+      const userId = await resolveEmployeeUserId(payload.employeeId);
+      if (!userId) {
+        logger.warn('Training nomination dispatch skipped — no linked user', { employeeId: payload.employeeId });
+        return;
+      }
       await notificationService.dispatch({
         companyId: payload.companyId,
         triggerEvent: 'TRAINING_NOMINATION',
         entityType: 'TrainingNomination',
         entityId: payload.nominationId,
-        explicitRecipients: [payload.employeeId],
+        explicitRecipients: [userId],
         tokens: {
           training_name: (payload as any).trainingName ?? 'a training program',
         },
@@ -129,12 +144,17 @@ export function registerHRListeners() {
 
   // Training completed → notify employee
   eventBus.onEvent<EventPayload<'training.completed'>>(HR_EVENTS.TRAINING_COMPLETED, async (payload) => {
+    const userId = await resolveEmployeeUserId(payload.employeeId);
+    if (!userId) {
+      logger.warn('Training completed dispatch skipped — no linked user', { employeeId: payload.employeeId });
+      return;
+    }
     await notificationService.dispatch({
       companyId: payload.companyId,
       triggerEvent: 'TRAINING_COMPLETED',
       entityType: 'TrainingNomination',
       entityId: payload.nominationId,
-      explicitRecipients: [payload.employeeId],
+      explicitRecipients: [userId],
       tokens: {
         training_name: payload.trainingName,
       },
@@ -145,12 +165,17 @@ export function registerHRListeners() {
 
   // Certificate expiring → notify employee
   eventBus.onEvent<EventPayload<'certificate.expiring'>>(HR_EVENTS.CERTIFICATE_EXPIRING, async (payload) => {
+    const userId = await resolveEmployeeUserId(payload.employeeId);
+    if (!userId) {
+      logger.warn('Certificate expiring dispatch skipped — no linked user', { employeeId: payload.employeeId });
+      return;
+    }
     await notificationService.dispatch({
       companyId: payload.companyId,
       triggerEvent: 'CERTIFICATE_EXPIRING',
       entityType: 'TrainingNomination',
       entityId: payload.nominationId,
-      explicitRecipients: [payload.employeeId],
+      explicitRecipients: [userId],
       tokens: {
         training_name: payload.trainingName,
         expiry_date: payload.expiryDate,
