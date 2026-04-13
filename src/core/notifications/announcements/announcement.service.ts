@@ -71,6 +71,7 @@ export const announcementService = {
       },
       priority: input.priority,
       type: 'ANNOUNCEMENTS',
+      channelOverride: input.channels,
     });
 
     logger.info('Announcement sent', {

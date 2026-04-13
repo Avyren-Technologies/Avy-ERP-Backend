@@ -25,6 +25,9 @@ export interface DispatchBulkInput {
   systemCritical?: boolean;
   actionUrl?: string;
   chunkSize?: number;
+  /** When provided, overrides rule-derived channels. Used by announcements
+   *  and other ad-hoc dispatches where the caller selects delivery channels. */
+  channelOverride?: NotificationChannel[];
 }
 
 export interface DispatchBulkResult {
@@ -90,8 +93,12 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
     //    the template for rendering; additional rules contribute their
     //    channels to the delivery set. This mirrors what the single
     //    dispatch() does per-recipient with its RecipientBucket merge.
+    //    When channelOverride is provided (e.g. announcements), use it
+    //    instead of rule-derived channels.
     const primaryRule = rules[0]!;
-    const allChannels = Array.from(new Set(rules.map((r) => r.channel)));
+    const allChannels = input.channelOverride
+      ? Array.from(new Set(input.channelOverride))
+      : Array.from(new Set(rules.map((r) => r.channel)));
     const nonInAppChannels = allChannels.filter((c) => c !== 'IN_APP');
     const effectivePriority: NotificationPriority =
       priority ?? primaryRule.priority ?? primaryRule.template.priority ?? 'MEDIUM';
