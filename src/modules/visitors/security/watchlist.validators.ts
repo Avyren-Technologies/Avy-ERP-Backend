@@ -46,7 +46,7 @@ export const updateWatchlistSchema = watchlistBaseSchema.partial().refine(
     }
     return true;
   },
-  { message: 'Expiry date is required when block duration is UNTIL_DATE', path: ['expiryDate'] },
+  { message: 'Expiry date is required when changing block duration to UNTIL_DATE', path: ['expiryDate'] },
 ).refine(
   (data) => {
     if (data.blockDuration === 'PERMANENT' && data.expiryDate) {

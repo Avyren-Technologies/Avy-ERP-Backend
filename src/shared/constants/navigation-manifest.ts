@@ -212,7 +212,7 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'vms-types', label: 'Visitor Types', icon: 'tag', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings/types', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 763 },
   { id: 'vms-gates', label: 'Gates', icon: 'door-open', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings/gates', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 764 },
   { id: 'vms-inductions', label: 'Safety Inductions', icon: 'shield-check', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings/inductions', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 765 },
-  { id: 'vms-settings', label: 'VMS Settings', icon: 'settings', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 765 },
+  { id: 'vms-settings', label: 'VMS Settings', icon: 'settings', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 766 },
 
   // ═══════ REPORTS ═══════
   { id: 'rpt-audit', label: 'Audit Logs', icon: 'shield-check', requiredPerm: 'audit:read', path: '/app/reports/audit', module: null, group: 'Reports', roleScope: 'company', sortOrder: 800 },
