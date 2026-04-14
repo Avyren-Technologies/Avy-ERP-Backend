@@ -1,0 +1,31 @@
+// App version control — server-side gating for mobile/web clients.
+// Super admin sets minimum + recommended versions per platform.
+// Public endpoint lets clients check before even logging in.
+
+model AppVersionConfig {
+  id                  String   @id @default(cuid())
+
+  // Target platform
+  platform            String   // ANDROID | IOS
+
+  // Version thresholds (semver strings e.g. "1.2.0")
+  latestVersion       String   // Latest available version
+  minimumVersion      String   // Force update below this
+  recommendedVersion  String?  // Soft prompt below this (but >= minimum)
+
+  // Store links
+  updateUrl           String?  // Play Store / App Store URL
+
+  // Maintenance mode — blocks ALL versions regardless of thresholds
+  maintenanceMode     Boolean  @default(false)
+  maintenanceMessage  String?  // Custom message shown during maintenance
+
+  // Control flag — allows disabling a config without deleting
+  isActive            Boolean  @default(true)
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([platform])
+  @@map("app_version_configs")
+}

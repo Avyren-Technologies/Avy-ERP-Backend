@@ -18,6 +18,7 @@ import { companyAdminRoutes } from '../core/company-admin/company-admin.routes';
 import { supportCompanyRoutes, supportPlatformRoutes } from '../core/support/support.routes';
 import { registrationPublicRoutes, registrationPlatformRoutes } from '../core/registration/registration.routes';
 import { notificationRoutes } from '../core/notifications/notification.routes';
+import { appVersionPublicRoutes, appVersionAdminRoutes } from '../core/app-version/app-version.routes';
 
 // Import business module routes
 import { hrRoutes } from '../modules/hr/routes';
@@ -44,6 +45,9 @@ router.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// App version check (public, no auth — must work before login)
+router.use('/app-version', appVersionPublicRoutes);
 
 // Authentication routes (no tenant required)
 // Registration public route MUST be mounted before authRoutes to avoid
@@ -86,6 +90,7 @@ router.use('/platform/dashboard', dashboardPlatformRoutes);
 router.use('/platform/audit-logs', auditRoutes);
 router.use('/platform/support', supportPlatformRoutes);
 router.use('/platform/registrations', registrationPlatformRoutes);
+router.use('/platform/app-versions', appVersionAdminRoutes);
 router.use('/platform/upload', uploadPlatformRoutes);
 
 // Platform RBAC utilities (super-admin only)
