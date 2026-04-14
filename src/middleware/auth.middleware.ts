@@ -89,16 +89,14 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
           if (dbUser.companyId) {
             const companyForModules = await platformPrisma.company.findUnique({
               where: { id: dbUser.companyId },
-              select: { selectedModuleIds: true },
+              select: { selectedModuleIds: true, locationConfig: true },
             });
-            let activeModuleIds: string[] = companyForModules?.selectedModuleIds
-              ? (Array.isArray(companyForModules.selectedModuleIds)
-                ? companyForModules.selectedModuleIds as string[]
-                : JSON.parse(companyForModules.selectedModuleIds as string))
-              : [];
 
-            // Fallback: if company-level modules are empty, aggregate from locations
-            if (activeModuleIds.length === 0) {
+            let activeModuleIds: string[] = [];
+
+            // When using per-location module config, always aggregate from locations
+            // (selectedModuleIds may be stale/incomplete in per-location mode)
+            if (companyForModules?.locationConfig === 'per-location') {
               const locations = await platformPrisma.location.findMany({
                 where: { companyId: dbUser.companyId },
                 select: { moduleIds: true },
@@ -109,6 +107,27 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
                   : [],
               );
               activeModuleIds = Array.from(new Set(locModules));
+            } else {
+              // Company-level module selection
+              activeModuleIds = companyForModules?.selectedModuleIds
+                ? (Array.isArray(companyForModules.selectedModuleIds)
+                  ? companyForModules.selectedModuleIds as string[]
+                  : JSON.parse(companyForModules.selectedModuleIds as string))
+                : [];
+
+              // Fallback: if company-level modules are empty, aggregate from locations
+              if (activeModuleIds.length === 0) {
+                const locations = await platformPrisma.location.findMany({
+                  where: { companyId: dbUser.companyId },
+                  select: { moduleIds: true },
+                });
+                const locModules = locations.flatMap(l =>
+                  l.moduleIds
+                    ? (Array.isArray(l.moduleIds) ? l.moduleIds as string[] : JSON.parse(l.moduleIds as string))
+                    : [],
+                );
+                activeModuleIds = Array.from(new Set(locModules));
+              }
             }
 
             permissions = suppressByModules(expanded, activeModuleIds);

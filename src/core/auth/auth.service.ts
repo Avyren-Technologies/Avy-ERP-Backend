@@ -869,16 +869,14 @@ export class AuthService {
     if (companyId) {
       const company = await platformPrisma.company.findUnique({
         where: { id: companyId },
-        select: { selectedModuleIds: true },
+        select: { selectedModuleIds: true, locationConfig: true },
       });
-      let activeModuleIds: string[] = company?.selectedModuleIds
-        ? (Array.isArray(company.selectedModuleIds)
-          ? company.selectedModuleIds as string[]
-          : JSON.parse(company.selectedModuleIds as string))
-        : [];
 
-      // Fallback: if company-level modules are empty, aggregate from locations
-      if (activeModuleIds.length === 0) {
+      let activeModuleIds: string[] = [];
+
+      // When using per-location module config, always aggregate from locations
+      // (selectedModuleIds may be stale/incomplete in per-location mode)
+      if (company?.locationConfig === 'per-location') {
         const locations = await platformPrisma.location.findMany({
           where: { companyId },
           select: { moduleIds: true },
@@ -889,6 +887,27 @@ export class AuthService {
             : [],
         );
         activeModuleIds = Array.from(new Set(locModules));
+      } else {
+        // Company-level module selection
+        activeModuleIds = company?.selectedModuleIds
+          ? (Array.isArray(company.selectedModuleIds)
+            ? company.selectedModuleIds as string[]
+            : JSON.parse(company.selectedModuleIds as string))
+          : [];
+
+        // Fallback: if company-level modules are empty, aggregate from locations
+        if (activeModuleIds.length === 0) {
+          const locations = await platformPrisma.location.findMany({
+            where: { companyId },
+            select: { moduleIds: true },
+          });
+          const locModules = locations.flatMap(l =>
+            l.moduleIds
+              ? (Array.isArray(l.moduleIds) ? l.moduleIds as string[] : JSON.parse(l.moduleIds as string))
+              : [],
+          );
+          activeModuleIds = Array.from(new Set(locModules));
+        }
       }
 
       return suppressByModules(expanded, activeModuleIds);
