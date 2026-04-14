@@ -580,6 +580,41 @@ describe('createWatchlistSchema', () => {
       expect(result.data.plantIds).toEqual([]);
     }
   });
+
+  it('should reject appliesToAllPlants=false with empty plantIds', () => {
+    const result = createWatchlistSchema.safeParse({
+      ...validInput,
+      appliesToAllPlants: false,
+      plantIds: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should accept appliesToAllPlants=false with non-empty plantIds', () => {
+    const result = createWatchlistSchema.safeParse({
+      ...validInput,
+      appliesToAllPlants: false,
+      plantIds: ['plant-1'],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should require expiryDate when blockDuration is UNTIL_DATE', () => {
+    const result = createWatchlistSchema.safeParse({
+      ...validInput,
+      blockDuration: 'UNTIL_DATE',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject expiryDate when blockDuration is PERMANENT', () => {
+    const result = createWatchlistSchema.safeParse({
+      ...validInput,
+      blockDuration: 'PERMANENT',
+      expiryDate: '2026-12-31',
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('watchlistCheckSchema', () => {

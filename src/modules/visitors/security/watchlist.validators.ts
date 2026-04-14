@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const trimString = (val: unknown) => (typeof val === 'string' ? val.trim() : val);
 
-export const createWatchlistSchema = z.object({
+const watchlistBaseSchema = z.object({
   type: z.enum(['BLOCKLIST', 'WATCHLIST']),
   personName: z.preprocess(trimString, z.string().min(1, 'Person name is required').max(200)),
   mobileNumber: z.preprocess(trimString, z.string().max(15)).optional(),
@@ -17,7 +17,45 @@ export const createWatchlistSchema = z.object({
   plantIds: z.array(z.string()).default([]),
 });
 
-export const updateWatchlistSchema = createWatchlistSchema.partial();
+export const createWatchlistSchema = watchlistBaseSchema
+  .refine(
+    (data) => data.appliesToAllPlants || data.plantIds.length > 0,
+    { message: 'At least one plant must be selected when appliesToAllPlants is false', path: ['plantIds'] },
+  )
+  .refine(
+    (data) => data.blockDuration !== 'UNTIL_DATE' || !!data.expiryDate,
+    { message: 'Expiry date is required when block duration is UNTIL_DATE', path: ['expiryDate'] },
+  )
+  .refine(
+    (data) => data.blockDuration !== 'PERMANENT' || !data.expiryDate,
+    { message: 'Expiry date should not be set for permanent blocks', path: ['expiryDate'] },
+  );
+
+export const updateWatchlistSchema = watchlistBaseSchema.partial().refine(
+  (data) => {
+    if (data.appliesToAllPlants === false && data.plantIds !== undefined) {
+      return data.plantIds.length > 0;
+    }
+    return true;
+  },
+  { message: 'At least one plant must be selected when appliesToAllPlants is false', path: ['plantIds'] },
+).refine(
+  (data) => {
+    if (data.blockDuration === 'UNTIL_DATE' && data.expiryDate === undefined) {
+      return false;
+    }
+    return true;
+  },
+  { message: 'Expiry date is required when block duration is UNTIL_DATE', path: ['expiryDate'] },
+).refine(
+  (data) => {
+    if (data.blockDuration === 'PERMANENT' && data.expiryDate) {
+      return false;
+    }
+    return true;
+  },
+  { message: 'Expiry date should not be set for permanent blocks', path: ['expiryDate'] },
+);
 
 export const watchlistListQuerySchema = z.object({
   type: z.enum(['BLOCKLIST', 'WATCHLIST']).optional(),
