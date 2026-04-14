@@ -3,7 +3,7 @@ import { rbacService } from './rbac.service';
 import { validateCreateRole, validateUpdateRole } from '../../shared/validators';
 import { createSuccessResponse } from '../../shared/utils';
 import { asyncHandler } from '../../middleware/error.middleware';
-import { AuthError } from '../../shared/errors';
+import { AuthError, ApiError } from '../../shared/errors';
 import type { CreateRoleRequest, UpdateRoleRequest } from './rbac.types';
 import { getPermissionCatalogue } from '../../shared/constants/permissions';
 import { platformPrisma } from '../../config/database';
@@ -129,6 +129,33 @@ export class RbacController {
   syncCompanyAdminPermissions = asyncHandler(async (_req: Request, res: Response) => {
     const result = await rbacService.syncCompanyAdminPermissions();
     res.json(createSuccessResponse(result, `Company Admin permissions synced: ${result.updated} updated, ${result.skipped} already current`));
+  });
+
+  // List all Company Admin roles across tenants (platform admin only)
+  listCompanyAdminRoles = asyncHandler(async (_req: Request, res: Response) => {
+    const roles = await rbacService.listCompanyAdminRoles();
+    res.json(createSuccessResponse(roles, 'Company Admin roles retrieved'));
+  });
+
+  // Update a specific Company Admin role's permissions (platform admin only)
+  updateCompanyAdminRole = asyncHandler(async (req: Request, res: Response) => {
+    const roleId = req.params.id;
+    if (!roleId) throw AuthError.missingToken();
+
+    const { permissions } = req.body;
+    if (!Array.isArray(permissions) || permissions.length === 0) {
+      throw ApiError.badRequest('Permissions must be a non-empty array');
+    }
+
+    // Validate each permission is a string in module:action format
+    for (const perm of permissions) {
+      if (typeof perm !== 'string' || !perm.includes(':')) {
+        throw ApiError.badRequest(`Invalid permission format: ${perm}. Expected module:action`);
+      }
+    }
+
+    const role = await rbacService.updateCompanyAdminRolePermissions(roleId, permissions);
+    res.json(createSuccessResponse(role, 'Company Admin role permissions updated'));
   });
 }
 

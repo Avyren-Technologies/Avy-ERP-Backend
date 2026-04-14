@@ -95,6 +95,8 @@ router.use('/platform/upload', uploadPlatformRoutes);
 
 // Platform RBAC utilities (super-admin only)
 router.post('/platform/rbac/sync-admin-permissions', rbacController.syncCompanyAdminPermissions);
+router.get('/platform/rbac/company-admin-roles', rbacController.listCompanyAdminRoles);
+router.patch('/platform/rbac/company-admin-roles/:id', rbacController.updateCompanyAdminRole);
 
 // Tenant-scoped routes (require tenant context)
 router.use(

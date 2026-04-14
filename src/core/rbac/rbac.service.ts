@@ -319,6 +319,80 @@ export class RbacService {
    * existing Company Admin roles get the updated permissions.
    * Called from a platform admin endpoint or during deployment.
    */
+  /**
+   * List all Company Admin roles across tenants, with company info.
+   * Used by super admin to view/manage company admin permissions.
+   */
+  async listCompanyAdminRoles() {
+    const roles = await platformPrisma.role.findMany({
+      where: { name: 'Company Admin', isSystem: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Fetch company info for each tenant
+    const tenantIds = roles.map(r => r.tenantId);
+    const tenants = await platformPrisma.tenant.findMany({
+      where: { id: { in: tenantIds } },
+      select: {
+        id: true,
+        status: true,
+        company: { select: { id: true, displayName: true } },
+      },
+    });
+
+    const tenantMap = new Map(tenants.map(t => [t.id, t]));
+
+    return roles.map(role => {
+      const tenant = tenantMap.get(role.tenantId);
+      return {
+        roleId: role.id,
+        tenantId: role.tenantId,
+        companyId: tenant?.company?.id ?? null,
+        companyName: tenant?.company?.displayName ?? 'Unknown',
+        companyStatus: tenant?.status ?? 'UNKNOWN',
+        permissions: role.permissions as string[],
+        updatedAt: role.updatedAt,
+      };
+    });
+  }
+
+  /**
+   * Update a specific Company Admin role's permissions.
+   * Invalidates Redis cache for all users with that role.
+   */
+  async updateCompanyAdminRolePermissions(roleId: string, permissions: string[]) {
+    const role = await platformPrisma.role.findUnique({ where: { id: roleId } });
+    if (!role) throw ApiError.notFound('Role not found');
+    if (role.name !== 'Company Admin' || !role.isSystem) {
+      throw ApiError.badRequest('Can only update system Company Admin roles via this endpoint');
+    }
+
+    const updated = await platformPrisma.role.update({
+      where: { id: roleId },
+      data: { permissions },
+    });
+
+    // Invalidate cache for all users with this role
+    const tenantUsers = await platformPrisma.tenantUser.findMany({
+      where: { roleId },
+      select: { userId: true, tenantId: true },
+    });
+    for (const tu of tenantUsers) {
+      const cacheKey = createUserPermissionsCacheKey(tu.userId, tu.tenantId);
+      await cacheRedis.del(cacheKey);
+      const userCacheKey = createUserCacheKey(tu.userId);
+      await cacheRedis.del(userCacheKey);
+    }
+
+    logger.info(`Updated Company Admin role permissions for tenant ${role.tenantId}`, {
+      roleId,
+      permissionCount: permissions.length,
+      cacheInvalidated: tenantUsers.length,
+    });
+
+    return updated;
+  }
+
   async syncCompanyAdminPermissions(): Promise<{ updated: number; skipped: number }> {
     // The canonical Company Admin permission set (must match tenant.service.ts)
     const COMPANY_ADMIN_PERMISSIONS = [

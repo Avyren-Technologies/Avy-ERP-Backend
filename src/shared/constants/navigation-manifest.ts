@@ -34,6 +34,7 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'sa-registrations', label: 'Registrations', icon: 'user-plus', requiredPerm: 'platform:admin', path: '/app/registrations', module: null, group: 'Platform Management', roleScope: 'super_admin', sortOrder: 103 },
   { id: 'sa-support', label: 'Support Dashboard', icon: 'support', requiredPerm: 'platform:admin', path: '/app/support', module: null, group: 'System', roleScope: 'super_admin', sortOrder: 203 },
   { id: 'sa-app-versions', label: 'App Version Control', icon: 'refresh-cw', requiredPerm: 'platform:admin', path: '/app/app-versions', module: null, group: 'System', roleScope: 'super_admin', sortOrder: 204 },
+  { id: 'sa-ca-permissions', label: 'Admin Permissions', icon: 'shield', requiredPerm: 'platform:admin', path: '/app/admin/company-admin-permissions', module: null, group: 'System', roleScope: 'super_admin', sortOrder: 205 },
 
   // ═══════ SELF-SERVICE (ESS) — visible to employees, managers, and admins ═══════
   { id: 'ess-profile', label: 'My Profile', icon: 'user', requiredPerm: 'ess:view-profile', path: '/app/company/hr/my-profile', module: 'hr', group: 'My Workspace', moduleSeparator: 'Self-Service', roleScope: 'company', sortOrder: 300 },
