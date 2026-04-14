@@ -138,7 +138,6 @@ class DashboardService {
       walkIns,
       avgDurationResult,
       completedWithDuration,
-      overstayedVisits,
       inductionRequired,
       inductionCompleted,
     ] = await Promise.all([
@@ -152,14 +151,6 @@ class DashboardService {
       platformPrisma.visit.aggregate({
         where: { ...where, visitDurationMinutes: { not: null } },
         _avg: { visitDurationMinutes: true },
-      }),
-      platformPrisma.visit.count({
-        where: {
-          ...where,
-          status: { in: ['CHECKED_OUT', 'AUTO_CHECKED_OUT'] },
-          visitDurationMinutes: { not: null },
-          expectedDurationMinutes: { not: null },
-        },
       }),
       platformPrisma.visit.count({
         where: {
