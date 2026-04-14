@@ -380,7 +380,8 @@ export class RbacService {
     for (const tu of tenantUsers) {
       const cacheKey = createUserPermissionsCacheKey(tu.userId, tu.tenantId);
       await cacheRedis.del(cacheKey);
-      const userCacheKey = createUserCacheKey(tu.userId);
+      // Auth middleware caches at createUserCacheKey(userId, 'auth') — must match
+      const userCacheKey = createUserCacheKey(tu.userId, 'auth');
       await cacheRedis.del(userCacheKey);
     }
 
@@ -432,7 +433,8 @@ export class RbacService {
       for (const tu of tenantUsers) {
         const cacheKey = createUserPermissionsCacheKey(tu.userId, tu.tenantId);
         await cacheRedis.del(cacheKey);
-        const userCacheKey = createUserCacheKey(tu.userId);
+        // Auth middleware caches at createUserCacheKey(userId, 'auth') — must match
+        const userCacheKey = createUserCacheKey(tu.userId, 'auth');
         await cacheRedis.del(userCacheKey);
       }
 
