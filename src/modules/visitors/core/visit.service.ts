@@ -3,7 +3,9 @@ import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { n } from '../../../shared/utils/prisma-helpers';
+import QRCode from 'qrcode';
 import crypto from 'crypto';
+import { DateTime } from 'luxon';
 import type {
   CreateVisitInput,
   CheckInInput,
@@ -99,6 +101,22 @@ class VisitService {
         },
         include: { visitorType: true },
       });
+
+      // Generate QR code as data URL
+      try {
+        const qrCodeUrl = await QRCode.toDataURL(visitCode, {
+          width: 300,
+          margin: 2,
+          color: { dark: '#000000', light: '#FFFFFF' },
+        });
+        await tx.visit.update({
+          where: { id: visit.id },
+          data: { qrCodeUrl },
+        });
+        visit.qrCodeUrl = qrCodeUrl;
+      } catch (qrErr) {
+        logger.warn('Failed to generate QR code for visit', { error: qrErr, visitId: visit.id });
+      }
 
       // Dispatch notification to host (non-blocking)
       try {
@@ -630,6 +648,69 @@ class VisitService {
     }
 
     return entries.find(e => e.type === 'WATCHLIST') ?? null;
+  }
+
+  // ─── Cron-support methods ───────────────────────────────────────────
+
+  /**
+   * Auto check-out all CHECKED_IN visits for a company.
+   */
+  async autoCheckOutAll(companyId: string): Promise<number> {
+    const result = await platformPrisma.visit.updateMany({
+      where: {
+        companyId,
+        status: 'CHECKED_IN',
+      },
+      data: {
+        status: 'AUTO_CHECKED_OUT',
+        checkOutTime: new Date(),
+        checkOutMethod: 'AUTO_CHECKOUT',
+      },
+    });
+    return result.count;
+  }
+
+  /**
+   * Get visitors who have overstayed their expected duration for a company.
+   */
+  async getOverstayingVisitors(companyId: string): Promise<any[]> {
+    const config = await platformPrisma.visitorManagementConfig.findUnique({
+      where: { companyId },
+      select: { defaultMaxDurationMinutes: true },
+    });
+    const maxMinutes = config?.defaultMaxDurationMinutes ?? 480;
+    const cutoff = DateTime.utc().minus({ minutes: maxMinutes }).toJSDate();
+
+    return platformPrisma.visit.findMany({
+      where: {
+        companyId,
+        status: 'CHECKED_IN',
+        checkInTime: { lt: cutoff },
+      },
+      select: {
+        id: true,
+        visitorName: true,
+        checkInTime: true,
+        hostEmployeeId: true,
+      },
+    });
+  }
+
+  /**
+   * Mark EXPECTED visits older than 7 days as NO_SHOW.
+   */
+  async markNoShows(): Promise<number> {
+    const cutoff = DateTime.utc().minus({ days: 7 }).toJSDate();
+    const result = await platformPrisma.visit.updateMany({
+      where: {
+        status: 'EXPECTED',
+        expectedDate: { lt: cutoff },
+      },
+      data: {
+        status: 'NO_SHOW',
+      },
+    });
+    return result.count;
   }
 }
 

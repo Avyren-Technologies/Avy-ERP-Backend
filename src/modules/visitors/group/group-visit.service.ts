@@ -6,6 +6,20 @@ import crypto from 'crypto';
 
 class GroupVisitService {
 
+  private async generateVisitCode(): Promise<string> {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let code = '';
+      const bytes = crypto.randomBytes(6);
+      for (let i = 0; i < 6; i++) {
+        code += chars[bytes[i]! % chars.length];
+      }
+      const existing = await platformPrisma.visit.findUnique({ where: { visitCode: code } });
+      if (!existing) return code;
+    }
+    throw ApiError.conflict('Unable to generate unique visit code. Please try again.');
+  }
+
   private async generateGroupVisitCode(): Promise<string> {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -138,13 +152,8 @@ class GroupVisitService {
         if (!member) continue;
         if (member.status !== 'EXPECTED') continue;
 
-        // Create individual visit record for this member using ambiguous-character-free alphabet
-        const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-        let visitCode = '';
-        const bytes = crypto.randomBytes(6);
-        for (let i = 0; i < 6; i++) {
-          visitCode += ALPHABET[bytes[i]! % ALPHABET.length];
-        }
+        // Create individual visit record for this member
+        const visitCode = await this.generateVisitCode();
         const visitNumber = await generateNextNumber(
           tx, companyId, ['Visitor', 'Visitor Registration'], 'Visitor Registration',
         );

@@ -775,6 +775,16 @@ export class ESSService {
           });
           break;
 
+        case 'Visit': {
+          const { visitService } = await import('../../visitors/core/visit.service');
+          if (decision === 'APPROVED') {
+            await visitService.approveVisit(companyId, entityId, 'system');
+          } else {
+            await visitService.rejectVisit(companyId, entityId, 'system', 'Approval workflow rejected');
+          }
+          break;
+        }
+
         default:
           // Unknown entity type — log but don't fail
           break;

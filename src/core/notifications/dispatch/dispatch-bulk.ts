@@ -190,9 +190,17 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
       triggerEvent: input.triggerEvent,
     });
 
-    // 6. Emit socket events
+    // 6. Emit socket events (include title/body for Electron native notifications)
+    // Correlate created rows to createInputs via userId to retrieve rendered title/body.
+    const inputByUserId = new Map(createInputs.map((ci) => [ci.userId, ci]));
     for (const row of createdRows) {
-      emitSocketEvent(row.userId, { notificationId: row.id, traceId });
+      const ci = inputByUserId.get(row.userId);
+      emitSocketEvent(row.userId, {
+        notificationId: row.id,
+        traceId,
+        ...(ci?.title ? { title: ci.title } : {}),
+        ...(ci?.body ? { body: ci.body } : {}),
+      });
     }
 
     // 7. Chunk into BullMQ bulk-delivery jobs with backpressure throttling.

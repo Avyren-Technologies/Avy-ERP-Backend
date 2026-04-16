@@ -309,7 +309,12 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
         continue;
       }
 
-      emitSocketEvent(row.userId, { notificationId: row.id, traceId });
+      emitSocketEvent(row.userId, {
+        notificationId: row.id,
+        traceId,
+        title: bucket.rendered.title,
+        body: bucket.rendered.body,
+      });
 
       const deliveryChannels = bucket.channels.filter((c) => c !== 'IN_APP');
       if (deliveryChannels.length > 0) {

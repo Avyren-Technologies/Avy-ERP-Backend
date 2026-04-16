@@ -85,9 +85,10 @@ export const fcmProvider = {
           notification: {
             title: payload.title,
             body: payload.body,
-            icon: '/favicon.ico',
+            icon: '/logo.png',
             ...(payload.imageUrl ? { image: payload.imageUrl } : {}),
           },
+          fcmOptions: {},
         },
       });
 

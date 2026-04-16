@@ -8,6 +8,7 @@ import { startSLACron } from '../workers/sla-cron';
 import { initSocket } from '../lib/socket';
 import { analyticsCronService } from '../modules/hr/analytics/services/analytics-cron.service';
 import { startDemoResetCron } from '../workers/demo-reset-cron';
+import { startVMSCron } from '../workers/vms-cron';
 import { notificationService } from '../core/notifications/notification.service';
 import { notificationCronService } from '../core/notifications/cron/notification-cron.service';
 import { registerHRListeners } from '../shared/events/listeners/hr-listeners';
@@ -53,6 +54,9 @@ async function startServer(): Promise<void> {
 
       // Start demo tenant reset cron (daily at 2 AM)
       startDemoResetCron();
+
+      // Start VMS cron jobs (auto-checkout, overstay, no-show, pass expiry)
+      startVMSCron();
 
       // Initialize Firebase Admin for push notifications
       notificationService.initFirebase();

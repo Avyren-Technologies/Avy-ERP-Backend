@@ -113,10 +113,18 @@ export function emitTicketResolved(ticketId: string, companyId: string, ticket: 
  * Notification fan-out: emit a lightweight UI hint to the user's socket room.
  * Clients receive { notificationId, unreadCountHint } and must re-fetch via
  * React Query — they do NOT append the payload directly to state.
+ *
+ * title/body are included so Electron clients (which lack FCM Web Push) can
+ * show native OS notifications without an extra API round-trip.
  */
-export function emitNotificationNew(userId: string, payload: { notificationId: string; traceId: string }) {
+export function emitNotificationNew(
+    userId: string,
+    payload: { notificationId: string; traceId: string; title?: string; body?: string },
+) {
     io?.to(`user:${userId}`).emit('notification:new', {
         notificationId: payload.notificationId,
         unreadCountHint: null,
+        title: payload.title,
+        body: payload.body,
     });
 }

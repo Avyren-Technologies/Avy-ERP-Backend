@@ -71,6 +71,11 @@ export const NOTIFICATION_CATEGORIES: NotificationCategoryDef[] = [
     label: 'Celebrations',
     description: 'Birthday wishes and work anniversaries',
   },
+  {
+    code: 'VISITOR_MANAGEMENT',
+    label: 'Visitor Management',
+    description: 'Visitor pre-registration, check-in/out, approvals, emergency alerts',
+  },
 ];
 
 export function getCategoryDef(code: string): NotificationCategoryDef | undefined {
@@ -223,6 +228,16 @@ export const TRIGGER_TO_CATEGORY: Record<string, string> = {
   // Announcements
   HOLIDAY_REMINDER: 'ANNOUNCEMENTS',
   ANNOUNCEMENT: 'ANNOUNCEMENTS',
+
+  // Visitor Management
+  VMS_PRE_REGISTRATION_CREATED: 'VISITOR_MANAGEMENT',
+  VMS_VISITOR_CHECKED_IN: 'VISITOR_MANAGEMENT',
+  VMS_VISITOR_CHECKED_OUT: 'VISITOR_MANAGEMENT',
+  VMS_HOST_APPROVAL_REQUEST: 'VISITOR_MANAGEMENT',
+  VMS_EMERGENCY_EVACUATION: 'VISITOR_MANAGEMENT',
+  VMS_OVERSTAY_ALERT: 'VISITOR_MANAGEMENT',
+  VMS_PASS_EXPIRY: 'VISITOR_MANAGEMENT',
+  VMS_BLOCKLIST_ALERT: 'VISITOR_MANAGEMENT',
 };
 
 /**

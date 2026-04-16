@@ -3,11 +3,14 @@ import { logger } from '../../../config/logger';
 
 /**
  * Emit a notification:new socket event to a user's room.
- * Payload is intentionally minimal ({ notificationId, unreadCountHint: null })
- * so clients are forced to re-fetch via React Query rather than trust the
- * socket payload as a source of truth.
+ * Payload is intentionally minimal so clients re-fetch via React Query.
+ * title/body are included for Electron clients that need native OS notifications
+ * without FCM Web Push support.
  */
-export function emitSocketEvent(userId: string, payload: { notificationId: string; traceId: string }): void {
+export function emitSocketEvent(
+  userId: string,
+  payload: { notificationId: string; traceId: string; title?: string; body?: string },
+): void {
   try {
     emitNotificationNew(userId, payload);
   } catch (err) {
