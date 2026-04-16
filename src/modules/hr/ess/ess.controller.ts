@@ -17,6 +17,12 @@ import {
   type ShiftInfo,
 } from '../../../shared/services/attendance-status-resolver.service';
 import { TRIGGER_EVENTS } from '../../../shared/constants/trigger-events';
+import { essOvertimeService } from './ess-overtime.service';
+import {
+  claimOvertimeSchema,
+  myOvertimeListSchema,
+  myOvertimeSummarySchema,
+} from './ess-overtime.validators';
 import {
   essConfigSchema,
   createWorkflowSchema,
@@ -1727,6 +1733,54 @@ export class ESSController {
 
     const loan = await essService.applyForLoan(companyId, userId, parsed.data);
     res.status(201).json(createSuccessResponse(loan, 'Loan application submitted'));
+  });
+
+  // ── Overtime (ESS) ────────────────────────────────────────────────
+
+  getMyOvertimeRequests = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const employeeId = req.user?.employeeId;
+    if (!companyId || !employeeId) throw ApiError.badRequest('Company and employee context required');
+
+    const parsed = myOvertimeListSchema.safeParse(req.query);
+    if (!parsed.success) throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+
+    const result = await essOvertimeService.getMyOvertimeRequests(companyId, employeeId, parsed.data);
+    res.json(createSuccessResponse(result.data, 'Overtime requests retrieved', result.meta));
+  });
+
+  getMyOvertimeDetail = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const employeeId = req.user?.employeeId;
+    if (!companyId || !employeeId) throw ApiError.badRequest('Company and employee context required');
+
+    const result = await essOvertimeService.getMyOvertimeDetail(companyId, employeeId, req.params.id);
+    res.json(createSuccessResponse(result, 'Overtime request detail retrieved'));
+  });
+
+  getMyOvertimeSummary = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const employeeId = req.user?.employeeId;
+    if (!companyId || !employeeId) throw ApiError.badRequest('Company and employee context required');
+
+    const parsed = myOvertimeSummarySchema.safeParse(req.query);
+    if (!parsed.success) throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+
+    const result = await essOvertimeService.getMyOvertimeSummary(companyId, employeeId, parsed.data);
+    res.json(createSuccessResponse(result, 'Overtime summary retrieved'));
+  });
+
+  claimOvertime = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    const employeeId = req.user?.employeeId;
+    if (!companyId || !userId || !employeeId) throw ApiError.badRequest('Company, user, and employee context required');
+
+    const parsed = claimOvertimeSchema.safeParse(req.body);
+    if (!parsed.success) throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+
+    const result = await essOvertimeService.claimOvertime(companyId, userId, employeeId, parsed.data);
+    res.json(createSuccessResponse(result, 'Overtime claim submitted successfully'));
   });
 
   // ── Dashboard ─────────────────────────────────────────────────────

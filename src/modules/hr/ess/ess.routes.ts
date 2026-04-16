@@ -134,6 +134,12 @@ router.get('/ess/my-loans', requireESSFeature('loanApplication'), requirePermiss
 router.get('/ess/loan-policies', requireESSFeature('loanApplication'), requirePermissions(['hr:read', 'ess:apply-loan']), controller.getAvailableLoanPolicies);
 router.post('/ess/apply-loan', requireESSFeature('loanApplication'), requirePermissions(['hr:create', 'ess:apply-loan']), controller.applyForLoan);
 
+// ── Overtime (ESS feature gated) ───────────────────────────────────
+router.get('/ess/my-overtime-requests', requireESSFeature('overtimeView'), requirePermissions(['hr:read', 'ess:view-overtime']), controller.getMyOvertimeRequests);
+router.get('/ess/my-overtime-summary', requireESSFeature('overtimeView'), requirePermissions(['hr:read', 'ess:view-overtime']), controller.getMyOvertimeSummary);
+router.get('/ess/my-overtime-requests/:id', requireESSFeature('overtimeView'), requirePermissions(['hr:read', 'ess:view-overtime']), controller.getMyOvertimeDetail);
+router.post('/ess/claim-overtime', requireESSFeature('overtimeView'), requirePermissions(['hr:create', 'ess:claim-overtime']), controller.claimOvertime);
+
 // ── MSS Manager Self-Service (feature gated) ────────────────────────
 router.get('/mss/team-members', requireESSFeature('mssViewTeam'), requirePermissions(['hr:read']), controller.getTeamMembers);
 router.get('/mss/pending-approvals', requireESSFeature('mssApproveLeave'), requirePermissions(['hr:read']), controller.getPendingManagerApprovals);
