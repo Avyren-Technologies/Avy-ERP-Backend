@@ -236,7 +236,7 @@ model OvertimeRule {
 
 model OvertimeRequest {
   id                 String @id @default(cuid())
-  attendanceRecordId String @unique
+  attendanceRecordId String? @unique
   companyId          String
   employeeId         String
   overtimeRuleId     String
@@ -255,7 +255,11 @@ model OvertimeRequest {
 
   compOffGranted Boolean @default(false)
 
-  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  source      OvertimeRequestSource @default(AUTO)
+  reason      String?
+  attachments Json?
+
+  attendanceRecord AttendanceRecord? @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
   company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employee         Employee         @relation(fields: [employeeId], references: [id])
   overtimeRule     OvertimeRule     @relation(fields: [overtimeRuleId], references: [id])
@@ -364,6 +368,11 @@ enum OTMultiplierSource {
   WEEKEND
   HOLIDAY
   NIGHT_SHIFT
+}
+
+enum OvertimeRequestSource {
+  AUTO
+  MANUAL
 }
 
 enum HolidayType {

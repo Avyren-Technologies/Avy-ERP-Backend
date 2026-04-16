@@ -27,6 +27,9 @@ model ESSConfig {
   shiftSwapRequest         Boolean @default(true)
   wfhRequest               Boolean @default(true)
 
+  // ── Overtime ──
+  overtimeView Boolean @default(true)
+
   // ── Profile & Documents ──
   profileUpdate     Boolean @default(true)
   documentUpload    Boolean @default(true)
