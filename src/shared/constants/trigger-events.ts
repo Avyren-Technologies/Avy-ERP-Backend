@@ -52,6 +52,18 @@ export const TRIGGER_EVENTS: readonly TriggerEventOption[] = [
     description: 'Triggered when an employee claims overtime hours',
   },
   {
+    value: 'OVERTIME_AUTO_DETECTED',
+    label: 'Overtime Auto-Detected',
+    module: 'ESS',
+    description: 'Triggered when the system auto-detects overtime for an employee',
+  },
+  {
+    value: 'COMP_OFF_GRANTED',
+    label: 'Compensatory Off Granted',
+    module: 'ESS',
+    description: 'Triggered when compensatory off leave is credited after OT approval',
+  },
+  {
     value: 'SHIFT_CHANGE',
     label: 'Shift Change',
     module: 'ESS',

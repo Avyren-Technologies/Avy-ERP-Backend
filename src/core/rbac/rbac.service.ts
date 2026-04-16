@@ -25,6 +25,7 @@ const NAV_TO_ESS_CONFIG: Record<string, string> = {
   'ess-grievance': 'grievanceSubmission',
   'ess-training': 'trainingEnrollment',
   'ess-assets': 'assetView',
+  'ess-overtime': 'overtimeView',
   'ess-shift-swap': 'shiftSwapRequest',
   'ess-wfh': 'wfhRequest',
   'ess-documents': 'documentUpload',

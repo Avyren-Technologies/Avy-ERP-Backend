@@ -186,7 +186,7 @@ export const PERMISSION_MODULES = {
   },
   ess: {
     label: 'Employee Self-Service',
-    actions: ['view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart', 'use-chatbot', 'view-esign', 'view-disciplinary'],
+    actions: ['view-payslips', 'view-leave', 'apply-leave', 'view-attendance', 'regularize-attendance', 'view-holidays', 'it-declaration', 'view-directory', 'view-profile', 'download-form16', 'apply-loan', 'view-assets', 'view-goals', 'submit-appraisal', 'submit-feedback', 'enroll-training', 'raise-grievance', 'raise-helpdesk', 'swap-shift', 'request-wfh', 'upload-document', 'view-policies', 'claim-expense', 'view-org-chart', 'use-chatbot', 'view-esign', 'view-disciplinary', 'view-overtime', 'claim-overtime'],
   },
   platform: {
     label: 'Platform Administration',
@@ -260,7 +260,7 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   },
   'HR Personnel': {
     description: 'Full HR module access',
-    permissions: ['hr:*', 'attendance:mark', 'reports:read', 'reports:export'],
+    permissions: ['hr:*', 'attendance:mark', 'reports:read', 'reports:export', 'ess:view-overtime', 'ess:claim-overtime'],
   },
   'Finance Team': {
     description: 'Finance module with read-only payroll',
@@ -313,6 +313,7 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
       'ess:raise-grievance', 'ess:enroll-training', 'ess:view-assets',
       'ess:raise-helpdesk', 'ess:use-chatbot',
       'ess:view-esign', 'ess:view-disciplinary',
+      'ess:view-overtime', 'ess:claim-overtime',
     ],
   },
   'Manager': {
