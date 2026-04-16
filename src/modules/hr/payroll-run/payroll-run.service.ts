@@ -796,7 +796,7 @@ export class PayrollRunService {
             const dailyCap = Number(otRule.dailyCapHours);
             const byDate = new Map<string, typeof empOtRequests>();
             for (const req of empOtRequests) {
-              const dateKey = new Date(req.date).toISOString().split('T')[0];
+              const dateKey = new Date(req.date).toISOString().split('T')[0] as string;
               if (!byDate.has(dateKey)) byDate.set(dateKey, []);
               byDate.get(dateKey)!.push(req);
             }

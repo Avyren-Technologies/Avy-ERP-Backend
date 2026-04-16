@@ -1746,7 +1746,7 @@ export class ESSController {
     if (!parsed.success) throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
 
     const result = await essOvertimeService.getMyOvertimeRequests(companyId, employeeId, parsed.data);
-    res.json(createSuccessResponse(result.data, 'Overtime requests retrieved', result.meta));
+    res.json(createPaginatedResponse(result.data, result.meta.page, result.meta.limit, result.meta.total, 'Overtime requests retrieved'));
   });
 
   getMyOvertimeDetail = asyncHandler(async (req: Request, res: Response) => {
@@ -1754,7 +1754,9 @@ export class ESSController {
     const employeeId = req.user?.employeeId;
     if (!companyId || !employeeId) throw ApiError.badRequest('Company and employee context required');
 
-    const result = await essOvertimeService.getMyOvertimeDetail(companyId, employeeId, req.params.id);
+    const id = req.params.id;
+    if (!id) throw ApiError.badRequest('Overtime request ID is required');
+    const result = await essOvertimeService.getMyOvertimeDetail(companyId, employeeId, id);
     res.json(createSuccessResponse(result, 'Overtime request detail retrieved'));
   });
 
