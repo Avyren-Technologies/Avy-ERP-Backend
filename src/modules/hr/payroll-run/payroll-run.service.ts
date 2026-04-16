@@ -817,10 +817,8 @@ export class PayrollRunService {
             const byWeek = new Map<string, typeof empOtRequests>();
             for (const req of empOtRequests) {
               const d = new Date(req.date);
-              // ISO week: year + week number
-              const jan1 = new Date(d.getFullYear(), 0, 1);
-              const weekNum = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-              const weekKey = `${d.getFullYear()}-W${weekNum}`;
+              // ISO week via Luxon
+              const weekKey = DateTime.fromJSDate(d).toISOWeekDate().slice(0, 8); // e.g., "2026-W16"
               if (!byWeek.has(weekKey)) byWeek.set(weekKey, []);
               byWeek.get(weekKey)!.push(req);
             }
