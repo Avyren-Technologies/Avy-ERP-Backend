@@ -486,6 +486,7 @@ export class PayrollRunService {
       },
       select: {
         employeeId: true,
+        date: true,
         requestedHours: true,
         appliedMultiplier: true,
         multiplierSource: true,
@@ -788,6 +789,53 @@ export class PayrollRunService {
         // L1: Use fullDayThresholdHours instead of hardcoded 8
         const ratePerHour = basicPerDay / workHoursPerDay;
 
+        // Enforce daily/weekly caps on raw requests before grouping
+        if (otRule.enforceCaps) {
+          // Daily cap — scale down requests per day if total exceeds cap
+          if (otRule.dailyCapHours) {
+            const dailyCap = Number(otRule.dailyCapHours);
+            const byDate = new Map<string, typeof empOtRequests>();
+            for (const req of empOtRequests) {
+              const dateKey = new Date(req.date).toISOString().split('T')[0];
+              if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+              byDate.get(dateKey)!.push(req);
+            }
+            for (const dayReqs of byDate.values()) {
+              const dayTotal = dayReqs.reduce((sum, r) => sum + Number(r.requestedHours), 0);
+              if (dayTotal > dailyCap) {
+                const scaleFactor = dailyCap / dayTotal;
+                for (const r of dayReqs) {
+                  (r as any).requestedHours = round(Number(r.requestedHours) * scaleFactor);
+                }
+              }
+            }
+          }
+
+          // Weekly cap — scale down requests per ISO week if total exceeds cap
+          if (otRule.weeklyCapHours) {
+            const weeklyCap = Number(otRule.weeklyCapHours);
+            const byWeek = new Map<string, typeof empOtRequests>();
+            for (const req of empOtRequests) {
+              const d = new Date(req.date);
+              // ISO week: year + week number
+              const jan1 = new Date(d.getFullYear(), 0, 1);
+              const weekNum = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+              const weekKey = `${d.getFullYear()}-W${weekNum}`;
+              if (!byWeek.has(weekKey)) byWeek.set(weekKey, []);
+              byWeek.get(weekKey)!.push(req);
+            }
+            for (const weekReqs of byWeek.values()) {
+              const weekTotal = weekReqs.reduce((sum, r) => sum + Number(r.requestedHours), 0);
+              if (weekTotal > weeklyCap) {
+                const scaleFactor = weeklyCap / weekTotal;
+                for (const r of weekReqs) {
+                  (r as any).requestedHours = round(Number(r.requestedHours) * scaleFactor);
+                }
+              }
+            }
+          }
+        }
+
         // Group OT requests by multiplier source and apply per-group multiplier
         const otBySource = new Map<string, { hours: number; multiplier: number }>();
         for (const otReq of empOtRequests) {
@@ -821,7 +869,7 @@ export class PayrollRunService {
           otHours += hours;
         }
 
-        // Enforce weekly/monthly caps if enforceCaps is true
+        // Enforce monthly cap on grouped totals
         if (otRule.enforceCaps) {
           if (otRule.monthlyCapHours) {
             const monthlyCap = Number(otRule.monthlyCapHours);

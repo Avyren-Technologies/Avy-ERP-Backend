@@ -685,6 +685,24 @@ export class AttendanceService {
       `OT request created [employee=${record.employeeId}, hours=${cappedHours}, basis=${otRule.calculationBasis}, multiplier=${appliedMultiplier}x (${multiplierSource}), status=${status}]`,
     );
 
+    // Notify employee that OT was auto-detected
+    notificationService.dispatch({
+      companyId: record.companyId,
+      triggerEvent: 'OVERTIME_AUTO_DETECTED',
+      entityType: 'OvertimeRequest',
+      entityId: otRequest.id,
+      explicitRecipients: [record.employeeId],
+      tokens: {
+        employee_name: '',
+        date: record.date.toISOString().split('T')[0],
+        hours: cappedHours,
+        multiplier_source: multiplierSource,
+      },
+      priority: 'LOW',
+      type: 'OVERTIME',
+      actionUrl: '/company/hr/my-overtime',
+    }).catch((err: any) => logger.warn('Failed to dispatch OVERTIME_AUTO_DETECTED notification', err));
+
     return otRequest;
   }
 
@@ -1873,6 +1891,30 @@ export class AttendanceService {
           });
 
           logger.info(`Comp-off ${credit} day(s) credited for employee ${request.employeeId} from OT request ${id}`);
+
+          // Notify employee about comp-off grant
+          const compOffRequesterUserId = await getRequesterUserId({ employeeId: request.employeeId });
+          if (compOffRequesterUserId) {
+            const compOffEmployeeName = `${updated.employee?.firstName ?? ''} ${updated.employee?.lastName ?? ''}`.trim();
+            const compOffBalance = existingBalance ? Number(existingBalance.balance) + credit : credit;
+            notificationService.dispatch({
+              companyId,
+              triggerEvent: 'COMP_OFF_GRANTED',
+              entityType: 'OvertimeRequest',
+              entityId: id,
+              explicitRecipients: [compOffRequesterUserId],
+              tokens: {
+                employee_name: compOffEmployeeName,
+                days: credit,
+                date: new Date(request.date).toISOString().split('T')[0],
+                expires_at: expiresAt ? expiresAt.toISOString().split('T')[0] : '',
+                balance: compOffBalance,
+              },
+              priority: 'MEDIUM',
+              type: 'OVERTIME',
+              actionUrl: '/company/hr/my-overtime',
+            }).catch((err: any) => logger.warn('Failed to dispatch COMP_OFF_GRANTED notification', err));
+          }
         }
       }
     } catch (err) {
