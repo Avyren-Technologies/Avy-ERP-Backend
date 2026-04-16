@@ -63,7 +63,10 @@ class EssOvertimeService {
           status: true,
           source: true,
           reason: true,
+          attachments: true,
           compOffGranted: true,
+          approvalNotes: true,
+          approvedAt: true,
           createdAt: true,
         },
         orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -83,7 +86,10 @@ class EssOvertimeService {
       status: r.status,
       source: r.source,
       reason: r.reason,
+      attachments: r.attachments ?? null,
       compOffGranted: r.compOffGranted,
+      approvalNotes: r.approvalNotes ?? null,
+      approvedAt: r.approvedAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
     }));
 
@@ -146,8 +152,8 @@ class EssOvertimeService {
       reason: row.reason,
       attachments: row.attachments ?? null,
       compOffGranted: row.compOffGranted,
-      requestedBy: userMap.get(row.requestedBy) ?? null,
-      approvedBy: row.approvedBy ? (userMap.get(row.approvedBy) ?? null) : null,
+      requestedByName: userMap.get(row.requestedBy) ?? null,
+      approvedByName: row.approvedBy ? (userMap.get(row.approvedBy) ?? null) : null,
       approvalNotes: row.approvalNotes,
       approvedAt: row.approvedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
@@ -235,10 +241,10 @@ class EssOvertimeService {
     companyId: string,
     employeeId: string,
     year: number,
-  ): Promise<{ enabled: boolean; balance: number } | null> {
+  ): Promise<{ enabled: boolean; balance: number; expiresAt: string | null; leaveTypeId: string | null } | null> {
     const otRule = await platformPrisma.overtimeRule.findUnique({
       where: { companyId },
-      select: { compOffEnabled: true },
+      select: { compOffEnabled: true, compOffExpiryDays: true },
     });
 
     if (!otRule?.compOffEnabled) return null;
@@ -249,14 +255,26 @@ class EssOvertimeService {
       select: { id: true },
     });
 
-    if (!compOffType) return { enabled: true, balance: 0 };
+    if (!compOffType) return { enabled: true, balance: 0, expiresAt: null, leaveTypeId: null };
 
     const lb = await platformPrisma.leaveBalance.findFirst({
       where: { employeeId, leaveTypeId: compOffType.id, year },
-      select: { balance: true },
+      select: { balance: true, expiresAt: true },
     });
 
-    return { enabled: true, balance: dec(lb?.balance) };
+    // Compute expiry date from compOffExpiryDays if set
+    const expiresAt = lb?.expiresAt
+      ? lb.expiresAt.toISOString()
+      : otRule.compOffExpiryDays
+        ? DateTime.now().plus({ days: otRule.compOffExpiryDays }).toISO()
+        : null;
+
+    return {
+      enabled: true,
+      balance: dec(lb?.balance),
+      expiresAt,
+      leaveTypeId: compOffType.id,
+    };
   }
 
   // ── 4. Submit manual OT claim ───────────────────────────────────────────
