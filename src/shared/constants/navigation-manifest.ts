@@ -216,6 +216,9 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'vms-inductions', label: 'Safety Inductions', icon: 'shield-check', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings/inductions', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 765 },
   { id: 'vms-settings', label: 'VMS Settings', icon: 'settings', requiredPerm: 'visitors:configure', path: '/app/company/visitors/settings', module: 'visitor', group: 'VMS Settings', roleScope: 'company', sortOrder: 766 },
 
+  // ═══════ DOCUMENT COMPARISON ═══════
+  { id: 'docdiff', label: 'DocDiff Pro', icon: 'file-diff', requiredPerm: 'docdiff:read', path: '/app/docdiff', module: null, group: 'Document Comparison', moduleSeparator: 'Document Comparison', roleScope: 'company', sortOrder: 780 },
+
   // ═══════ REPORTS ═══════
   { id: 'rpt-audit', label: 'Audit Logs', icon: 'shield-check', requiredPerm: 'audit:read', path: '/app/reports/audit', module: null, group: 'Reports', roleScope: 'company', sortOrder: 800 },
 ];
