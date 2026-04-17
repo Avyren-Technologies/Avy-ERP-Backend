@@ -76,7 +76,7 @@ export function suppressByModules(permissions: string[], activeModuleIds: string
   // (callers should resolve modules from locations as fallback before reaching here)
   if (activeModuleIds.length === 0) return permissions;
 
-  const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform', 'billing']);
+  const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform', 'billing', 'docdiff']);
 
   // Build set of allowed permission modules from active subscriptions
   const allowedPermModules = new Set(SYSTEM_PERMISSION_MODULES);
@@ -191,6 +191,10 @@ export const PERMISSION_MODULES = {
   platform: {
     label: 'Platform Administration',
     actions: ['admin'],
+  },
+  docdiff: {
+    label: 'Document Comparison',
+    actions: ['read', 'create', 'update', 'delete', 'export', 'configure'],
   },
 } as const;
 

@@ -401,7 +401,7 @@ export class RbacService {
       'company:*', 'hr:*', 'ess:*', 'attendance:*', 'production:*', 'inventory:*', 'sales:*',
       'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
       'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
-      'billing:*', 'analytics:*',
+      'billing:*', 'analytics:*', 'docdiff:*',
     ];
 
     const companyAdminRoles = await platformPrisma.role.findMany({
