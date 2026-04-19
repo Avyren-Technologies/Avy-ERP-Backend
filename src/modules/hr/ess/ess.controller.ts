@@ -11,6 +11,9 @@ import {
 } from '../../../shared/utils/config-cache';
 import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
 import { resolvePolicy, type EvaluationContext } from '../../../shared/services/policy-resolver.service';
+import { validateShiftWindow } from '../../../shared/services/shift-window-validator.service';
+import { adjustLeaveBasedOnAttendance } from '../../../shared/services/leave-auto-adjustment.service';
+import { mapShiftToRecord } from '../../../shared/services/shift-mapping.service';
 import {
   resolveAttendanceStatus,
   type AttendanceRulesInput,
@@ -1095,7 +1098,7 @@ export class ESSController {
     } as const;
 
     let record = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date: { employeeId, date: today } },
+      where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
       include: shiftInclude,
     });
 
@@ -1105,7 +1108,7 @@ export class ESSController {
       const yesterdayDT = nowCT.minus({ days: 1 });
       const yesterday = new Date(yesterdayDT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
       const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
-        where: { employeeId_date: { employeeId, date: yesterday } },
+        where: { employeeId_date_shiftSequence: { employeeId, date: yesterday, shiftSequence: 1 } },
         include: shiftInclude,
       });
       if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
@@ -1161,6 +1164,42 @@ export class ESSController {
         });
       }
 
+      // ── Recent Attendance (last 7 days excluding today) ──
+      const sevenDaysAgoNotCheckedIn = DateTime.fromJSDate(today).minus({ days: 7 }).toJSDate();
+      const recentRecordsNotCheckedIn = await platformPrisma.attendanceRecord.findMany({
+        where: {
+          employeeId,
+          date: { gte: sevenDaysAgoNotCheckedIn, lt: today },
+        },
+        select: {
+          id: true,
+          date: true,
+          punchIn: true,
+          punchOut: true,
+          workedHours: true,
+          status: true,
+          overtimeHours: true,
+          geoStatus: true,
+          source: true,
+          shift: { select: { name: true } },
+        },
+        orderBy: { date: 'desc' },
+        take: 7,
+      });
+
+      const recentAttendanceNotCheckedIn = recentRecordsNotCheckedIn.map(r => ({
+        id: r.id,
+        date: r.date.toISOString().split('T')[0],
+        punchIn: r.punchIn?.toISOString() ?? null,
+        punchOut: r.punchOut?.toISOString() ?? null,
+        workedHours: r.workedHours ? Number(r.workedHours) : null,
+        status: r.status,
+        overtimeHours: r.overtimeHours ? Number(r.overtimeHours) : null,
+        geoStatus: r.geoStatus,
+        source: r.source,
+        shiftName: r.shift?.name ?? null,
+      }));
+
       res.json(createSuccessResponse({
         status: 'NOT_CHECKED_IN',
         record: null,
@@ -1168,6 +1207,7 @@ export class ESSController {
         resolvedPolicy,
         location: employeeLocation,
         assignedGeofence,
+        recentAttendance: recentAttendanceNotCheckedIn,
       }, 'Not checked in today'));
       return;
     }
@@ -1193,8 +1233,44 @@ export class ESSController {
       // Non-fatal
     }
 
+    // ── Recent Attendance (last 7 days excluding today) ──
+    const sevenDaysAgo = DateTime.fromJSDate(today).minus({ days: 7 }).toJSDate();
+    const recentRecords = await platformPrisma.attendanceRecord.findMany({
+      where: {
+        employeeId,
+        date: { gte: sevenDaysAgo, lt: today },
+      },
+      select: {
+        id: true,
+        date: true,
+        punchIn: true,
+        punchOut: true,
+        workedHours: true,
+        status: true,
+        overtimeHours: true,
+        geoStatus: true,
+        source: true,
+        shift: { select: { name: true } },
+      },
+      orderBy: { date: 'desc' },
+      take: 7,
+    });
+
+    const recentAttendance = recentRecords.map(r => ({
+      id: r.id,
+      date: r.date.toISOString().split('T')[0],
+      punchIn: r.punchIn?.toISOString() ?? null,
+      punchOut: r.punchOut?.toISOString() ?? null,
+      workedHours: r.workedHours ? Number(r.workedHours) : null,
+      status: r.status,
+      overtimeHours: r.overtimeHours ? Number(r.overtimeHours) : null,
+      geoStatus: r.geoStatus,
+      source: r.source,
+      shiftName: r.shift?.name ?? null,
+    }));
+
     const status = record.punchOut ? 'CHECKED_OUT' : 'CHECKED_IN';
-    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy }, `Attendance status: ${status}`));
+    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy, recentAttendance }, `Attendance status: ${status}`));
   });
 
   checkIn = asyncHandler(async (req: Request, res: Response) => {
@@ -1223,7 +1299,7 @@ export class ESSController {
 
     // Prevent double check-in
     const existing = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date: { employeeId, date: today } },
+      where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
     });
     if (existing?.punchIn) {
       throw ApiError.badRequest('Already checked in today. Use check-out instead.');
@@ -1339,86 +1415,57 @@ export class ESSController {
       }
     }
 
-    // Shift time validation (if employee has a shift assigned)
+    // Shift time validation using shared validator (respects attendanceMode + leaveCheckInMode)
+    const attendanceRules = await getCachedAttendanceRules(companyId);
+    const windowResult = await validateShiftWindow({
+      companyId,
+      employeeId,
+      shiftId: effectiveShiftId || null,
+      nowCT: { hour: nowCT.hour, minute: nowCT.minute },
+      attendanceMode: attendanceRules.attendanceMode,
+      leaveCheckInMode: attendanceRules.leaveCheckInMode,
+      today,
+    });
+    if (!windowResult.allowed) {
+      throw ApiError.badRequest(windowResult.reason!);
+    }
 
-    if (effectiveShiftId) {
-      const shift = await platformPrisma.companyShift.findUnique({
-        where: { id: effectiveShiftId },
-        select: {
-          startTime: true,
-          endTime: true,
-          name: true,
-          isCrossDay: true,
-          gracePeriodMinutes: true,
-          maxLateCheckInMinutes: true,
-        },
+    // Multi-shift support: determine shiftSequence
+    let shiftSequence = 1;
+    if (attendanceRules.multipleShiftsPerDayEnabled) {
+      const lastRecord = await platformPrisma.attendanceRecord.findFirst({
+        where: { employeeId, date: today },
+        orderBy: { shiftSequence: 'desc' },
       });
 
-      if (shift) {
-        // Resolve max late check-in using policy hierarchy:
-        // shift override -> attendance rules -> system defaults
-        const rules = await getCachedAttendanceRules(companyId);
-        const maxLateCheckIn = shift.maxLateCheckInMinutes
-          ?? rules.maxLateCheckInMinutes
-          ?? 240;
-
-        // Parse shift start/end in company timezone
-        const [shiftHour = 0, shiftMin = 0] = (shift.startTime || '00:00').split(':').map(Number);
-        const [endHour = 0, endMin = 0] = (shift.endTime || '23:59').split(':').map(Number);
-        // Current time in company timezone (minutes since midnight)
-        const nowMinutes = nowCT.hour * 60 + nowCT.minute;
-        const shiftStartMinutes = (shiftHour ?? 0) * 60 + (shiftMin ?? 0);
-        const shiftEndMinutes = (endHour ?? 0) * 60 + (endMin ?? 0);
-
-        // Early window: 60 minutes before shift start
-        const earlyWindowMinutes = 60;
-        // Late window: maxLateCheckIn minutes after shift start, but never past shift end
-        let lateWindowMinutes = maxLateCheckIn;
-
-        if (!shift.isCrossDay && shiftEndMinutes > shiftStartMinutes) {
-          // For non-cross-day shifts, cap the late window at shift end time
-          const shiftDuration = shiftEndMinutes - shiftStartMinutes;
-          lateWindowMinutes = Math.min(lateWindowMinutes, shiftDuration);
+      if (lastRecord) {
+        if (!lastRecord.punchOut) {
+          throw ApiError.badRequest('You must check out from your current shift before starting a new one.');
         }
 
-        const earliestMinutes = shiftStartMinutes - earlyWindowMinutes;
-        const latestMinutes = shiftStartMinutes + lateWindowMinutes;
+        shiftSequence = lastRecord.shiftSequence + 1;
 
-        let isWithinWindow: boolean;
+        // Validate maxShiftsPerDay
+        if (attendanceRules.maxShiftsPerDay && shiftSequence > attendanceRules.maxShiftsPerDay) {
+          throw ApiError.badRequest(`Maximum ${attendanceRules.maxShiftsPerDay} shifts per day exceeded.`);
+        }
 
-        if (shift.isCrossDay) {
-          // Cross-day (night) shift: e.g., 19:00 - 07:00
-          // The check-in window wraps around midnight.
-          // Also cap at shift end time (next day) to prevent check-in after shift ends
-          const crossDayEndMinutes = shiftEndMinutes + 1440; // end time next day
-          const shiftDuration = crossDayEndMinutes - shiftStartMinutes;
-          const effectiveLatest = shiftStartMinutes + Math.min(lateWindowMinutes, shiftDuration);
-
-          if (effectiveLatest >= 1440) {
-            isWithinWindow = nowMinutes >= earliestMinutes || nowMinutes <= (effectiveLatest - 1440);
-          } else {
-            isWithinWindow = nowMinutes >= earliestMinutes && nowMinutes <= effectiveLatest;
+        // Validate minGapBetweenShiftsMinutes
+        if (attendanceRules.minGapBetweenShiftsMinutes && lastRecord.punchOut) {
+          const gapMinutes = (now.getTime() - lastRecord.punchOut.getTime()) / 60000;
+          if (gapMinutes < attendanceRules.minGapBetweenShiftsMinutes) {
+            throw ApiError.badRequest(`Minimum ${attendanceRules.minGapBetweenShiftsMinutes} minutes gap required between shifts. Please wait ${Math.ceil(attendanceRules.minGapBetweenShiftsMinutes - gapMinutes)} more minutes.`);
           }
-        } else {
-          // Day shift: simple range check
-          isWithinWindow = nowMinutes >= earliestMinutes && nowMinutes <= latestMinutes;
-        }
-
-        if (!isWithinWindow) {
-          const earlyTime = `${String(Math.floor(Math.max(0, earliestMinutes) / 60)).padStart(2, '0')}:${String(Math.max(0, earliestMinutes) % 60).padStart(2, '0')}`;
-          throw ApiError.badRequest(
-            `Check-in not allowed at this time. Your shift "${shift.name}" is ${shift.startTime} – ${shift.endTime}. ` +
-            `You can check in from ${earlyTime} (1 hour before shift start) until the shift ends.`
-          );
         }
       }
     }
 
     const record = await platformPrisma.attendanceRecord.upsert({
-      where: { employeeId_date: { employeeId, date: today } },
+      where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence } },
       create: {
         employeeId,
         date: today,
+        shiftSequence,
         punchIn: now,
         status: 'PRESENT',
         source: 'MOBILE_GPS',
@@ -1448,7 +1495,9 @@ export class ESSController {
       include: { shift: true, location: true },
     });
 
-    res.status(201).json(createSuccessResponse(record, 'Checked in successfully'));
+    res.status(201).json(createSuccessResponse(record, windowResult.warning
+      ? `Checked in successfully. Note: ${windowResult.warning}`
+      : 'Checked in successfully'));
   });
 
   checkOut = asyncHandler(async (req: Request, res: Response) => {
@@ -1472,19 +1521,21 @@ export class ESSController {
     const todayStr = nowCT.toFormat('yyyy-MM-dd');
     const today = new Date(todayStr + 'T00:00:00.000Z');
 
-    // Look for today's record first; for cross-day (night) shifts, also check
-    // yesterday's record (employee checked in on day 1, checking out on day 2)
-    let existing = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date: { employeeId, date: today } },
+    // Look for open (unchecked-out) record: today first, then yesterday (cross-day shifts)
+    // Uses findFirst to support multi-shift (finds the latest open record)
+    let existing = await platformPrisma.attendanceRecord.findFirst({
+      where: { employeeId, date: today, punchOut: null, punchIn: { not: null } },
+      orderBy: { shiftSequence: 'desc' },
     });
     let attendanceDate = today;
 
-    if ((!existing || !existing.punchIn || existing.punchOut) && todayStr) {
+    if (!existing) {
       const yesterdayDT = nowCT.minus({ days: 1 });
       const yesterdayStr = yesterdayDT.toFormat('yyyy-MM-dd');
       const yesterday = new Date(yesterdayStr + 'T00:00:00.000Z');
-      const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
-        where: { employeeId_date: { employeeId, date: yesterday } },
+      const yesterdayRecord = await platformPrisma.attendanceRecord.findFirst({
+        where: { employeeId, date: yesterday, punchOut: null, punchIn: { not: null } },
+        orderBy: { shiftSequence: 'desc' },
       });
       if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
         existing = yesterdayRecord;
@@ -1526,7 +1577,7 @@ export class ESSController {
 
     const evaluationContext: EvaluationContext = {
       employeeId,
-      shiftId: effectiveShiftId,
+      shiftId: effectiveShiftId || null,
       locationId: effectiveLocationId,
       date: attendanceDate,
       isHoliday: !!holiday,
@@ -1691,6 +1742,45 @@ export class ESSController {
       },
       include: { shift: true, location: true },
     });
+
+    // Auto shift mapping: if enabled and no shift assigned, map to best-fit shift
+    if (rules.autoShiftMappingEnabled && !record.shiftId && existing.punchIn) {
+      const mappingResult = await mapShiftToRecord({
+        companyId,
+        employeeId,
+        punchIn: existing.punchIn,
+        punchOut: now,
+        currentShiftId: null,
+        minShiftMatchPercentage: rules.minShiftMatchPercentage,
+        companyTimezone,
+      });
+      if (mappingResult.autoMapped && mappingResult.mappedShiftId) {
+        await platformPrisma.attendanceRecord.update({
+          where: { id: record.id },
+          data: { shiftId: mappingResult.mappedShiftId, isAutoMapped: true },
+        });
+        logger.info(`Auto-mapped shift for employee ${employeeId}: ${mappingResult.reason}`);
+      }
+    }
+
+    // Leave auto-adjustment: if employee had approved leave and worked, adjust leave accordingly
+    if (rules.leaveAutoAdjustmentEnabled) {
+      const adjustResult = await adjustLeaveBasedOnAttendance({
+        companyId,
+        employeeId,
+        date: attendanceDate,
+        workedHours: statusResult.workedHours,
+        fullDayThreshold: policy.fullDayThresholdHours,
+        halfDayThreshold: policy.halfDayThresholdHours,
+        leaveAutoAdjustmentEnabled: rules.leaveAutoAdjustmentEnabled,
+      });
+      if (adjustResult.action !== 'NO_LEAVE') {
+        await platformPrisma.attendanceRecord.update({
+          where: { id: record.id },
+          data: { remarks: [record.remarks, `[Leave Adjustment: ${adjustResult.action}] ${adjustResult.reason}`].filter(Boolean).join(' | ') },
+        });
+      }
+    }
 
     res.json(createSuccessResponse(record, 'Checked out successfully'));
   });
