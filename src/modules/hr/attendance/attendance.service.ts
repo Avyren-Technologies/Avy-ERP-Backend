@@ -1102,6 +1102,7 @@ export class AttendanceService {
         // Capture Requirements
         ...(data.selfieRequired !== undefined && { selfieRequired: data.selfieRequired }),
         ...(data.gpsRequired !== undefined && { gpsRequired: data.gpsRequired }),
+        ...(data.geofenceEnforcementMode !== undefined && { geofenceEnforcementMode: data.geofenceEnforcementMode }),
         ...(data.missingPunchAlert !== undefined && { missingPunchAlert: data.missingPunchAlert }),
 
         updatedBy: userId ?? null,

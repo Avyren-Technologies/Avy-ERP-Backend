@@ -8,6 +8,7 @@ import {
   OTCalculationBasis,
   OvertimeRequestStatus,
   LocationAccuracy,
+  GeofenceEnforcementMode,
 } from '@prisma/client';
 
 const coerceOptionalInt = () => z.coerce.number().int().min(0).optional();
@@ -101,6 +102,7 @@ export const attendanceRulesSchema = z.object({
   // Capture Requirements
   selfieRequired: z.boolean().optional(),
   gpsRequired: z.boolean().optional(),
+  geofenceEnforcementMode: z.nativeEnum(GeofenceEnforcementMode).optional(),
   missingPunchAlert: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   // lateDeductionValue required when lateDeductionType != NONE
