@@ -1661,12 +1661,42 @@ export class ESSService {
       where: { companyId, employeeId, year: currentYear },
       include: {
         leaveType: {
-          select: { id: true, name: true, code: true, category: true },
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            category: true,
+            accrualFrequency: true,
+            encashmentAllowed: true,
+            maxEncashableDays: true,
+          },
         },
       },
     });
 
-    return balances;
+    const enriched = balances.map((b) => ({
+      id: b.id,
+      leaveTypeId: b.leaveType.id,
+      leaveType: b.leaveType.name,
+      code: b.leaveType.code,
+      category: b.leaveType.category,
+      // Balance breakdown
+      openingBalance: Number(b.openingBalance),
+      accrued: Number(b.accrued),
+      taken: Number(b.taken),
+      adjusted: Number(b.adjusted),
+      balance: Number(b.balance),
+      expiresAt: b.expiresAt?.toISOString() ?? null,
+      // Accrual info
+      accrualFrequency: b.leaveType.accrualFrequency ?? null,
+      // Encashment info
+      encashmentAllowed: b.leaveType.encashmentAllowed ?? false,
+      maxEncashableDays: b.leaveType.maxEncashableDays
+        ? Number(b.leaveType.maxEncashableDays)
+        : null,
+    }));
+
+    return enriched;
   }
 
   async getMyAttendance(companyId: string, employeeId: string, month: number, year: number) {
