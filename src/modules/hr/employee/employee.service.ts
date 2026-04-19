@@ -39,7 +39,7 @@ export class EmployeeService {
     const where: any = { companyId };
 
     if (status) {
-      where.status = status;
+      where.status = status.toUpperCase() as any;
     }
     if (departmentId) {
       where.departmentId = departmentId;
