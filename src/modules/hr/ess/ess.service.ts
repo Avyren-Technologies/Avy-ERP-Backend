@@ -1873,6 +1873,22 @@ export class ESSService {
       );
     }
 
+    // A6: Enforce regularization window
+    const rules = await platformPrisma.attendanceRule.findUnique({
+      where: { companyId },
+      select: { regularizationWindowDays: true },
+    });
+    const windowDays = rules?.regularizationWindowDays ?? 7;
+    if (windowDays > 0) {
+      const recordDate = DateTime.fromJSDate(new Date(record.date)).startOf('day');
+      const cutoff = DateTime.now().startOf('day').minus({ days: windowDays });
+      if (recordDate < cutoff) {
+        throw ApiError.badRequest(
+          `Cannot regularize attendance older than ${windowDays} days. The cutoff date is ${cutoff.toISODate()}.`,
+        );
+      }
+    }
+
     // 5. Validate approval workflow exists BEFORE creating the override
     await this.requireWorkflow(companyId, 'ATTENDANCE_REGULARIZATION');
 
