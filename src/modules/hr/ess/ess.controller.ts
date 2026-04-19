@@ -17,6 +17,8 @@ import {
   type ShiftInfo,
 } from '../../../shared/services/attendance-status-resolver.service';
 import { TRIGGER_EVENTS } from '../../../shared/constants/trigger-events';
+import { notificationService } from '../../../core/notifications/notification.service';
+import { logger } from '../../../config/logger';
 import { essOvertimeService } from './ess-overtime.service';
 import {
   claimOvertimeSchema,
@@ -1256,13 +1258,72 @@ export class ESSController {
       }
     }
 
-    // Shift time validation (if employee has a shift assigned)
+    // ── Resolve effective policy for enforcement ──────────────────────
     const employeeForShift = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
-      select: { shiftId: true, locationId: true },
+      select: { shiftId: true, locationId: true, location: { select: { name: true } } },
     });
-
     const effectiveShiftId = shiftId || employeeForShift?.shiftId;
+    const effectiveLocationId2 = locationId || employeeForShift?.locationId;
+
+    const holiday = await platformPrisma.holidayCalendar.findFirst({
+      where: { companyId, date: today },
+      select: { name: true },
+    });
+    const roster = await platformPrisma.roster.findFirst({
+      where: { companyId, isDefault: true },
+      select: { weekOff1: true, weekOff2: true },
+    });
+    const dayOfWeekNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dow = dayOfWeekNames[nowCT.weekday % 7];
+    const isWeekOff = dow === roster?.weekOff1 || dow === roster?.weekOff2;
+
+    const evaluationContext: EvaluationContext = {
+      employeeId,
+      shiftId: effectiveShiftId || null,
+      locationId: effectiveLocationId2 || null,
+      date: today,
+      isHoliday: !!holiday,
+      isWeekOff,
+      ...(holiday?.name && { holidayName: holiday.name }),
+      ...(roster && { rosterPattern: `${roster.weekOff1 ?? ''}${roster.weekOff2 ? '/' + roster.weekOff2 : ''}` }),
+    };
+
+    const { policy } = await resolvePolicy(companyId, evaluationContext);
+
+    // ── Policy Enforcement: Selfie validation (A3) ──
+    if (policy.selfieRequired && !parsed.data.photoUrl) {
+      throw ApiError.badRequest('Selfie photo is required by company policy');
+    }
+
+    // ── Policy Enforcement: GPS validation (A4) ──
+    if (policy.gpsRequired && (latitude == null || longitude == null)) {
+      throw ApiError.badRequest('GPS location is required by company policy');
+    }
+
+    // ── Policy Enforcement: Geofence (A1+A2) ──
+    if (policy.geofenceEnforcementMode !== 'OFF' && geoStatus === 'OUTSIDE_GEOFENCE') {
+      if (policy.geofenceEnforcementMode === 'STRICT') {
+        throw ApiError.forbidden('You must be inside the designated geofence area to check in');
+      }
+      if (policy.geofenceEnforcementMode === 'WARN') {
+        notificationService.dispatch({
+          companyId,
+          triggerEvent: 'GEOFENCE_VIOLATION',
+          entityType: 'AttendanceRecord',
+          entityId: employeeId,
+          tokens: {
+            employee_name: '',
+            date: new Date().toISOString().split('T')[0],
+            action: 'check-in',
+            location_name: employeeForShift?.location?.name ?? 'Unknown',
+          },
+          type: 'ATTENDANCE',
+        }).catch((err: any) => logger.warn('Failed to dispatch geofence violation notification', err));
+      }
+    }
+
+    // Shift time validation (if employee has a shift assigned)
 
     if (effectiveShiftId) {
       const shift = await platformPrisma.companyShift.findUnique({
@@ -1426,7 +1487,7 @@ export class ESSController {
 
     const employee = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
-      select: { shiftId: true, locationId: true },
+      select: { shiftId: true, locationId: true, location: { select: { name: true } } },
     });
     const effectiveShiftId = existing.shiftId ?? employee?.shiftId ?? null;
     const effectiveLocationId = existing.locationId ?? employee?.locationId ?? null;
@@ -1546,6 +1607,38 @@ export class ESSController {
             }
           }
         }
+      }
+    }
+
+    // ── Policy Enforcement: Selfie validation (A3) ──
+    if (policy.selfieRequired && !parsed.data.photoUrl) {
+      throw ApiError.badRequest('Selfie photo is required by company policy');
+    }
+
+    // ── Policy Enforcement: GPS validation (A4) ──
+    if (policy.gpsRequired && (latitude == null || longitude == null)) {
+      throw ApiError.badRequest('GPS location is required by company policy');
+    }
+
+    // ── Policy Enforcement: Geofence (A1+A2) ──
+    if (policy.geofenceEnforcementMode !== 'OFF' && geoStatus === 'OUTSIDE_GEOFENCE') {
+      if (policy.geofenceEnforcementMode === 'STRICT') {
+        throw ApiError.forbidden('You must be inside the designated geofence area to check out');
+      }
+      if (policy.geofenceEnforcementMode === 'WARN') {
+        notificationService.dispatch({
+          companyId,
+          triggerEvent: 'GEOFENCE_VIOLATION',
+          entityType: 'AttendanceRecord',
+          entityId: employeeId,
+          tokens: {
+            employee_name: '',
+            date: new Date().toISOString().split('T')[0],
+            action: 'check-out',
+            location_name: employee?.location?.name ?? 'Unknown',
+          },
+          type: 'ATTENDANCE',
+        }).catch((err: any) => logger.warn('Failed to dispatch geofence violation notification', err));
       }
     }
 

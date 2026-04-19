@@ -46,6 +46,12 @@ export const TRIGGER_EVENTS: readonly TriggerEventOption[] = [
     description: 'Triggered when an employee requests attendance correction',
   },
   {
+    value: 'GEOFENCE_VIOLATION',
+    label: 'Geofence Violation',
+    module: 'Attendance',
+    description: 'Triggered when an employee checks in/out outside the designated geofence (WARN mode)',
+  },
+  {
     value: 'OVERTIME_CLAIM',
     label: 'Overtime Claim',
     module: 'ESS',
