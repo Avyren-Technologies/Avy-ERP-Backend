@@ -52,6 +52,12 @@ export const TRIGGER_EVENTS: readonly TriggerEventOption[] = [
     description: 'Triggered when an employee checks in/out outside the designated geofence (WARN mode)',
   },
   {
+    value: 'MISSING_PUNCH_ALERT',
+    label: 'Missing Punch Alert',
+    module: 'Attendance',
+    description: 'Triggered when an employee has an incomplete punch (check-in without check-out)',
+  },
+  {
     value: 'OVERTIME_CLAIM',
     label: 'Overtime Claim',
     module: 'ESS',
@@ -68,6 +74,12 @@ export const TRIGGER_EVENTS: readonly TriggerEventOption[] = [
     label: 'Compensatory Off Granted',
     module: 'ESS',
     description: 'Triggered when compensatory off leave is credited after OT approval',
+  },
+  {
+    value: 'COMP_OFF_EXPIRED',
+    label: 'Compensatory Off Expired',
+    module: 'Leave',
+    description: 'Triggered when compensatory off leave balance expires',
   },
   {
     value: 'SHIFT_CHANGE',

@@ -12,6 +12,8 @@ import { startVMSCron } from '../workers/vms-cron';
 import { notificationService } from '../core/notifications/notification.service';
 import { notificationCronService } from '../core/notifications/cron/notification-cron.service';
 import { registerHRListeners } from '../shared/events/listeners/hr-listeners';
+import { attendanceCronService } from '../shared/jobs/attendance-cron.service';
+import { compOffExpiryCronService } from '../shared/jobs/compoff-expiry.job';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -57,6 +59,12 @@ async function startServer(): Promise<void> {
 
       // Start VMS cron jobs (auto-checkout, overstay, no-show, pass expiry)
       startVMSCron();
+
+      // Start attendance cron jobs (auto-absent, missing-punch alerts)
+      attendanceCronService.startAll();
+
+      // Start comp-off expiry cron job (daily@1AM)
+      compOffExpiryCronService.startAll();
 
       // Initialize Firebase Admin for push notifications
       notificationService.initFirebase();
