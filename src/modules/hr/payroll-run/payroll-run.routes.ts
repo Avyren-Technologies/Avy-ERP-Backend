@@ -67,6 +67,7 @@ router.get('/payroll-reports/variance', requirePermissions(['hr:read']), control
 
 // ── RED-4: Form 16 & 24Q ────────────────────────────────────────
 router.post('/payroll-reports/form-16', requirePermissions(['hr:create']), controller.generateForm16);
+router.get('/payroll-reports/form-16/:employeeId/pdf', requirePermissions(['hr:read']), controller.downloadForm16PDF);
 router.post('/payroll-reports/form-24q', requirePermissions(['hr:create']), controller.generateForm24Q);
 router.post('/payroll-reports/form-16/bulk-email', requirePermissions(['hr:update']), controller.bulkEmailForm16);
 

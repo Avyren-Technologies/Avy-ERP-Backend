@@ -8,6 +8,7 @@ import { essService } from '../ess/ess.service';
 import { n } from '../../../shared/utils/prisma-helpers';
 import { logger } from '../../../config/logger';
 import { notificationService } from '../../../core/notifications/notification.service';
+import { generateForm16PDF } from './form16-pdf.service';
 
 /** Round to 2 decimal places. */
 function round(v: number): number {
@@ -3221,6 +3222,24 @@ export class PayrollRunService {
       },
       records: form16Records,
     };
+  }
+
+  /**
+   * Generate a Form 16 PDF for a single employee and return the buffer.
+   * Reuses generateForm16() internally, then filters to the requested employee.
+   */
+  async getForm16PDF(companyId: string, financialYear: string, employeeId: string): Promise<{ buffer: Buffer; fileName: string }> {
+    const result = await this.generateForm16(companyId, financialYear);
+    const record = result.records.find((r) => r.employeeId === employeeId);
+    if (!record) {
+      throw ApiError.notFound(`No Form 16 data found for employee ${employeeId} in FY ${financialYear}`);
+    }
+
+    const buffer = await generateForm16PDF(record);
+    const safeName = record.employeeName.replace(/[^a-zA-Z0-9]/g, '_');
+    const fileName = `Form16_${safeName}_${financialYear}.pdf`;
+
+    return { buffer, fileName };
   }
 
   async generateForm24Q(companyId: string, quarter: number, financialYear: string) {

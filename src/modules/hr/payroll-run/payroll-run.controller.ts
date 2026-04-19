@@ -524,6 +524,25 @@ export class PayrollRunController {
     const result = await payrollRunService.bulkEmailForm16(companyId, parsed.data.financialYear);
     res.json(createSuccessResponse(result, 'Form 16 bulk email dispatched'));
   });
+
+  downloadForm16PDF = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { employeeId } = req.params;
+    if (!employeeId) throw ApiError.badRequest('Employee ID param is required');
+
+    const financialYear = req.query.financialYear as string;
+    if (!financialYear || !/^\d{4}-\d{2}$/.test(financialYear)) {
+      throw ApiError.badRequest('financialYear query param required (format: YYYY-YY, e.g. 2025-26)');
+    }
+
+    const { buffer, fileName } = await payrollRunService.getForm16PDF(companyId, financialYear, employeeId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(buffer);
+  });
 }
 
 export const payrollRunController = new PayrollRunController();
