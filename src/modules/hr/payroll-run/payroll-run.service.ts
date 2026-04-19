@@ -1314,7 +1314,11 @@ export class PayrollRunService {
         // VPF is applied on full PF wage base (no ceiling cap) when company has vpfEnabled
         // and employee has a vpfPercentage set.
         if (pfConfig.vpfEnabled && entry.employee.vpfPercentage) {
-          const vpfRate = Number(entry.employee.vpfPercentage);
+          let vpfRate = Number(entry.employee.vpfPercentage);
+          // P8: Apply VPF rate cap if configured
+          if (pfConfig.vpfMaxRate) {
+            vpfRate = Math.min(vpfRate, Number(pfConfig.vpfMaxRate));
+          }
           vpfAmount = round(pfWageBase * vpfRate / 100);
         }
 

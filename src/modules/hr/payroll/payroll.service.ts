@@ -661,6 +661,7 @@ export class PayrollConfigService {
         adminChargeRate: data.adminChargeRate ?? 0.5,
         wageCeiling: data.wageCeiling ?? 15000,
         vpfEnabled: data.vpfEnabled ?? false,
+        vpfMaxRate: data.vpfMaxRate ?? null,
         excludedComponents: data.excludedComponents ?? Prisma.JsonNull,
       },
       update: {
@@ -671,6 +672,7 @@ export class PayrollConfigService {
         ...(data.adminChargeRate !== undefined && { adminChargeRate: data.adminChargeRate }),
         ...(data.wageCeiling !== undefined && { wageCeiling: data.wageCeiling }),
         ...(data.vpfEnabled !== undefined && { vpfEnabled: data.vpfEnabled }),
+        ...(data.vpfMaxRate !== undefined && { vpfMaxRate: data.vpfMaxRate ?? null }),
         ...(data.excludedComponents !== undefined && { excludedComponents: data.excludedComponents ?? Prisma.JsonNull }),
       },
     });

@@ -72,6 +72,7 @@ export const pfConfigSchema = z.object({
   adminChargeRate: z.number().min(0).max(100).optional(),
   wageCeiling: z.number().min(0).optional(),
   vpfEnabled: z.boolean().optional(),
+  vpfMaxRate: z.number().min(0).max(100).nullable().optional(),
   excludedComponents: z.array(z.string()).optional(),
 });
 
