@@ -39,6 +39,7 @@ export interface ResolvedPolicy {
   gpsRequired: boolean;
   punchMode: string; // PunchMode enum value
   workingHoursRounding: string; // RoundingStrategy enum value
+  geofenceEnforcementMode: string; // 'OFF' | 'WARN' | 'STRICT'
   breakDeductionMinutes: number;
 }
 
@@ -209,6 +210,11 @@ export async function resolvePolicy(
     workingHoursRounding: resolve('workingHoursRounding', trace,
       { value: rules.workingHoursRounding, label: 'ATTENDANCE_RULE' },
       { value: SYSTEM_DEFAULTS.workingHoursRounding, label: 'SYSTEM_DEFAULT' },
+    ),
+
+    geofenceEnforcementMode: resolve('geofenceEnforcementMode', trace,
+      { value: rules.geofenceEnforcementMode, label: 'ATTENDANCE_RULE' },
+      { value: 'OFF' as const, label: 'SYSTEM_DEFAULT' },
     ),
 
     // Break deduction is calculated below
