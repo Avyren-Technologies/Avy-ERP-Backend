@@ -829,7 +829,7 @@ export class PayrollRunService {
             for (const req of empOtRequests) {
               const d = new Date(req.date);
               // ISO week via Luxon
-              const weekKey = DateTime.fromJSDate(d).toISOWeekDate().slice(0, 8); // e.g., "2026-W16"
+              const weekKey = DateTime.fromJSDate(d).toISOWeekDate()!.slice(0, 8); // e.g., "2026-W16"
               if (!byWeek.has(weekKey)) byWeek.set(weekKey, []);
               byWeek.get(weekKey)!.push(req);
             }
@@ -940,9 +940,9 @@ export class PayrollRunService {
           for (const key of Object.keys(earnings)) {
             earnings[key] = 0;
           }
-        } else if (hold.holdType === 'PARTIAL' && hold.holdComponents) {
+        } else if (hold.holdType === 'PARTIAL' && hold.heldComponents) {
           // PARTIAL hold: zero only held components
-          const heldComponents = hold.holdComponents as string[];
+          const heldComponents = hold.heldComponents as string[];
           for (const code of heldComponents) {
             if (earnings[code] !== undefined) {
               grossEarnings -= Number(earnings[code]);
