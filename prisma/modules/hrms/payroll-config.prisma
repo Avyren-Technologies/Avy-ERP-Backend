@@ -82,6 +82,7 @@ model PFConfig {
   adminChargeRate    Decimal  @default(0.5) @db.Decimal(5, 2)
   wageCeiling        Decimal  @default(15000) @db.Decimal(15, 2)
   vpfEnabled         Boolean  @default(false)
+  vpfMaxRate         Decimal?  @db.Decimal(5, 2)
   excludedComponents Json? // string[] of component codes excluded from PF wage
   companyId          String   @unique
   company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)

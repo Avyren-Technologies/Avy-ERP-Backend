@@ -54,6 +54,7 @@ model PayrollEntry {
   lopDays               Decimal?   @db.Decimal(5, 1)
   overtimeHours         Decimal?   @db.Decimal(5, 1)
   overtimeAmount        Decimal?   @db.Decimal(15, 2)
+  arrearsAmount         Decimal?   @db.Decimal(15, 2)
   pfEmployee            Decimal?   @db.Decimal(15, 2)
   pfEmployer            Decimal?   @db.Decimal(15, 2)
   vpfAmount             Decimal?   @db.Decimal(15, 2)
@@ -105,6 +106,7 @@ model Payslip {
   lwfEmployer         Decimal? @db.Decimal(15, 2)
   loanDeduction       Decimal? @db.Decimal(15, 2)
   overtimeAmount      Decimal? @db.Decimal(15, 2)
+  arrearsAmount       Decimal? @db.Decimal(15, 2)
   workingDays         Int?
   presentDays         Decimal? @db.Decimal(5, 1)
   lopDays             Decimal? @db.Decimal(5, 1)
