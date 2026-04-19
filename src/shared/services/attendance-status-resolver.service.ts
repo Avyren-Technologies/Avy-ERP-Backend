@@ -33,6 +33,7 @@ import { DateTime } from 'luxon';
 import { logger } from '../../config/logger';
 import { parseInCompanyTimezone } from '../utils/timezone';
 import type { ResolvedPolicy, EvaluationContext } from './policy-resolver.service';
+import { validatePunchSequence } from './punch-validator.service';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -205,9 +206,50 @@ export function resolveAttendanceStatus(
     });
   }
 
+  // ── A8: Apply punch mode validation ──
+
+  let effectivePunchIn = punchIn;
+  let effectivePunchOut = punchOut;
+  let precomputedWorkedMinutes: number | null = null;
+
+  if (punchIn && punchOut && policy.punchMode !== 'FIRST_LAST') {
+    const punches = [
+      { time: punchIn, direction: 'IN' as const },
+      { time: punchOut, direction: 'OUT' as const },
+    ];
+
+    // For SHIFT_BASED mode, provide shift start/end as Date objects
+    let shiftStartDate: Date | null = null;
+    let shiftEndDate: Date | null = null;
+    if (shift) {
+      const dateStr = DateTime.fromJSDate(context.date).toFormat('yyyy-MM-dd');
+      const parsed = parseShiftTimes(dateStr, shift, companyTimezone);
+      shiftStartDate = parsed.shiftStart.toJSDate();
+      shiftEndDate = parsed.shiftEnd.toJSDate();
+    }
+
+    const validated = validatePunchSequence(
+      punches,
+      policy.punchMode,
+      shiftStartDate,
+      shiftEndDate,
+    );
+
+    if (validated.resolvedIn) effectivePunchIn = validated.resolvedIn;
+    if (validated.resolvedOut) effectivePunchOut = validated.resolvedOut;
+
+    // For EVERY_PAIR mode, use the precomputed totalWorkedMinutes (sum of pair durations)
+    // instead of simple punchOut - punchIn span
+    if (policy.punchMode === 'EVERY_PAIR' && validated.totalWorkedMinutes != null) {
+      precomputedWorkedMinutes = validated.totalWorkedMinutes;
+    }
+  }
+
   // ── Step 3: Calculate raw worked minutes ──
 
-  const rawWorkedMinutes = Math.max(0, (punchOut.getTime() - punchIn.getTime()) / (1000 * 60));
+  const rawWorkedMinutes = precomputedWorkedMinutes != null
+    ? precomputedWorkedMinutes
+    : Math.max(0, (effectivePunchOut.getTime() - effectivePunchIn.getTime()) / (1000 * 60));
 
   // ── Step 4: Deduct unpaid breaks -> net worked minutes ──
 
@@ -227,7 +269,7 @@ export function resolveAttendanceStatus(
     const dateStr = DateTime.fromJSDate(context.date).toFormat('yyyy-MM-dd');
     const { shiftStart } = parseShiftTimes(dateStr, shift, companyTimezone);
 
-    const punchInDt = DateTime.fromJSDate(punchIn).setZone(companyTimezone);
+    const punchInDt = DateTime.fromJSDate(effectivePunchIn).setZone(companyTimezone);
     const delayMinutes = punchInDt.diff(shiftStart, 'minutes').minutes;
 
     if (delayMinutes > policy.gracePeriodMinutes) {
@@ -272,7 +314,7 @@ export function resolveAttendanceStatus(
     const dateStr = DateTime.fromJSDate(context.date).toFormat('yyyy-MM-dd');
     const { shiftEnd } = parseShiftTimes(dateStr, shift, companyTimezone);
 
-    const punchOutDt = DateTime.fromJSDate(punchOut).setZone(companyTimezone);
+    const punchOutDt = DateTime.fromJSDate(effectivePunchOut).setZone(companyTimezone);
     const earlyByMinutes = shiftEnd.diff(punchOutDt, 'minutes').minutes;
 
     if (earlyByMinutes > policy.earlyExitToleranceMinutes) {
