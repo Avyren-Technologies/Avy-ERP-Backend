@@ -74,6 +74,7 @@ router.get('/ess/dashboard', requirePermissions(['hr:read', 'ess:view-profile'])
 // ── ESS Self-Service (Employee-facing, feature gated) ───────────────
 router.get('/ess/my-profile', requireESSFeature('profileUpdate'), requirePermissions(['hr:read', 'ess:view-profile']), controller.getMyProfile);
 router.get('/ess/my-payslips', requireESSFeature('viewPayslips'), requirePermissions(['hr:read', 'ess:view-payslips']), controller.getMyPayslips);
+router.get('/ess/my-payslips/:id/detail', requireESSFeature('viewPayslips'), requirePermissions(['hr:read', 'ess:view-payslips']), controller.getPayslipDetail);
 router.get('/ess/my-leave-balance', requireESSFeature('leaveBalanceView'), requirePermissions(['hr:read', 'ess:view-leave']), controller.getMyLeaveBalance);
 router.get('/ess/my-attendance', requireESSFeature('attendanceView'), requirePermissions(['hr:read', 'ess:view-attendance']), controller.getMyAttendance);
 router.get('/ess/my-declarations', requireESSFeature('itDeclaration'), requirePermissions(['hr:read', 'ess:it-declaration']), controller.getMyDeclarations);

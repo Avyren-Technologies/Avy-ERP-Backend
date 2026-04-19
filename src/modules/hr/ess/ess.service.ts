@@ -1653,6 +1653,60 @@ export class ESSService {
     return payslips;
   }
 
+  async getPayslipDetail(companyId: string, employeeId: string, payslipId: string) {
+    const payslip = await platformPrisma.payslip.findUnique({
+      where: { id: payslipId },
+      include: {
+        payrollRun: {
+          select: { id: true, month: true, year: true, status: true },
+        },
+      },
+    });
+
+    if (!payslip || payslip.companyId !== companyId || payslip.employeeId !== employeeId) {
+      throw ApiError.notFound('Payslip not found');
+    }
+
+    // E10: YTD totals
+    const fyStartMonth = 4; // April
+    const fyStartYear = payslip.month >= 4 ? payslip.year : payslip.year - 1;
+
+    const ytdPayslips = await platformPrisma.payslip.findMany({
+      where: {
+        employeeId: payslip.employeeId,
+        companyId,
+        OR: [
+          { year: fyStartYear, month: { gte: fyStartMonth } },
+          { year: fyStartYear + 1, month: { lt: fyStartMonth } },
+        ],
+      },
+      select: { grossEarnings: true, totalDeductions: true, netPay: true, tdsAmount: true },
+    });
+
+    const ytd = {
+      fyLabel: `${fyStartYear}-${(fyStartYear + 1).toString().slice(2)}`,
+      grossEarnings: ytdPayslips.reduce((s, p) => s + Number(p.grossEarnings ?? 0), 0),
+      totalDeductions: ytdPayslips.reduce((s, p) => s + Number(p.totalDeductions ?? 0), 0),
+      netPay: ytdPayslips.reduce((s, p) => s + Number(p.netPay ?? 0), 0),
+      tdsAmount: ytdPayslips.reduce((s, p) => s + Number(p.tdsAmount ?? 0), 0),
+    };
+
+    // E11: Leave balance
+    const leaveBalances = await platformPrisma.leaveBalance.findMany({
+      where: { employeeId: payslip.employeeId, companyId, year: payslip.year },
+      include: { leaveType: { select: { name: true, code: true } } },
+    });
+    const leaveBalance = leaveBalances.map(b => ({
+      type: b.leaveType.name,
+      code: b.leaveType.code,
+      balance: Number(b.balance),
+      used: Number(b.taken),
+      total: Number(b.openingBalance) + Number(b.accrued) + Number(b.adjusted),
+    }));
+
+    return { ...payslip, ytd, leaveBalance };
+  }
+
   async getMyLeaveBalance(companyId: string, employeeId: string) {
     const companySettings = await getCachedCompanySettings(companyId);
     const companyTimezone = companySettings?.timezone ?? 'Asia/Kolkata';

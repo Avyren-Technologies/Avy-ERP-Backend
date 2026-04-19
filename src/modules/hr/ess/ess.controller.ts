@@ -606,6 +606,22 @@ export class ESSController {
     res.json(createSuccessResponse(payslips, 'Payslips retrieved'));
   });
 
+  getPayslipDetail = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const payslipId = req.params.id;
+    if (!payslipId) throw ApiError.badRequest('Payslip ID is required');
+
+    const employeeId = await this.resolveEmployeeId(req);
+    if (!employeeId) {
+      res.json(createSuccessResponse(null, ESSController.NOT_LINKED_MSG));
+      return;
+    }
+    const detail = await essService.getPayslipDetail(companyId, employeeId, payslipId);
+    res.json(createSuccessResponse(detail, 'Payslip detail retrieved'));
+  });
+
   getMyLeaveBalance = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
