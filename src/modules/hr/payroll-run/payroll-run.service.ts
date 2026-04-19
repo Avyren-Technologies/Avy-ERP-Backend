@@ -498,6 +498,17 @@ export class PayrollRunService {
       otRequestsByEmployee.get(req.employeeId)!.push(req);
     }
 
+    // P3: Batch-fetch unpaid arrear entries
+    const allArrears = await platformPrisma.arrearEntry.findMany({
+      where: { companyId, payrollRunId: null },
+      select: { id: true, employeeId: true, totalAmount: true, components: true, forMonth: true, forYear: true },
+    });
+    const arrearsByEmployee = new Map<string, typeof allArrears>();
+    for (const arr of allArrears) {
+      if (!arrearsByEmployee.has(arr.employeeId)) arrearsByEmployee.set(arr.employeeId, []);
+      arrearsByEmployee.get(arr.employeeId)!.push(arr);
+    }
+
     // C1: Batch-fetch ALL approved leave requests for the month
     const allLeaveRequests = await platformPrisma.leaveRequest.findMany({
       where: {
@@ -890,6 +901,17 @@ export class PayrollRunService {
         grossEarnings += overtimeAmount;
       }
 
+      // P3: Add arrears to gross earnings
+      let arrearsAmount = 0;
+      const empArrears = arrearsByEmployee.get(emp.id) ?? [];
+      for (const arrear of empArrears) {
+        arrearsAmount += Number(arrear.totalAmount);
+      }
+      if (arrearsAmount > 0) {
+        grossEarnings += arrearsAmount;
+        earnings['ARREARS'] = arrearsAmount;
+      }
+
       // Loan EMI deductions
       let loanDeduction = 0;
       for (const loan of emp.loans) {
@@ -902,12 +924,33 @@ export class PayrollRunService {
       const deductions: Record<string, number> = {};
       let totalDed = loanDeduction;
 
-      // Check salary hold
+      // P6: Salary hold — reduce earnings
       const hold = holdMap.get(emp.id);
       let isException = !!hold;
       let exceptionNote = hold
         ? `Salary ${hold.holdType} hold: ${hold.reason}`
         : undefined;
+
+      if (hold) {
+        if (hold.holdType === 'FULL') {
+          // FULL hold: zero all earnings
+          grossEarnings = 0;
+          overtimeAmount = 0;
+          arrearsAmount = 0;
+          for (const key of Object.keys(earnings)) {
+            earnings[key] = 0;
+          }
+        } else if (hold.holdType === 'PARTIAL' && hold.holdComponents) {
+          // PARTIAL hold: zero only held components
+          const heldComponents = hold.holdComponents as string[];
+          for (const code of heldComponents) {
+            if (earnings[code] !== undefined) {
+              grossEarnings -= Number(earnings[code]);
+              earnings[code] = 0;
+            }
+          }
+        }
+      }
 
       // ORA-3: Apply salary rounding rule
       const applyRounding = (value: number): number => {
@@ -960,6 +1003,7 @@ export class PayrollRunService {
         lopDays,
         overtimeHours: otHours,
         overtimeAmount,
+        arrearsAmount: arrearsAmount > 0 ? arrearsAmount : null,
         loanDeduction,
         variancePercent,
         isException: isException || (variancePercent !== null && Math.abs(variancePercent) > 10),
@@ -1021,13 +1065,15 @@ export class PayrollRunService {
     const run = await this.getRunAndValidateStatus(companyId, runId, 'COMPUTED');
 
     // Fetch all configs upfront
-    const [pfConfig, esiConfig, ptConfigs, lwfConfigs, taxConfig] = await Promise.all([
+    const [pfConfig, esiConfig, ptConfigs, lwfConfigs, taxConfig, gratuityConfig] = await Promise.all([
       platformPrisma.pFConfig.findUnique({ where: { companyId } }),
       platformPrisma.eSIConfig.findUnique({ where: { companyId } }),
       platformPrisma.pTConfig.findMany({ where: { companyId } }),
       platformPrisma.lWFConfig.findMany({ where: { companyId } }),
       // C3: Fetch TaxConfig ONCE outside the loop
       platformPrisma.taxConfig.findUnique({ where: { companyId } }),
+      // P1: Fetch GratuityConfig for monthly provision
+      platformPrisma.gratuityConfig.findUnique({ where: { companyId } }),
     ]);
 
     // C4: Fetch salary components with pfInclusion ONCE before the loop
@@ -1214,6 +1260,7 @@ export class PayrollRunService {
           select: {
             id: true,
             vpfPercentage: true,
+            joiningDate: true,
             employeeType: { select: { pfApplicable: true, esiApplicable: true, ptApplicable: true } },
             location: { select: { state: true } },
           },
@@ -1415,6 +1462,15 @@ export class PayrollRunService {
         }
       }
 
+      // P7: Section 87A rebate (applied before surcharge and cess)
+      let rebate87A = 0;
+      if (empRegime === 'NEW' && taxableIncome <= 1200000) {
+        rebate87A = Math.min(annualTax, 60000);
+      } else if (empRegime === 'OLD' && taxableIncome <= 500000) {
+        rebate87A = Math.min(annualTax, 12500);
+      }
+      annualTax = Math.max(0, annualTax - rebate87A);
+
       // Apply surcharge for high earners (before cess)
       const surchargeRates = taxConfig.surchargeRates as Array<{ threshold: number; rate: number }> | null;
       if (surchargeRates && Array.isArray(surchargeRates) && surchargeRates.length > 0) {
@@ -1486,6 +1542,25 @@ export class PayrollRunService {
       }
       if (esiEmployer > 0) employerContributions.ESI_EMPLOYER = esiEmployer;
       if (lwfEmployer > 0) employerContributions.LWF_EMPLOYER = lwfEmployer;
+
+      // P1: Gratuity monthly provision (employer contribution)
+      if (gratuityConfig?.provisionMethod === 'MONTHLY') {
+        const joiningDate = entry.employee.joiningDate;
+        if (joiningDate) {
+          const yearsOfService = DateTime.now().diff(DateTime.fromJSDate(new Date(joiningDate)), 'years').years;
+          const effectiveYears = Math.max(yearsOfService, 1);
+          // Extract basic salary from earnings
+          const basicAmount = Object.entries(earningsObj).find(([code]) =>
+            code.toLowerCase().includes('basic')
+          )?.[1] ?? 0;
+          if (basicAmount > 0) {
+            const annualGratuity = (basicAmount * 15 * effectiveYears) / 26;
+            const cappedGratuity = Math.min(annualGratuity, Number(gratuityConfig.maxAmount));
+            const monthlyGratuityProvision = round(cappedGratuity / 12);
+            employerContributions['GRATUITY_PROVISION'] = monthlyGratuityProvision;
+          }
+        }
+      }
 
       // M5: Collect updates instead of individual queries
       entryUpdates.push({
@@ -1564,6 +1639,19 @@ export class PayrollRunService {
         approvedAt: new Date(),
       },
     });
+
+    // P3: Mark arrears as settled
+    const entriesWithArrears = await platformPrisma.payrollEntry.findMany({
+      where: { payrollRunId: run.id, arrearsAmount: { not: null, gt: 0 } },
+      select: { employeeId: true },
+    });
+    const arrearEmployeeIds = entriesWithArrears.map(e => e.employeeId);
+    if (arrearEmployeeIds.length > 0) {
+      await platformPrisma.arrearEntry.updateMany({
+        where: { companyId, employeeId: { in: arrearEmployeeIds }, payrollRunId: null },
+        data: { payrollRunId: run.id },
+      });
+    }
 
     return updatedRun;
   }
@@ -1911,6 +1999,7 @@ export class PayrollRunService {
       lwfEmployer: e.lwfEmployer !== null ? Number(e.lwfEmployer) : null,
       loanDeduction: e.loanDeduction !== null ? Number(e.loanDeduction) : null,
       overtimeAmount: e.overtimeAmount !== null ? Number(e.overtimeAmount) : null,
+      arrearsAmount: e.arrearsAmount !== null ? Number(e.arrearsAmount) : null,
       workingDays: e.workingDays !== null ? Number(e.workingDays) : null,
       presentDays: e.presentDays !== null ? Number(e.presentDays) : null,
       lopDays: e.lopDays !== null ? Number(e.lopDays) : null,
