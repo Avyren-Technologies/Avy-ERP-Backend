@@ -1277,7 +1277,7 @@ export class ESSController {
     // ── Resolve effective policy for enforcement ──────────────────────
     const employeeForShift = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
-      select: { shiftId: true, locationId: true, location: { select: { name: true } } },
+      select: { firstName: true, lastName: true, shiftId: true, locationId: true, location: { select: { name: true } } },
     });
     const effectiveShiftId = shiftId || employeeForShift?.shiftId;
     const effectiveLocationId2 = locationId || employeeForShift?.locationId;
@@ -1329,7 +1329,7 @@ export class ESSController {
           entityType: 'AttendanceRecord',
           entityId: employeeId,
           tokens: {
-            employee_name: '',
+            employee_name: `${employeeForShift?.firstName ?? ''} ${employeeForShift?.lastName ?? ''}`.trim() || 'Employee',
             date: new Date().toISOString().split('T')[0],
             action: 'check-in',
             location_name: employeeForShift?.location?.name ?? 'Unknown',
@@ -1503,7 +1503,7 @@ export class ESSController {
 
     const employee = await platformPrisma.employee.findUnique({
       where: { id: employeeId },
-      select: { shiftId: true, locationId: true, location: { select: { name: true } } },
+      select: { firstName: true, lastName: true, shiftId: true, locationId: true, location: { select: { name: true } } },
     });
     const effectiveShiftId = existing.shiftId ?? employee?.shiftId ?? null;
     const effectiveLocationId = existing.locationId ?? employee?.locationId ?? null;
@@ -1648,7 +1648,7 @@ export class ESSController {
           entityType: 'AttendanceRecord',
           entityId: employeeId,
           tokens: {
-            employee_name: '',
+            employee_name: `${employee?.firstName ?? ''} ${employee?.lastName ?? ''}`.trim() || 'Employee',
             date: new Date().toISOString().split('T')[0],
             action: 'check-out',
             location_name: employee?.location?.name ?? 'Unknown',

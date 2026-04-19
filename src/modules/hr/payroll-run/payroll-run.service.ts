@@ -1554,12 +1554,23 @@ export class PayrollRunService {
         if (joiningDate) {
           const yearsOfService = DateTime.now().diff(DateTime.fromJSDate(new Date(joiningDate)), 'years').years;
           const effectiveYears = Math.max(yearsOfService, 1);
-          // Extract basic salary from earnings
+          // C1: Respect gratuityConfig.baseSalary — "Basic" or "Basic + DA"
           const basicAmount = Object.entries(earningsObj).find(([code]) =>
+            code.toUpperCase() === 'BASIC'
+          )?.[1] ?? Object.entries(earningsObj).find(([code]) =>
             code.toLowerCase().includes('basic')
           )?.[1] ?? 0;
-          if (basicAmount > 0) {
-            const annualGratuity = (basicAmount * 15 * effectiveYears) / 26;
+          let gratuityBase = basicAmount;
+          if (gratuityConfig.baseSalary === 'Basic + DA') {
+            const daAmount = Object.entries(earningsObj).find(([code]) =>
+              code.toUpperCase() === 'DA'
+            )?.[1] ?? Object.entries(earningsObj).find(([code]) =>
+              code.toLowerCase().includes('dearness')
+            )?.[1] ?? 0;
+            gratuityBase = basicAmount + daAmount;
+          }
+          if (gratuityBase > 0) {
+            const annualGratuity = (gratuityBase * 15 * effectiveYears) / 26;
             const cappedGratuity = Math.min(annualGratuity, Number(gratuityConfig.maxAmount));
             const monthlyGratuityProvision = round(cappedGratuity / 12);
             employerContributions['GRATUITY_PROVISION'] = monthlyGratuityProvision;
