@@ -138,7 +138,8 @@ model AttendanceRule {
 
   // ── Capture Requirements (defaults — location/shift can override) ──
   selfieRequired    Boolean @default(false)
-  gpsRequired       Boolean @default(false)
+  gpsRequired            Boolean                @default(false)
+  geofenceEnforcementMode GeofenceEnforcementMode @default(OFF)
   missingPunchAlert Boolean @default(true)
 
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -373,6 +374,12 @@ enum OTMultiplierSource {
 enum OvertimeRequestSource {
   AUTO
   MANUAL
+}
+
+enum GeofenceEnforcementMode {
+  OFF
+  WARN
+  STRICT
 }
 
 enum HolidayType {
