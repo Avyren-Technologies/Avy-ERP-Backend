@@ -947,9 +947,10 @@ export class LeaveService {
 
       await platformPrisma.attendanceRecord.upsert({
         where: {
-          employeeId_date: {
+          employeeId_date_shiftSequence: {
             employeeId: request.employeeId,
             date: dateOnly,
+            shiftSequence: 1,
           },
         },
         create: {

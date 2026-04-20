@@ -64,6 +64,23 @@ export const SYSTEM_DEFAULTS = {
 
   // ── Day Boundary ──
   dayBoundaryTime: '00:00',
+
+  // ── Attendance Mode & Flexibility ──
+  attendanceMode: 'SHIFT_STRICT' as const,
+  leaveCheckInMode: 'STRICT' as const,
+  leaveAutoAdjustmentEnabled: true,
+
+  // ── Multiple Shifts ──
+  multipleShiftsPerDayEnabled: false,
+
+  // ── Auto Shift Mapping ──
+  autoShiftMappingEnabled: false,
+  shiftMappingStrategy: 'BEST_FIT_HOURS' as const,
+  minShiftMatchPercentage: 50,
+
+  // ── Weekly Review ──
+  weeklyReviewEnabled: false,
+  weeklyReviewRemindersEnabled: false,
 } as const;
 
 // ─── Industry Template Types ─────────────────────────────────────────────────
@@ -149,6 +166,21 @@ interface AttendanceRuleDefaults {
   selfieRequired?: boolean;
   gpsRequired?: boolean;
   missingPunchAlert?: boolean;
+  // Attendance Mode & Flexibility
+  attendanceMode?: 'SHIFT_STRICT' | 'SHIFT_RELAXED' | 'FULLY_FLEXIBLE';
+  leaveCheckInMode?: 'STRICT' | 'ALLOW_WITHIN_WINDOW' | 'ALLOW_TILL_SHIFT_END' | 'FULLY_FLEXIBLE';
+  leaveAutoAdjustmentEnabled?: boolean;
+  // Multiple Shifts
+  multipleShiftsPerDayEnabled?: boolean;
+  minGapBetweenShiftsMinutes?: number | null;
+  maxShiftsPerDay?: number | null;
+  // Auto Shift Mapping
+  autoShiftMappingEnabled?: boolean;
+  shiftMappingStrategy?: 'BEST_FIT_HOURS';
+  minShiftMatchPercentage?: number;
+  // Weekly Review
+  weeklyReviewEnabled?: boolean;
+  weeklyReviewRemindersEnabled?: boolean;
 }
 
 interface OvertimeRuleDefaults {

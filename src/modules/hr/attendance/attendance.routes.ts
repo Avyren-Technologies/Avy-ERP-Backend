@@ -33,6 +33,13 @@ router.get('/attendance/overrides', requirePermissions(['hr:read']), controller.
 router.post('/attendance/overrides', requirePermissions(['hr:create']), controller.createOverride);
 router.patch('/attendance/overrides/:id', requirePermissions(['hr:update']), controller.processOverride);
 
+// ── Weekly Review ──────────────────────────────────────────────────────
+router.get('/attendance/weekly-review', requirePermissions(['hr:read']), controller.getWeeklyReview);
+router.get('/attendance/weekly-review/summary', requirePermissions(['hr:read']), controller.getWeeklyReviewSummary);
+router.patch('/attendance/weekly-review/:id/remap-shift', requirePermissions(['hr:update']), controller.remapShift);
+router.patch('/attendance/weekly-review/:id/edit-punches', requirePermissions(['hr:update']), controller.editPunches);
+router.patch('/attendance/weekly-review/mark-reviewed', requirePermissions(['hr:update']), controller.markReviewed);
+
 // ── Attendance by ID (must be last to avoid catching named routes) ────
 router.get('/attendance/:id', requirePermissions(['hr:read']), controller.getRecord);
 router.patch('/attendance/:id', requirePermissions(['hr:update']), controller.updateRecord);

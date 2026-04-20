@@ -9,6 +9,9 @@ import {
   OvertimeRequestStatus,
   LocationAccuracy,
   GeofenceEnforcementMode,
+  AttendanceMode,
+  LeaveCheckInMode,
+  ShiftMappingStrategy,
 } from '@prisma/client';
 
 const coerceOptionalInt = () => z.coerce.number().int().min(0).optional();
@@ -104,6 +107,28 @@ export const attendanceRulesSchema = z.object({
   gpsRequired: z.boolean().optional(),
   geofenceEnforcementMode: z.nativeEnum(GeofenceEnforcementMode).optional(),
   missingPunchAlert: z.boolean().optional(),
+
+  // Attendance Mode & Flexibility
+  attendanceMode: z.nativeEnum(AttendanceMode).optional(),
+  leaveCheckInMode: z.nativeEnum(LeaveCheckInMode).optional(),
+  leaveAutoAdjustmentEnabled: z.boolean().optional(),
+
+  // Multiple Shifts Per Day
+  multipleShiftsPerDayEnabled: z.boolean().optional(),
+  minGapBetweenShiftsMinutes: coerceOptionalNullableNumber(0),
+  maxShiftsPerDay: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : v),
+    z.coerce.number().int().min(2).max(10).nullable().optional(),
+  ),
+
+  // Auto Shift Mapping
+  autoShiftMappingEnabled: z.boolean().optional(),
+  shiftMappingStrategy: z.nativeEnum(ShiftMappingStrategy).optional(),
+  minShiftMatchPercentage: coerceOptionalNumberInRange(0, 100),
+
+  // Weekly Review
+  weeklyReviewEnabled: z.boolean().optional(),
+  weeklyReviewRemindersEnabled: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   // lateDeductionValue required when lateDeductionType != NONE
   if (data.lateDeductionType && data.lateDeductionType !== 'NONE' && (data.lateDeductionValue === undefined || data.lateDeductionValue === null)) {
@@ -282,4 +307,29 @@ export const approveOvertimeRequestSchema = z.object({
 
 export const rejectOvertimeRequestSchema = z.object({
   approvalNotes: z.string().min(1, 'Rejection reason is required'),
+});
+
+// ── Weekly Review ────────────────────────────────────────────────────
+
+export const weeklyReviewQuerySchema = z.object({
+  weekStart: z.string().min(1, 'Week start date is required'),
+  weekEnd: z.string().min(1, 'Week end date is required'),
+  departmentId: z.string().optional(),
+  flag: z.enum(['MISSING_PUNCH', 'AUTO_MAPPED', 'WORKED_ON_LEAVE', 'LATE_BEYOND_THRESHOLD', 'MULTIPLE_SHIFT_ANOMALY', 'OT_ANOMALY']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const remapShiftSchema = z.object({
+  shiftId: z.string().min(1, 'Shift ID is required'),
+});
+
+export const editPunchesSchema = z.object({
+  punchIn: z.string().optional(),
+  punchOut: z.string().optional(),
+  reason: z.string().min(1, 'Reason is required'),
+});
+
+export const markReviewedSchema = z.object({
+  recordIds: z.array(z.string().min(1)).min(1, 'At least one record ID is required'),
 });

@@ -1932,12 +1932,42 @@ export class ESSService {
       throw ApiError.badRequest('Attendance regularization is not enabled for your company');
     }
 
-    // 3. Find attendance record for the date (must belong to this employee)
-    const record = await platformPrisma.attendanceRecord.findUnique({
-      where: { id: data.attendanceRecordId },
-    });
-    if (!record || record.companyId !== companyId || record.employeeId !== employeeId) {
-      throw ApiError.badRequest('Attendance record not found or does not belong to this employee');
+    // 3. Resolve the attendance record — either by ID (existing record) or by
+    //    employeeId+date composite key (absent day with no record yet).
+    let record: Awaited<ReturnType<typeof platformPrisma.attendanceRecord.findUnique>>;
+
+    if (data.attendanceRecordId) {
+      // Existing record — look up directly by primary key
+      record = await platformPrisma.attendanceRecord.findUnique({
+        where: { id: data.attendanceRecordId },
+      });
+      if (!record || record.companyId !== companyId || record.employeeId !== employeeId) {
+        throw ApiError.badRequest('Attendance record not found or does not belong to this employee');
+      }
+    } else if (data.date) {
+      // No record exists yet (fully absent day) — look up by composite key or create a placeholder.
+      // The schema @@unique is [employeeId, date, shiftSequence], so use the correct Prisma key name.
+      const dateObj = new Date(data.date);
+      record = await platformPrisma.attendanceRecord.findUnique({
+        where: { employeeId_date_shiftSequence: { employeeId, date: dateObj, shiftSequence: 1 } },
+      });
+      if (record && (record.companyId !== companyId || record.employeeId !== employeeId)) {
+        throw ApiError.badRequest('Attendance record does not belong to this employee');
+      }
+      if (!record) {
+        // Create a minimal ABSENT placeholder so the override has something to link to
+        record = await platformPrisma.attendanceRecord.create({
+          data: {
+            companyId,
+            employeeId,
+            date: dateObj,
+            status: 'ABSENT',
+            shiftSequence: 1,
+          },
+        });
+      }
+    } else {
+      throw ApiError.badRequest('Either attendanceRecordId or date is required');
     }
 
     // 4. Check payroll lock (payrollRun for that month must be DRAFT or not exist)
@@ -1976,11 +2006,13 @@ export class ESSService {
     // 5. Validate approval workflow exists BEFORE creating the override
     await this.requireWorkflow(companyId, 'ATTENDANCE_REGULARIZATION');
 
-    // 6. Create AttendanceOverride with requestedBy = employeeId, status = PENDING
+    // 6. Create AttendanceOverride with requestedBy = employeeId, status = PENDING.
+    //    Always use the resolved record.id — data.attendanceRecordId may be undefined
+    //    when the request came in with only a date (absent day path).
     const override = await platformPrisma.attendanceOverride.create({
       data: {
         companyId,
-        attendanceRecordId: data.attendanceRecordId,
+        attendanceRecordId: record!.id,
         issueType: data.issueType,
         correctedPunchIn: data.correctedPunchIn ? new Date(data.correctedPunchIn) : null,
         correctedPunchOut: data.correctedPunchOut ? new Date(data.correctedPunchOut) : null,
@@ -2438,7 +2470,7 @@ export class ESSService {
     const today = new Date(todayStr + 'T00:00:00.000Z');
 
     let record = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date: { employeeId, date: today } },
+      where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
       include: {
         shift: { select: { id: true, name: true, startTime: true, endTime: true } },
         location: { select: { id: true, name: true } },
@@ -2450,7 +2482,7 @@ export class ESSService {
       const yesterdayDT = nowCT.minus({ days: 1 });
       const yesterday = new Date(yesterdayDT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
       const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
-        where: { employeeId_date: { employeeId, date: yesterday } },
+        where: { employeeId_date_shiftSequence: { employeeId, date: yesterday, shiftSequence: 1 } },
         include: {
           shift: { select: { id: true, name: true, startTime: true, endTime: true } },
           location: { select: { id: true, name: true } },

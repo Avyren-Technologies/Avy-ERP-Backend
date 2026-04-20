@@ -25,7 +25,12 @@ import {
   createRotationScheduleSchema,
   updateRotationScheduleSchema,
   assignRotationSchema,
+  weeklyReviewQuerySchema,
+  remapShiftSchema,
+  editPunchesSchema,
+  markReviewedSchema,
 } from './attendance.validators';
+import { weeklyReviewService } from './weekly-review.service';
 
 export class AttendanceController {
   // ── Attendance Records ──────────────────────────────────────────────
@@ -512,6 +517,106 @@ export class AttendanceController {
 
     const result = await attendanceService.executeShiftRotation(companyId);
     res.json(createSuccessResponse(result, `Rotation executed: ${result.schedulesProcessed} schedules, ${result.employeesRotated} employees rotated`));
+  });
+
+  // ── Weekly Review ──────────────────────────────────────────────────
+
+  getWeeklyReview = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = weeklyReviewQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const { weekStart, weekEnd, departmentId, flag, page, limit } = parsed.data;
+    const opts: any = {};
+    if (departmentId) opts.departmentId = departmentId;
+    if (flag) opts.flag = flag;
+    if (page) opts.page = page;
+    if (limit) opts.limit = limit;
+
+    const result = await weeklyReviewService.getWeeklyReviewRecords(
+      companyId,
+      new Date(weekStart),
+      new Date(weekEnd),
+      opts,
+    );
+    res.json(createSuccessResponse(result, 'Weekly review records retrieved'));
+  });
+
+  getWeeklyReviewSummary = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const weekStart = req.query.weekStart as string;
+    const weekEnd = req.query.weekEnd as string;
+    if (!weekStart || !weekEnd) {
+      throw ApiError.badRequest('weekStart and weekEnd are required');
+    }
+
+    const result = await weeklyReviewService.getWeeklyReviewSummary(
+      companyId,
+      new Date(weekStart),
+      new Date(weekEnd),
+    );
+    res.json(createSuccessResponse(result, 'Weekly review summary retrieved'));
+  });
+
+  remapShift = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = remapShiftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await weeklyReviewService.remapShift(companyId, req.params.id!, parsed.data.shiftId, userId);
+    res.json(createSuccessResponse(result, 'Shift remapped successfully'));
+  });
+
+  editPunches = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = editPunchesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await weeklyReviewService.editPunches(
+      companyId,
+      req.params.id!,
+      parsed.data.punchIn,
+      parsed.data.punchOut,
+      parsed.data.reason,
+      userId,
+    );
+    res.json(createSuccessResponse(result, 'Punches updated successfully'));
+  });
+
+  markReviewed = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = markReviewedSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await weeklyReviewService.markReviewed(companyId, parsed.data.recordIds, userId);
+    res.json(createSuccessResponse(result, `${result.count} records marked as reviewed`));
   });
 }
 

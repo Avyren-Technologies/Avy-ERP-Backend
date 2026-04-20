@@ -434,7 +434,7 @@ export class AuthService {
           expiresAt: new Date(Date.now() + this.parseExpiresInToSeconds(env.JWT_REFRESH_EXPIRES_IN) * 1000),
           lastActiveAt: new Date(),
         },
-      }).catch(() => {});
+      }).catch(() => { });
 
       return tokens;
     } catch (error) {
@@ -782,7 +782,7 @@ export class AuthService {
       const { getCachedSystemControls } = await import('../../shared/utils/config-cache');
       const controls = await getCachedSystemControls(companyId);
       maxSessions = controls.maxConcurrentSessions;
-    } catch {}
+    } catch { }
 
     const sessions = await platformPrisma.activeSession.findMany({
       where: { userId, expiresAt: { gt: new Date() } },
@@ -800,13 +800,13 @@ export class AuthService {
 
   private async removeSessionByToken(refreshToken: string): Promise<void> {
     const tokenHash = this.hashToken(refreshToken);
-    await platformPrisma.activeSession.deleteMany({ where: { refreshToken: tokenHash } }).catch(() => {});
+    await platformPrisma.activeSession.deleteMany({ where: { refreshToken: tokenHash } }).catch(() => { });
   }
 
   private async cleanExpiredSessions(userId: string): Promise<void> {
     await platformPrisma.activeSession.deleteMany({
       where: { userId, expiresAt: { lte: new Date() } },
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   // Generate JWT tokens

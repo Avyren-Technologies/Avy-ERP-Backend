@@ -211,14 +211,14 @@ export class TenantService {
     // Build razorpay config JSON (only when relevant)
     const razorpayConfig = preferences.razorpayEnabled
       ? {
-          enabled: true,
-          keyId: preferences.razorpayKeyId,
-          keySecret: preferences.razorpayKeySecret,
-          webhookSecret: preferences.razorpayWebhookSecret,
-          accountNumber: preferences.razorpayAccountNumber,
-          autoDisbursement: preferences.razorpayAutoDisbursement ?? false,
-          testMode: preferences.razorpayTestMode ?? true,
-        }
+        enabled: true,
+        keyId: preferences.razorpayKeyId,
+        keySecret: preferences.razorpayKeySecret,
+        webhookSecret: preferences.razorpayWebhookSecret,
+        accountNumber: preferences.razorpayAccountNumber,
+        autoDisbursement: preferences.razorpayAutoDisbursement ?? false,
+        testMode: preferences.razorpayTestMode ?? true,
+      }
       : null;
 
     // Preferences are now saved to CompanySettings by seedCompanyConfigs() after the transaction.
@@ -271,10 +271,10 @@ export class TenantService {
           selectedModuleIds: strategy.locationConfig === 'per-location'
             ? dedupedPerLocationModuleIds as any
             : (commercial?.selectedModuleIds?.length
-                ? commercial.selectedModuleIds as any
-                : dedupedPerLocationModuleIds.length
-                  ? dedupedPerLocationModuleIds as any
-                  : Prisma.JsonNull),
+              ? commercial.selectedModuleIds as any
+              : dedupedPerLocationModuleIds.length
+                ? dedupedPerLocationModuleIds as any
+                : Prisma.JsonNull),
           customModulePricing: strategy.locationConfig === 'per-location'
             ? Prisma.JsonNull
             : commercial?.customModulePricing as any ?? Prisma.JsonNull,
@@ -385,8 +385,8 @@ export class TenantService {
       const moduleIds = strategy.locationConfig === 'per-location'
         ? dedupedPerLocationModuleIds
         : (commercial?.selectedModuleIds?.length
-            ? commercial.selectedModuleIds
-            : dedupedPerLocationModuleIds);
+          ? commercial.selectedModuleIds
+          : dedupedPerLocationModuleIds);
       const modulesJson: Record<string, boolean> = {};
       moduleIds.forEach((m) => { modulesJson[m] = true; });
 

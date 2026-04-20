@@ -151,7 +151,7 @@ export class AttendanceService {
     // Check for duplicate record on same date
     const attendanceDate = new Date(data.date);
     const existing = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date: { employeeId: data.employeeId, date: attendanceDate } },
+      where: { employeeId_date_shiftSequence: { employeeId: data.employeeId, date: attendanceDate, shiftSequence: 1 } },
     });
     if (existing) {
       throw ApiError.conflict('Attendance record already exists for this employee on this date');
@@ -731,6 +731,52 @@ export class AttendanceService {
   }
 
   /**
+   * Aggregate daily OT across multiple shifts when multipleShiftsPerDayEnabled.
+   * Per-shift OT is calculated normally, then daily caps are applied to the aggregate.
+   */
+  async aggregateDailyOvertime(companyId: string, employeeId: string, date: Date) {
+    const rules = await getCachedAttendanceRules(companyId);
+    if (!rules.multipleShiftsPerDayEnabled) return;
+
+    const otRule = await platformPrisma.overtimeRule.findUnique({
+      where: { companyId },
+    });
+    if (!otRule || !otRule.enforceCaps || !otRule.dailyCapHours) return;
+
+    const dailyCap = Number(otRule.dailyCapHours);
+    const records = await platformPrisma.attendanceRecord.findMany({
+      where: { companyId, employeeId, date },
+      orderBy: { shiftSequence: 'asc' },
+      select: { id: true, overtimeHours: true, shiftSequence: true },
+    });
+
+    if (records.length <= 1) return;
+
+    const totalOt = records.reduce((sum, r) => sum + (r.overtimeHours ? Number(r.overtimeHours) : 0), 0);
+    if (totalOt <= dailyCap) return;
+
+    // Distribute the cap proportionally across shifts
+    const ratio = dailyCap / totalOt;
+    for (const record of records) {
+      const originalOt = record.overtimeHours ? Number(record.overtimeHours) : 0;
+      if (originalOt > 0) {
+        const cappedOt = Math.round(originalOt * ratio * 100) / 100;
+        await platformPrisma.attendanceRecord.update({
+          where: { id: record.id },
+          data: {
+            overtimeHours: cappedOt,
+            remarks: `OT capped: ${originalOt.toFixed(2)}h → ${cappedOt.toFixed(2)}h (daily cap ${dailyCap}h across ${records.length} shifts)`,
+          },
+        });
+      }
+    }
+
+    logger.info(
+      `Multi-shift OT aggregation for employee ${employeeId} on ${date.toISOString().split('T')[0]}: ${totalOt.toFixed(2)}h capped to ${dailyCap}h across ${records.length} shifts`,
+    );
+  }
+
+  /**
    * Apply OT-specific rounding strategy to OT hours.
    */
   private applyOtRounding(hours: number, strategy: string): number {
@@ -1104,6 +1150,25 @@ export class AttendanceService {
         ...(data.gpsRequired !== undefined && { gpsRequired: data.gpsRequired }),
         ...(data.geofenceEnforcementMode !== undefined && { geofenceEnforcementMode: data.geofenceEnforcementMode }),
         ...(data.missingPunchAlert !== undefined && { missingPunchAlert: data.missingPunchAlert }),
+
+        // Attendance Mode & Flexibility
+        ...(data.attendanceMode !== undefined && { attendanceMode: data.attendanceMode }),
+        ...(data.leaveCheckInMode !== undefined && { leaveCheckInMode: data.leaveCheckInMode }),
+        ...(data.leaveAutoAdjustmentEnabled !== undefined && { leaveAutoAdjustmentEnabled: data.leaveAutoAdjustmentEnabled }),
+
+        // Multiple Shifts Per Day
+        ...(data.multipleShiftsPerDayEnabled !== undefined && { multipleShiftsPerDayEnabled: data.multipleShiftsPerDayEnabled }),
+        ...(data.minGapBetweenShiftsMinutes !== undefined && { minGapBetweenShiftsMinutes: data.minGapBetweenShiftsMinutes }),
+        ...(data.maxShiftsPerDay !== undefined && { maxShiftsPerDay: data.maxShiftsPerDay }),
+
+        // Auto Shift Mapping
+        ...(data.autoShiftMappingEnabled !== undefined && { autoShiftMappingEnabled: data.autoShiftMappingEnabled }),
+        ...(data.shiftMappingStrategy !== undefined && { shiftMappingStrategy: data.shiftMappingStrategy }),
+        ...(data.minShiftMatchPercentage !== undefined && { minShiftMatchPercentage: data.minShiftMatchPercentage }),
+
+        // Weekly Review
+        ...(data.weeklyReviewEnabled !== undefined && { weeklyReviewEnabled: data.weeklyReviewEnabled }),
+        ...(data.weeklyReviewRemindersEnabled !== undefined && { weeklyReviewRemindersEnabled: data.weeklyReviewRemindersEnabled }),
 
         updatedBy: userId ?? null,
       },

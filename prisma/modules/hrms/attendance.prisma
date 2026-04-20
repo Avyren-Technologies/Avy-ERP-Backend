@@ -22,6 +22,8 @@ model AttendanceRecord {
   earlyMinutes  Int?
   overtimeHours Decimal?         @db.Decimal(5, 2)
   remarks       String?
+  // ── Multi-Shift Support ──
+  shiftSequence Int              @default(1)
   locationId    String?
   location      Location?        @relation("AttendanceLocation", fields: [locationId], references: [id])
   // Geo-tagging for check-in/check-out
@@ -62,10 +64,16 @@ model AttendanceRecord {
   // ── Status Reasoning ──
   finalStatusReason String?
 
+  // ── Weekly Review ──
+  isAutoMapped Boolean   @default(false)
+  isReviewed   Boolean   @default(false)
+  reviewedBy   String?
+  reviewedAt   DateTime?
+
   overrides       AttendanceOverride[]
   overtimeRequest OvertimeRequest?
 
-  @@unique([employeeId, date])
+  @@unique([employeeId, date, shiftSequence])
   @@index([companyId, date])
   @@index([companyId, status])
   @@map("attendance_records")
@@ -141,6 +149,25 @@ model AttendanceRule {
   gpsRequired            Boolean                @default(false)
   geofenceEnforcementMode GeofenceEnforcementMode @default(OFF)
   missingPunchAlert Boolean @default(true)
+
+  // ── Attendance Mode & Flexibility ──
+  attendanceMode             AttendanceMode       @default(SHIFT_STRICT)
+  leaveCheckInMode           LeaveCheckInMode     @default(STRICT)
+  leaveAutoAdjustmentEnabled Boolean              @default(true)
+
+  // ── Multiple Shifts Per Day ──
+  multipleShiftsPerDayEnabled Boolean             @default(false)
+  minGapBetweenShiftsMinutes  Int?
+  maxShiftsPerDay             Int?
+
+  // ── Auto Shift Mapping ──
+  autoShiftMappingEnabled Boolean              @default(false)
+  shiftMappingStrategy    ShiftMappingStrategy @default(BEST_FIT_HOURS)
+  minShiftMatchPercentage Float                @default(50)
+
+  // ── Weekly Review ──
+  weeklyReviewEnabled          Boolean @default(false)
+  weeklyReviewRemindersEnabled Boolean @default(false)
 
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdBy String?
@@ -395,4 +422,23 @@ enum RosterPattern {
   MON_SAT
   MON_SAT_ALT
   CUSTOM
+}
+
+// ── Attendance Mode & Flexibility Enums ──
+
+enum AttendanceMode {
+  SHIFT_STRICT
+  SHIFT_RELAXED
+  FULLY_FLEXIBLE
+}
+
+enum LeaveCheckInMode {
+  STRICT
+  ALLOW_WITHIN_WINDOW
+  ALLOW_TILL_SHIFT_END
+  FULLY_FLEXIBLE
+}
+
+enum ShiftMappingStrategy {
+  BEST_FIT_HOURS
 }
