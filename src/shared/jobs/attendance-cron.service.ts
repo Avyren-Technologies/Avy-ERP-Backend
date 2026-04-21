@@ -3,6 +3,7 @@ import { platformPrisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { notificationService } from '../../core/notifications/notification.service';
 import { mapShiftToRecord } from '../services/shift-mapping.service';
+import { checkIfStale, autoCloseStaleRecord } from '../services/stale-checkout-resolver.service';
 import { getCachedCompanySettings } from '../utils/config-cache';
 import { DateTime } from 'luxon';
 
@@ -230,6 +231,64 @@ class AttendanceCronService {
     }
   }
 
+  /**
+   * Auto-close stale open records (forgotten checkouts).
+   * Respects cross-day/night shifts — only closes records past their expected end + buffer.
+   * Runs hourly as a safety net (primary auto-close happens in getMyAttendanceStatus).
+   */
+  async processStaleCheckouts() {
+    // Find all open records older than today (punchIn set, punchOut null, date < today)
+    const today = DateTime.now().startOf('day').toJSDate();
+    const staleRecords = await platformPrisma.attendanceRecord.findMany({
+      where: {
+        punchIn: { not: null },
+        punchOut: null,
+        date: { lt: today },
+        status: { notIn: ['ON_LEAVE', 'HOLIDAY', 'WEEK_OFF', 'ABSENT'] },
+      },
+      select: {
+        id: true,
+        employeeId: true,
+        companyId: true,
+        punchIn: true,
+        shiftId: true,
+        date: true,
+        locationId: true,
+      },
+      take: 500, // batch limit
+    });
+
+    if (staleRecords.length === 0) return;
+
+    let closed = 0;
+    let skipped = 0;
+    for (const record of staleRecords) {
+      try {
+        if (!record.punchIn) continue;
+        const companySettings = await getCachedCompanySettings(record.companyId);
+        const tz = companySettings.timezone ?? 'Asia/Kolkata';
+
+        const result = await checkIfStale(
+          { id: record.id, punchIn: record.punchIn, shiftId: record.shiftId, date: record.date },
+          tz,
+        );
+
+        if (result.isStale && result.autoCloseTime) {
+          await autoCloseStaleRecord(record as any, result.autoCloseTime, tz, result.reason);
+          closed++;
+        } else {
+          skipped++; // Legitimate cross-day shift still in progress
+        }
+      } catch (err) {
+        logger.warn(`Stale checkout cron: failed for record ${record.id}`, err);
+      }
+    }
+
+    if (closed > 0 || skipped > 0) {
+      logger.info(`Stale checkout cron: ${closed} closed, ${skipped} skipped (cross-day)`);
+    }
+  }
+
   startAll() {
     cron.schedule('0 2 * * *', () => {
       this.processAutoAbsent().catch((err) =>
@@ -257,8 +316,15 @@ class AttendanceCronService {
       );
     });
 
+    // Stale checkout auto-close — hourly
+    cron.schedule('0 * * * *', () => {
+      this.processStaleCheckouts().catch((err) =>
+        logger.error('Stale checkout cron failed', err),
+      );
+    });
+
     logger.info(
-      'Attendance cron jobs started (auto-absent@2AM, shift-mapping@2:30AM, missing-punch@10PM, weekly-review@Mon9AM)',
+      'Attendance cron jobs started (auto-absent@2AM, shift-mapping@2:30AM, stale-checkout@hourly, missing-punch@10PM, weekly-review@Mon9AM)',
     );
   }
 }

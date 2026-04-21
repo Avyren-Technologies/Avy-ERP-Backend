@@ -167,7 +167,7 @@ interface AttendanceRuleDefaults {
   gpsRequired?: boolean;
   missingPunchAlert?: boolean;
   // Attendance Mode & Flexibility
-  attendanceMode?: 'SHIFT_STRICT' | 'SHIFT_RELAXED' | 'FULLY_FLEXIBLE';
+  attendanceMode?: 'SHIFT_STRICT' | 'SHIFT_RELAXED' | 'FULLY_FLEXIBLE' | 'EMPLOYEE_CHOICE';
   leaveCheckInMode?: 'STRICT' | 'ALLOW_WITHIN_WINDOW' | 'ALLOW_TILL_SHIFT_END' | 'FULLY_FLEXIBLE';
   leaveAutoAdjustmentEnabled?: boolean;
   // Multiple Shifts

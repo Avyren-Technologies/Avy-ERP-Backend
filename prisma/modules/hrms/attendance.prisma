@@ -430,6 +430,7 @@ enum AttendanceMode {
   SHIFT_STRICT
   SHIFT_RELAXED
   FULLY_FLEXIBLE
+  EMPLOYEE_CHOICE
 }
 
 enum LeaveCheckInMode {

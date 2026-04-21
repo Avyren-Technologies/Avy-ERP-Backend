@@ -14,6 +14,8 @@ import { resolvePolicy, type EvaluationContext } from '../../../shared/services/
 import { validateShiftWindow } from '../../../shared/services/shift-window-validator.service';
 import { adjustLeaveBasedOnAttendance } from '../../../shared/services/leave-auto-adjustment.service';
 import { mapShiftToRecord } from '../../../shared/services/shift-mapping.service';
+import { attendanceService } from '../attendance/attendance.service';
+import { checkIfStale, autoCloseStaleRecord } from '../../../shared/services/stale-checkout-resolver.service';
 import {
   resolveAttendanceStatus,
   type AttendanceRulesInput,
@@ -1127,7 +1129,25 @@ export class ESSController {
             include: shiftInclude,
           });
       if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
-        record = yesterdayRecord;
+        // Check if yesterday's open record is stale (forgotten checkout) vs legitimate cross-day shift
+        const staleCheck = await checkIfStale(
+          { id: yesterdayRecord.id, punchIn: yesterdayRecord.punchIn, shiftId: yesterdayRecord.shiftId, date: yesterdayRecord.date },
+          companyTimezone,
+        );
+        if (staleCheck.isStale && staleCheck.autoCloseTime) {
+          // Auto-close the stale record and treat today as NOT_CHECKED_IN
+          await autoCloseStaleRecord(
+            { id: yesterdayRecord.id, employeeId, companyId, punchIn: yesterdayRecord.punchIn, shiftId: yesterdayRecord.shiftId, date: yesterdayRecord.date, locationId: yesterdayRecord.locationId },
+            staleCheck.autoCloseTime,
+            companyTimezone,
+            staleCheck.reason,
+          );
+          logger.info(`Stale record auto-closed for employee ${employeeId}: ${staleCheck.reason}`);
+          // Don't set record — fall through to NOT_CHECKED_IN
+        } else {
+          // Legitimate cross-day shift still in progress
+          record = yesterdayRecord;
+        }
       }
     }
 
@@ -1179,12 +1199,13 @@ export class ESSController {
         });
       }
 
-      // ── Recent Attendance (last 7 days excluding today) ──
+      // ── Recent Attendance (last 7 days INCLUDING today) ──
       const sevenDaysAgoNotCheckedIn = DateTime.fromJSDate(today).minus({ days: 7 }).toJSDate();
+      const nextDayNotCheckedIn = DateTime.fromJSDate(today).plus({ days: 1 }).toJSDate();
       const recentRecordsNotCheckedIn = await platformPrisma.attendanceRecord.findMany({
         where: {
           employeeId,
-          date: { gte: sevenDaysAgoNotCheckedIn, lt: today },
+          date: { gte: sevenDaysAgoNotCheckedIn, lt: nextDayNotCheckedIn },
         },
         select: {
           id: true,
@@ -1196,10 +1217,11 @@ export class ESSController {
           overtimeHours: true,
           geoStatus: true,
           source: true,
+          shiftSequence: true,
           shift: { select: { name: true } },
         },
-        orderBy: { date: 'desc' },
-        take: 7,
+        orderBy: [{ date: 'desc' }, { shiftSequence: 'desc' }],
+        take: 10,
       });
 
       const recentAttendanceNotCheckedIn = recentRecordsNotCheckedIn.map(r => ({
@@ -1213,7 +1235,18 @@ export class ESSController {
         geoStatus: r.geoStatus,
         source: r.source,
         shiftName: r.shift?.name ?? null,
+        shiftSequence: r.shiftSequence,
       }));
+
+      // EMPLOYEE_CHOICE: include company shifts for the dropdown
+      let companyShifts: Array<{ id: string; name: string; startTime: string; endTime: string; shiftType: string }> | undefined;
+      if (attendanceRulesForStatus.attendanceMode === 'EMPLOYEE_CHOICE') {
+        companyShifts = await platformPrisma.companyShift.findMany({
+          where: { companyId },
+          select: { id: true, name: true, startTime: true, endTime: true, shiftType: true },
+          orderBy: { startTime: 'asc' },
+        });
+      }
 
       res.json(createSuccessResponse({
         status: 'NOT_CHECKED_IN',
@@ -1223,6 +1256,8 @@ export class ESSController {
         location: employeeLocation,
         assignedGeofence,
         recentAttendance: recentAttendanceNotCheckedIn,
+        attendanceMode: attendanceRulesForStatus.attendanceMode,
+        companyShifts,
       }, 'Not checked in today'));
       return;
     }
@@ -1248,12 +1283,13 @@ export class ESSController {
       // Non-fatal
     }
 
-    // ── Recent Attendance (last 7 days excluding today) ──
+    // ── Recent Attendance (last 7 days INCLUDING today) ──
     const sevenDaysAgo = DateTime.fromJSDate(today).minus({ days: 7 }).toJSDate();
+    const nextDay = DateTime.fromJSDate(today).plus({ days: 1 }).toJSDate();
     const recentRecords = await platformPrisma.attendanceRecord.findMany({
       where: {
         employeeId,
-        date: { gte: sevenDaysAgo, lt: today },
+        date: { gte: sevenDaysAgo, lt: nextDay },
       },
       select: {
         id: true,
@@ -1265,24 +1301,28 @@ export class ESSController {
         overtimeHours: true,
         geoStatus: true,
         source: true,
+        shiftSequence: true,
         shift: { select: { name: true } },
       },
-      orderBy: { date: 'desc' },
-      take: 7,
+      orderBy: [{ date: 'desc' }, { shiftSequence: 'desc' }],
+      take: 10,
     });
 
-    const recentAttendance = recentRecords.map(r => ({
-      id: r.id,
-      date: r.date.toISOString().split('T')[0],
-      punchIn: r.punchIn?.toISOString() ?? null,
-      punchOut: r.punchOut?.toISOString() ?? null,
-      workedHours: r.workedHours ? Number(r.workedHours) : null,
-      status: r.status,
-      overtimeHours: r.overtimeHours ? Number(r.overtimeHours) : null,
-      geoStatus: r.geoStatus,
-      source: r.source,
-      shiftName: r.shift?.name ?? null,
-    }));
+    const recentAttendance = recentRecords
+      .filter(r => r.id !== record.id) // exclude the current active record (shown separately)
+      .map(r => ({
+        id: r.id,
+        date: r.date.toISOString().split('T')[0],
+        punchIn: r.punchIn?.toISOString() ?? null,
+        punchOut: r.punchOut?.toISOString() ?? null,
+        workedHours: r.workedHours ? Number(r.workedHours) : null,
+        status: r.status,
+        overtimeHours: r.overtimeHours ? Number(r.overtimeHours) : null,
+        geoStatus: r.geoStatus,
+        source: r.source,
+        shiftName: r.shift?.name ?? null,
+        shiftSequence: r.shiftSequence,
+      }));
 
     const status = record.punchOut ? 'CHECKED_OUT' : 'CHECKED_IN';
 
@@ -1299,7 +1339,17 @@ export class ESSController {
       canStartNewShift = !maxShifts || completedShifts < maxShifts;
     }
 
-    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy, recentAttendance, canStartNewShift, completedShifts }, `Attendance status: ${status}`));
+    // EMPLOYEE_CHOICE: include company shifts for multi-shift new check-in dropdown
+    let companyShiftsForStatus: Array<{ id: string; name: string; startTime: string; endTime: string; shiftType: string }> | undefined;
+    if (attendanceRulesForStatus.attendanceMode === 'EMPLOYEE_CHOICE' && canStartNewShift) {
+      companyShiftsForStatus = await platformPrisma.companyShift.findMany({
+        where: { companyId },
+        select: { id: true, name: true, startTime: true, endTime: true, shiftType: true },
+        orderBy: { startTime: 'asc' },
+      });
+    }
+
+    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy, recentAttendance, canStartNewShift, completedShifts, attendanceMode: attendanceRulesForStatus.attendanceMode, companyShifts: companyShiftsForStatus }, `Attendance status: ${status}`));
   });
 
   checkIn = asyncHandler(async (req: Request, res: Response) => {
@@ -1314,7 +1364,7 @@ export class ESSController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const { shiftId, locationId, latitude, longitude, photoUrl } = parsed.data;
+    const { shiftId, locationId, latitude, longitude, photoUrl, selectedShiftId } = parsed.data;
 
     // Use company timezone for all time operations
     const companySettings = await getCachedCompanySettings(companyId);
@@ -1326,12 +1376,17 @@ export class ESSController {
 
     const now = new Date();
 
-    // Prevent double check-in
-    const existing = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
-    });
-    if (existing?.punchIn) {
-      throw ApiError.badRequest('Already checked in today. Use check-out instead.');
+    // Fetch attendance rules early — needed for multi-shift guard and shift window validation
+    const attendanceRules = await getCachedAttendanceRules(companyId);
+
+    // Prevent double check-in (single-shift mode only — multi-shift has its own guard below)
+    if (!attendanceRules.multipleShiftsPerDayEnabled) {
+      const existing = await platformPrisma.attendanceRecord.findUnique({
+        where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
+      });
+      if (existing?.punchIn) {
+        throw ApiError.badRequest('Already checked in today. Use check-out instead.');
+      }
     }
 
     // Geofence validation — check assigned geofence → all location geofences → legacy fields
@@ -1384,7 +1439,29 @@ export class ESSController {
       where: { id: employeeId },
       select: { firstName: true, lastName: true, shiftId: true, locationId: true, location: { select: { name: true } } },
     });
-    const effectiveShiftId = shiftId || employeeForShift?.shiftId;
+    // EMPLOYEE_CHOICE: use selectedShiftId from the dropdown.
+    // For assigned employees, selectedShiftId is required (pre-selected, can't be cleared).
+    // For unassigned employees, selectedShiftId can be empty (auto-map at checkout).
+    let effectiveShiftId: string | undefined;
+    if (attendanceRules.attendanceMode === 'EMPLOYEE_CHOICE') {
+      if (selectedShiftId) {
+        // Validate the selected shift exists and belongs to this company
+        const selectedShift = await platformPrisma.companyShift.findFirst({
+          where: { id: selectedShiftId, companyId },
+          select: { id: true, name: true },
+        });
+        if (!selectedShift) {
+          throw ApiError.badRequest('The selected shift does not exist or does not belong to your company.');
+        }
+        effectiveShiftId = selectedShiftId;
+      } else if (employeeForShift?.shiftId) {
+        // Assigned employee didn't send selectedShiftId — use their assigned shift (enforced by frontend)
+        effectiveShiftId = employeeForShift.shiftId || undefined;
+      }
+      // else: unassigned employee, no selection — effectiveShiftId stays undefined (auto-map at checkout)
+    } else {
+      effectiveShiftId = shiftId || employeeForShift?.shiftId || undefined;
+    }
     const effectiveLocationId2 = locationId || employeeForShift?.locationId;
 
     const holiday = await platformPrisma.holidayCalendar.findFirst({
@@ -1445,7 +1522,6 @@ export class ESSController {
     }
 
     // Shift time validation using shared validator (respects attendanceMode + leaveCheckInMode)
-    const attendanceRules = await getCachedAttendanceRules(companyId);
     const windowResult = await validateShiftWindow({
       companyId,
       employeeId,
@@ -1809,6 +1885,11 @@ export class ESSController {
           data: { remarks: [record.remarks, `[Leave Adjustment: ${adjustResult.action}] ${adjustResult.reason}`].filter(Boolean).join(' | ') },
         });
       }
+    }
+
+    // Multi-shift OT aggregation: cap total daily OT across all shifts
+    if (rules.multipleShiftsPerDayEnabled && statusResult.overtimeHours > 0) {
+      await attendanceService.aggregateDailyOvertime(companyId, employeeId, attendanceDate);
     }
 
     res.json(createSuccessResponse(record, 'Checked out successfully'));

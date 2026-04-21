@@ -47,8 +47,13 @@ export async function validateShiftWindow(input: ShiftWindowInput): Promise<Shif
     return { allowed: true, hasApprovedLeave: false };
   }
 
-  // 2. No shift assigned — nothing to enforce
+  // 2. No shift — behavior depends on mode
   if (!shiftId) {
+    if (attendanceMode === 'EMPLOYEE_CHOICE') {
+      // EMPLOYEE_CHOICE with no shift selected (unassigned employee) — allow, auto-map at checkout
+      return { allowed: true, hasApprovedLeave: false };
+    }
+    // Other modes: no shift = nothing to enforce
     return { allowed: true, hasApprovedLeave: false };
   }
 
@@ -197,8 +202,13 @@ export async function validateShiftWindow(input: ShiftWindowInput): Promise<Shif
 
   if (!isWithinWindow) {
     const earlyTime = `${String(Math.floor(Math.max(0, earliestMinutes) / 60)).padStart(2, '0')}:${String(Math.max(0, earliestMinutes) % 60).padStart(2, '0')}`;
-    const reason = `Check-in not allowed at this time. Your shift "${shift.name}" is ${shift.startTime} – ${shift.endTime}. ` +
-      `You can check in from ${earlyTime} (1 hour before shift start) until the shift ends.`;
+    const lateTime = `${String(Math.floor(latestMinutes / 60) % 24).padStart(2, '0')}:${String(latestMinutes % 60).padStart(2, '0')}`;
+    const isEmployeeChoice = attendanceMode === 'EMPLOYEE_CHOICE';
+    const reason = isEmployeeChoice
+      ? `You cannot start "${shift.name}" at this time. This shift runs ${shift.startTime} – ${shift.endTime}. ` +
+        `Allowed check-in window is ${earlyTime} – ${lateTime}. Please select a different shift or check in during the allowed window.`
+      : `Check-in not allowed at this time. Your shift "${shift.name}" is ${shift.startTime} – ${shift.endTime}. ` +
+        `You can check in from ${earlyTime} (1 hour before shift start) until the shift ends.`;
 
     logger.info(`Shift window validation failed for employee ${employeeId}: ${reason}`);
 

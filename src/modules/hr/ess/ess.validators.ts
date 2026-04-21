@@ -282,6 +282,8 @@ export const checkInSchema = z.object({
   latitude: z.coerce.number().optional(),
   longitude: z.coerce.number().optional(),
   photoUrl: z.string().optional(),
+  /** EMPLOYEE_CHOICE mode: shift selected by the employee at check-in */
+  selectedShiftId: z.string().optional(),
 });
 
 export const checkOutSchema = z.object({

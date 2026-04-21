@@ -33,6 +33,8 @@ export class EmployeeController {
     if (req.query.locationId) opts.locationId = req.query.locationId as string;
     if (req.query.status) opts.status = req.query.status as string;
     if (req.query.employeeTypeId) opts.employeeTypeId = req.query.employeeTypeId as string;
+    if (req.query.sortBy) opts.sortBy = req.query.sortBy as string;
+    if (req.query.sortOrder) opts.sortOrder = req.query.sortOrder as string;
 
     const result = await employeeService.listEmployees(companyId, opts);
     res.json(createPaginatedResponse(result.employees, result.page, result.limit, result.total, 'Employees retrieved'));

@@ -15,6 +15,7 @@ import { adjustLeaveBasedOnAttendance } from '../../../shared/services/leave-aut
 import { mapShiftToRecord } from '../../../shared/services/shift-mapping.service';
 import { DateTime } from 'luxon';
 import { logger } from '../../../config/logger';
+import { attendanceService } from './attendance.service';
 
 type AdminMarkInput = z.infer<typeof adminMarkSchema>;
 type TodayLogInput = z.infer<typeof todayLogSchema>;
@@ -431,6 +432,11 @@ class AdminAttendanceService {
           data: { remarks: [updated.remarks, `[Leave Adjustment: ${adjustResult.action}] ${adjustResult.reason}`].filter(Boolean).join(' | ') },
         });
       }
+    }
+
+    // Multi-shift OT aggregation: cap total daily OT across all shifts
+    if (rules.multipleShiftsPerDayEnabled && statusResult.overtimeHours > 0) {
+      await attendanceService.aggregateDailyOvertime(companyId, employee.id, record.date);
     }
 
     return { record: updated, status: 'CHECKED_OUT' as const };

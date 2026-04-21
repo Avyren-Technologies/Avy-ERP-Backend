@@ -3,9 +3,10 @@ import { DateTime } from 'luxon';
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../config/logger';
-import { invalidateESSConfig, getCachedCompanySettings } from '../../../shared/utils/config-cache';
+import { invalidateESSConfig, getCachedCompanySettings, getCachedAttendanceRules } from '../../../shared/utils/config-cache';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { nowInCompanyTimezone } from '../../../shared/utils/timezone';
+import { checkIfStale, autoCloseStaleRecord } from '../../../shared/services/stale-checkout-resolver.service';
 import { n } from '../../../shared/utils/prisma-helpers';
 import type { NotificationPriority } from '@prisma/client';
 import { notificationService } from '../../../core/notifications/notification.service';
@@ -2469,32 +2470,81 @@ export class ESSService {
     const todayStr = nowCT.toFormat('yyyy-MM-dd');
     const today = new Date(todayStr + 'T00:00:00.000Z');
 
-    let record = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
-      include: {
-        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
-        location: { select: { id: true, name: true } },
-      },
-    });
+    // Fetch attendance rules (non-fatal — default to single-shift if unavailable)
+    let multiShiftEnabled = false;
+    let maxShiftsPerDay: number | null = null;
+    let attendanceMode = 'SHIFT_STRICT';
+    try {
+      const rules = await getCachedAttendanceRules(companyId);
+      multiShiftEnabled = rules.multipleShiftsPerDayEnabled;
+      maxShiftsPerDay = rules.maxShiftsPerDay;
+      attendanceMode = rules.attendanceMode;
+    } catch {
+      // Rules not configured yet — safe to continue with defaults
+    }
+
+    const shiftInclude = {
+      shift: { select: { id: true, name: true, startTime: true, endTime: true } },
+      location: { select: { id: true, name: true } },
+    } as const;
+
+    // Multi-shift aware: find the LATEST shift record for today
+    let record = multiShiftEnabled
+      ? await platformPrisma.attendanceRecord.findFirst({
+          where: { employeeId, date: today },
+          orderBy: { shiftSequence: 'desc' },
+          include: shiftInclude,
+        })
+      : await platformPrisma.attendanceRecord.findUnique({
+          where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
+          include: shiftInclude,
+        });
 
     // For cross-day (night) shifts: check yesterday's record if still checked in
     if (!record || !record.punchIn) {
       const yesterdayDT = nowCT.minus({ days: 1 });
       const yesterday = new Date(yesterdayDT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
-      const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
-        where: { employeeId_date_shiftSequence: { employeeId, date: yesterday, shiftSequence: 1 } },
-        include: {
-          shift: { select: { id: true, name: true, startTime: true, endTime: true } },
-          location: { select: { id: true, name: true } },
-        },
-      });
+      const yesterdayRecord = multiShiftEnabled
+        ? await platformPrisma.attendanceRecord.findFirst({
+            where: { employeeId, date: yesterday, punchOut: null, punchIn: { not: null } },
+            orderBy: { shiftSequence: 'desc' },
+            include: shiftInclude,
+          })
+        : await platformPrisma.attendanceRecord.findUnique({
+            where: { employeeId_date_shiftSequence: { employeeId, date: yesterday, shiftSequence: 1 } },
+            include: shiftInclude,
+          });
       if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
-        record = yesterdayRecord;
+        // Check if stale (forgotten checkout) vs legitimate cross-day shift
+        const staleCheck = await checkIfStale(
+            { id: yesterdayRecord.id, punchIn: yesterdayRecord.punchIn, shiftId: yesterdayRecord.shiftId, date: yesterdayRecord.date },
+            companyTimezone,
+        );
+        if (staleCheck.isStale && staleCheck.autoCloseTime) {
+            await autoCloseStaleRecord(
+                { id: yesterdayRecord.id, employeeId, companyId, punchIn: yesterdayRecord.punchIn, shiftId: yesterdayRecord.shiftId, date: yesterdayRecord.date, locationId: yesterdayRecord.locationId },
+                staleCheck.autoCloseTime,
+                companyTimezone,
+                staleCheck.reason,
+            );
+            // Don't set record — fall through to NOT_CHECKED_IN
+        } else {
+            record = yesterdayRecord;
+        }
       }
     }
 
     if (!record || !record.punchIn) {
-      return { status: 'NOT_CHECKED_IN' as const, record: null, elapsedSeconds: 0 };
+      // EMPLOYEE_CHOICE: include company shifts for shift selection dropdown
+      let companyShifts: Array<{ id: string; name: string; startTime: string; endTime: string; shiftType: string }> | undefined;
+      if (attendanceMode === 'EMPLOYEE_CHOICE') {
+        companyShifts = await platformPrisma.companyShift.findMany({
+          where: { companyId },
+          select: { id: true, name: true, startTime: true, endTime: true, shiftType: true },
+          orderBy: { startTime: 'asc' },
+        });
+      }
+      return { status: 'NOT_CHECKED_IN' as const, record: null, elapsedSeconds: 0, canStartNewShift: false, completedShifts: 0, attendanceMode, companyShifts };
     }
 
     let elapsedSeconds = 0;
@@ -2503,7 +2553,30 @@ export class ESSService {
     }
 
     const status = record.punchOut ? ('CHECKED_OUT' as const) : ('CHECKED_IN' as const);
-    return { status, record, elapsedSeconds };
+
+    // Multi-shift: determine if employee can start a new shift
+    let canStartNewShift = false;
+    let completedShifts = 0;
+    if (multiShiftEnabled && record.punchOut) {
+      const allTodayRecords = await platformPrisma.attendanceRecord.findMany({
+        where: { employeeId, date: today },
+        select: { shiftSequence: true, punchOut: true },
+      });
+      completedShifts = allTodayRecords.filter(r => r.punchOut).length;
+      canStartNewShift = !maxShiftsPerDay || completedShifts < maxShiftsPerDay;
+    }
+
+    // EMPLOYEE_CHOICE: include company shifts for multi-shift new check-in dropdown
+    let companyShiftsForCheckedOut: Array<{ id: string; name: string; startTime: string; endTime: string; shiftType: string }> | undefined;
+    if (attendanceMode === 'EMPLOYEE_CHOICE' && canStartNewShift) {
+      companyShiftsForCheckedOut = await platformPrisma.companyShift.findMany({
+        where: { companyId },
+        select: { id: true, name: true, startTime: true, endTime: true, shiftType: true },
+        orderBy: { startTime: 'asc' },
+      });
+    }
+
+    return { status, record, elapsedSeconds, canStartNewShift, completedShifts, attendanceMode, companyShifts: companyShiftsForCheckedOut };
   }
 
   // ── Dashboard helper: Leave Balance Summary ──

@@ -31,9 +31,11 @@ export class EmployeeService {
       locationId?: string;
       status?: string;
       employeeTypeId?: string;
+      sortBy?: string;
+      sortOrder?: string;
     } = {},
   ) {
-    const { page = 1, limit = 25, search, departmentId, designationId, locationId, status, employeeTypeId } = options;
+    const { page = 1, limit = 25, search, departmentId, designationId, locationId, status, employeeTypeId, sortBy, sortOrder } = options;
     const offset = (page - 1) * limit;
 
     const where: any = { companyId };
@@ -91,13 +93,18 @@ export class EmployeeService {
         : {}),
     } satisfies Prisma.EmployeeInclude;
 
+    // Build orderBy — support sorting by employeeId or fallback to createdAt
+    const allowedSortFields = ['employeeId', 'firstName', 'lastName', 'joiningDate', 'createdAt', 'status'];
+    const resolvedSortBy = sortBy && allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+    const resolvedSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+
     const [rows, total] = await Promise.all([
       platformPrisma.employee.findMany({
         where,
         include: listInclude,
         skip: offset,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { [resolvedSortBy]: resolvedSortOrder },
       }),
       platformPrisma.employee.count({ where }),
     ]);

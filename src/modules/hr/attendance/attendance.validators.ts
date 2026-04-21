@@ -109,7 +109,7 @@ export const attendanceRulesSchema = z.object({
   missingPunchAlert: z.boolean().optional(),
 
   // Attendance Mode & Flexibility
-  attendanceMode: z.nativeEnum(AttendanceMode).optional(),
+  attendanceMode: z.nativeEnum(AttendanceMode).optional(), // SHIFT_STRICT | SHIFT_RELAXED | FULLY_FLEXIBLE | EMPLOYEE_CHOICE
   leaveCheckInMode: z.nativeEnum(LeaveCheckInMode).optional(),
   leaveAutoAdjustmentEnabled: z.boolean().optional(),
 
