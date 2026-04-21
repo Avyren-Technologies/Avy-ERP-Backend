@@ -65,38 +65,38 @@ export const updateEmployeeSalarySchema = z.object({
 // ── PF Config ─────────────────────────────────────────────────────────
 
 export const pfConfigSchema = z.object({
-  employeeRate: z.number().min(0).max(100).optional(),
-  employerEpfRate: z.number().min(0).max(100).optional(),
-  employerEpsRate: z.number().min(0).max(100).optional(),
-  employerEdliRate: z.number().min(0).max(100).optional(),
-  adminChargeRate: z.number().min(0).max(100).optional(),
-  wageCeiling: z.number().min(0).optional(),
+  employeeRate: z.coerce.number().min(0).max(100).optional(),
+  employerEpfRate: z.coerce.number().min(0).max(100).optional(),
+  employerEpsRate: z.coerce.number().min(0).max(100).optional(),
+  employerEdliRate: z.coerce.number().min(0).max(100).optional(),
+  adminChargeRate: z.coerce.number().min(0).max(100).optional(),
+  wageCeiling: z.coerce.number().min(0).optional(),
   vpfEnabled: z.boolean().optional(),
-  vpfMaxRate: z.number().min(0).max(100).nullable().optional(),
-  excludedComponents: z.array(z.string()).optional(),
+  vpfMaxRate: z.coerce.number().min(0).max(100).nullable().optional(),
+  excludedComponents: z.array(z.string()).nullish().transform((v) => v || []),
 });
 
 // ── ESI Config ────────────────────────────────────────────────────────
 
 export const esiConfigSchema = z.object({
-  employeeRate: z.number().min(0).max(100).optional(),
-  employerRate: z.number().min(0).max(100).optional(),
-  wageCeiling: z.number().min(0).optional(),
-  excludedWages: z.array(z.string()).optional(),
+  employeeRate: z.coerce.number().min(0).max(100).optional(),
+  employerRate: z.coerce.number().min(0).max(100).optional(),
+  wageCeiling: z.coerce.number().min(0).optional(),
+  excludedWages: z.array(z.string()).nullish().transform((v) => v || []),
 });
 
 // ── PT Config ─────────────────────────────────────────────────────────
 
 const ptSlabSchema = z.object({
-  fromAmount: z.number().min(0),
-  toAmount: z.number().min(0),
-  taxAmount: z.number().min(0),
+  fromAmount: z.coerce.number().min(0),
+  toAmount: z.coerce.number().min(0),
+  taxAmount: z.coerce.number().min(0),
 });
 
 export const createPTConfigSchema = z.object({
   state: z.string().min(1, 'State is required'),
   slabs: z.array(ptSlabSchema).min(1, 'At least one slab is required'),
-  monthlyOverrides: z.record(z.string(), z.number().min(0)).optional(), // { "2": 300 } — month number to override amount
+  monthlyOverrides: z.record(z.string(), z.coerce.number().min(0)).nullish().transform((v) => v || {}), // { "2": 300 } — month number to override amount
   financialYear: z.string().regex(/^\d{4}-\d{2}$/, 'Financial year must be in format YYYY-YY (e.g. 2025-26)').optional(),
   frequency: z.enum(['MONTHLY', 'SEMI_ANNUAL']).default('MONTHLY'),
   registrationNumber: z.string().optional(),
@@ -109,7 +109,7 @@ export const updatePTConfigSchema = createPTConfigSchema.partial();
 export const gratuityConfigSchema = z.object({
   formula: z.string().optional(),
   baseSalary: z.string().optional(),
-  maxAmount: z.number().min(0).optional(),
+  maxAmount: z.coerce.number().min(0).optional(),
   provisionMethod: z.enum(['MONTHLY', 'ACTUAL_AT_EXIT']).optional(),
   trustExists: z.boolean().optional(),
 });
@@ -117,10 +117,10 @@ export const gratuityConfigSchema = z.object({
 // ── Bonus Config ──────────────────────────────────────────────────────
 
 export const bonusConfigSchema = z.object({
-  wageCeiling: z.number().min(0).optional(),
-  minBonusPercent: z.number().min(0).max(100).optional(),
-  maxBonusPercent: z.number().min(0).max(100).optional(),
-  eligibilityDays: z.number().int().min(0).optional(),
+  wageCeiling: z.coerce.number().min(0).optional(),
+  minBonusPercent: z.coerce.number().min(0).max(100).optional(),
+  maxBonusPercent: z.coerce.number().min(0).max(100).optional(),
+  eligibilityDays: z.coerce.number().int().min(0).optional(),
   calculationPeriod: z.enum(['APR_MAR', 'JAN_DEC']).optional(),
 });
 
@@ -128,8 +128,8 @@ export const bonusConfigSchema = z.object({
 
 export const createLWFConfigSchema = z.object({
   state: z.string().min(1, 'State is required'),
-  employeeAmount: z.number().min(0, 'Employee amount is required'),
-  employerAmount: z.number().min(0, 'Employer amount is required'),
+  employeeAmount: z.coerce.number().min(0, 'Employee amount is required'),
+  employerAmount: z.coerce.number().min(0, 'Employer amount is required'),
   frequency: z.enum(['MONTHLY', 'SEMI_ANNUAL', 'ANNUAL']).default('MONTHLY'),
 });
 
@@ -157,6 +157,7 @@ export const createBankConfigSchema = z.object({
   fileFormat: z.string().optional(),
   autoPushOnApproval: z.boolean().default(false),
 });
+
 
 // ── Loan Policy ───────────────────────────────────────────────────────
 

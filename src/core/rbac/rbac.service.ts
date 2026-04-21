@@ -4,7 +4,7 @@ import { ApiError } from '../../shared/errors/api-error';
 import { AuthError } from '../../shared/errors';
 import { HttpStatus } from '../../shared/types';
 import { logger } from '../../config/logger';
-import { getAllPermissions, REFERENCE_ROLE_PERMISSIONS, hasPermission } from '../../shared/constants/permissions';
+import { getAllPermissions, REFERENCE_ROLE_PERMISSIONS, hasPermission, COMPANY_ADMIN_PERMISSIONS } from '../../shared/constants/permissions';
 import { NAVIGATION_MANIFEST, getGroupedNavigation, type NavigationItem } from '../../shared/constants/navigation-manifest';
 import { createUserCacheKey, createUserPermissionsCacheKey } from '../../shared/utils';
 import { getCachedSystemControls, getCachedESSConfig } from '../../shared/utils/config-cache';
@@ -396,13 +396,7 @@ export class RbacService {
   }
 
   async syncCompanyAdminPermissions(): Promise<{ updated: number; skipped: number }> {
-    // The canonical Company Admin permission set (must match tenant.service.ts)
-    const COMPANY_ADMIN_PERMISSIONS = [
-      'company:*', 'hr:*', 'ess:*', 'attendance:*', 'production:*', 'inventory:*', 'sales:*',
-      'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
-      'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
-      'billing:*', 'analytics:*', 'docdiff:*',
-    ];
+    // Imported from permissions.ts — single source of truth for Company Admin permissions.
 
     const companyAdminRoles = await platformPrisma.role.findMany({
       where: { name: 'Company Admin', isSystem: true },

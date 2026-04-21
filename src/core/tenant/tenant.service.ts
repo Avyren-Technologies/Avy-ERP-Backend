@@ -6,6 +6,7 @@ import {
   DEFAULT_APPROVAL_WORKFLOWS, DEFAULT_NOTIFICATION_TEMPLATES, DEFAULT_NOTIFICATION_RULES, DEFAULT_EXPENSE_CATEGORIES,
   DEFAULT_TAX_CONFIG, DEFAULT_ROSTERS, getDefaultHolidays,
 } from '../../shared/constants/company-defaults';
+import { COMPANY_ADMIN_PERMISSIONS } from '../../shared/constants/permissions';
 import { platformPrisma } from '../../config/database';
 import { cacheRedis, scanAndDelete } from '../../config/redis';
 import { ApiError } from '../../shared/errors';
@@ -409,12 +410,7 @@ export class TenantService {
           tenantId: tenant.id,
           name: 'Company Admin',
           description: 'Full company access — all modules and actions',
-          permissions: [
-            'company:*', 'hr:*', 'ess:*', 'attendance:*', 'production:*', 'inventory:*', 'sales:*',
-            'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
-            'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
-            'billing:*', 'analytics:*', 'docdiff:*',
-          ],
+          permissions: COMPANY_ADMIN_PERMISSIONS,
           isSystem: true,
         },
       });

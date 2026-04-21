@@ -35,7 +35,7 @@ function buildSeedConfig(): SeedConfig {
 
   return {
     superAdminEmail: requiredEnv('SEED_SUPER_ADMIN_EMAIL', 'superadmin@avyrentechnologies.com'),
-    superAdminPassword: requiredEnv('SEED_SUPER_ADMIN_PASSWORD', 'Avyren#Nexus47!Q'),
+    superAdminPassword: requiredEnv('SEED_SUPER_ADMIN_PASSWORD', 'Password@123'),
     superAdminFirstName: requiredEnv('SEED_SUPER_ADMIN_FIRST_NAME', 'Platform'),
     superAdminLastName: requiredEnv('SEED_SUPER_ADMIN_LAST_NAME', 'Admin'),
     ...(superAdminPhone ? { superAdminPhone } : {}),

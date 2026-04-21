@@ -1097,20 +1097,35 @@ export class ESSController {
       },
     } as const;
 
-    let record = await platformPrisma.attendanceRecord.findUnique({
-      where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
-      include: shiftInclude,
-    });
+    // Multi-shift aware: find the LATEST shift record for today (not just shiftSequence: 1)
+    const attendanceRulesForStatus = await getCachedAttendanceRules(companyId);
+    const multiShiftEnabled = attendanceRulesForStatus.multipleShiftsPerDayEnabled;
 
-    // For cross-day (night) shifts: if no record today, check yesterday's record
-    // (employee may have checked in yesterday and not yet checked out)
+    let record = multiShiftEnabled
+      ? await platformPrisma.attendanceRecord.findFirst({
+          where: { employeeId, date: today },
+          orderBy: { shiftSequence: 'desc' },
+          include: shiftInclude,
+        })
+      : await platformPrisma.attendanceRecord.findUnique({
+          where: { employeeId_date_shiftSequence: { employeeId, date: today, shiftSequence: 1 } },
+          include: shiftInclude,
+        });
+
+    // For cross-day (night) shifts: if no open record today, check yesterday
     if (!record || (!record.punchIn)) {
       const yesterdayDT = nowCT.minus({ days: 1 });
       const yesterday = new Date(yesterdayDT.toFormat('yyyy-MM-dd') + 'T00:00:00.000Z');
-      const yesterdayRecord = await platformPrisma.attendanceRecord.findUnique({
-        where: { employeeId_date_shiftSequence: { employeeId, date: yesterday, shiftSequence: 1 } },
-        include: shiftInclude,
-      });
+      const yesterdayRecord = multiShiftEnabled
+        ? await platformPrisma.attendanceRecord.findFirst({
+            where: { employeeId, date: yesterday, punchOut: null, punchIn: { not: null } },
+            orderBy: { shiftSequence: 'desc' },
+            include: shiftInclude,
+          })
+        : await platformPrisma.attendanceRecord.findUnique({
+            where: { employeeId_date_shiftSequence: { employeeId, date: yesterday, shiftSequence: 1 } },
+            include: shiftInclude,
+          });
       if (yesterdayRecord?.punchIn && !yesterdayRecord.punchOut) {
         record = yesterdayRecord;
       }
@@ -1270,7 +1285,21 @@ export class ESSController {
     }));
 
     const status = record.punchOut ? 'CHECKED_OUT' : 'CHECKED_IN';
-    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy, recentAttendance }, `Attendance status: ${status}`));
+
+    // Multi-shift: determine if employee can start a new shift
+    let canStartNewShift = false;
+    let completedShifts = 0;
+    if (multiShiftEnabled && record.punchOut) {
+      const allTodayRecords = await platformPrisma.attendanceRecord.findMany({
+        where: { employeeId, date: today },
+        select: { shiftSequence: true, punchOut: true },
+      });
+      completedShifts = allTodayRecords.filter(r => r.punchOut).length;
+      const maxShifts = attendanceRulesForStatus.maxShiftsPerDay;
+      canStartNewShift = !maxShifts || completedShifts < maxShifts;
+    }
+
+    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy, recentAttendance, canStartNewShift, completedShifts }, `Attendance status: ${status}`));
   });
 
   checkIn = asyncHandler(async (req: Request, res: Response) => {

@@ -20,7 +20,7 @@
     "worker:analytics": "ts-node src/workers/analytics.worker.ts",
     "worker:notifications": "ts-node src/workers/notification.worker.ts",
     "db:migrate-tenants": "node scripts/merge-prisma.js && prisma migrate deploy && npx tsx scripts/migrate-tenants.ts",
-    "company:seed": "npx tsx scripts/seed-company.ts --api-url http://localhost:3030/api/v1 --email superadmin@avyrentechnologies.com --password Avyren#Nexus47!Q",
+    "company:seed": "npx tsx scripts/seed-company.ts --api-url http://localhost:3030/api/v1 --email superadmin@avyrentechnologies.com --password Password@123",
     "demo:seed": "npx tsx scripts/seed-demo-tenant.ts",
     "seed:hrms": "npx tsx scripts/seed-hrms-data.ts"
   },

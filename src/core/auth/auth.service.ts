@@ -15,7 +15,7 @@ import {
   createRedisPattern,
 } from '../../shared/utils';
 import { logger } from '../../config/logger';
-import { expandPermissionsWithInheritance, suppressByModules } from '../../shared/constants/permissions';
+import { expandPermissionsWithInheritance, suppressByModules, COMPANY_ADMIN_PERMISSIONS } from '../../shared/constants/permissions';
 import {
   LoginRequest,
   RegisterRequest,
@@ -309,12 +309,7 @@ export class AuthService {
           tenantId: tenant.id,
           name: 'Company Admin',
           description: 'Full company access — all modules and actions',
-          permissions: [
-            'company:*', 'hr:*', 'ess:*', 'attendance:*', 'production:*', 'inventory:*', 'sales:*',
-            'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
-            'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
-            'billing:*', 'analytics:*',
-          ],
+          permissions: COMPANY_ADMIN_PERMISSIONS,
           isSystem: true,
         },
       });

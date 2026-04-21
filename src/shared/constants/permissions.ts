@@ -38,6 +38,7 @@ export const MODULE_TO_PERMISSION_MAP: Record<string, string[]> = {
   'finance': ['finance'],
   'visitor': ['visitors'],
   'masters': ['masters'],
+  'docdiff': ['docdiff'],
 };
 
 /**
@@ -69,7 +70,10 @@ export function expandPermissionsWithInheritance(permissions: string[]): string[
 /**
  * Filter permissions by active company modules.
  * Removes any permission whose module is not in the company's active subscription.
- * System modules (user, role, company, reports, audit, platform) are never suppressed.
+ * System modules (user, role, company, reports, audit, platform, billing) are never
+ * suppressed — they are always available regardless of subscription tier.
+ * All other modules (hr, production, inventory, sales, finance, maintenance, vendor,
+ * security, visitors, masters, docdiff, etc.) are gated by active subscription modules.
  */
 export function suppressByModules(permissions: string[], activeModuleIds: string[]): string[] {
   // If no modules are configured at all, skip suppression to avoid locking out users
@@ -199,6 +203,27 @@ export const PERMISSION_MODULES = {
 } as const;
 
 export type PermissionModule = keyof typeof PERMISSION_MODULES;
+
+/**
+ * Canonical permission set for the "Company Admin" system role.
+ *
+ * This is the single source of truth for what a Company Admin can do on creation.
+ * Import and use this constant in auth.service.ts, tenant.service.ts, and
+ * rbac.service.ts — do NOT inline this list in those files.
+ *
+ * NOTE: `docdiff:*` is included here so newly onboarded Company Admins have full
+ * DocDiff access by default. The super admin can revoke it per-company via the
+ * Company Admin Permissions screen. DocDiff is treated as a system-level permission
+ * (present in SYSTEM_PERMISSION_MODULES inside suppressByModules), so once a super
+ * admin grants it to a company it is NEVER stripped by subscription module gating —
+ * the super admin's explicit per-company grant is the sole access gate.
+ */
+export const COMPANY_ADMIN_PERMISSIONS: string[] = [
+  'company:*', 'hr:*', 'ess:*', 'attendance:*', 'production:*', 'inventory:*', 'sales:*',
+  'finance:*', 'maintenance:*', 'vendor:*', 'security:*', 'visitors:*',
+  'masters:*', 'user:*', 'role:*', 'reports:*', 'audit:*',
+  'billing:*', 'analytics:*', 'docdiff:*',
+];
 
 /**
  * Generate flat list of all available permissions.
