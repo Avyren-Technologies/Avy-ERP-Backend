@@ -530,12 +530,24 @@ class AttendanceBookService {
       entityType: 'AttendanceRecord',
       entityId: upsertedRecord.id,
       action: existingRecord ? 'UPDATE' : 'CREATE',
-      after: { status: finalStatus, source: 'HR_BOOK', firstHalf: input.firstHalf, secondHalf: input.secondHalf },
+      after: {
+        status: finalStatus,
+        source: 'HR_BOOK',
+        firstHalf: input.firstHalf,
+        secondHalf: input.secondHalf,
+        ...(isOverriding ? { override: true, previousSource: existingRecord!.source, overriddenBy: userId } : {}),
+      },
       changedBy: userId,
       companyId,
     };
     if (existingRecord) {
-      auditParams.before = { status: existingRecord.status, source: existingRecord.source };
+      auditParams.before = {
+        status: existingRecord.status,
+        source: existingRecord.source,
+        punchIn: existingRecord.punchIn?.toISOString() ?? null,
+        punchOut: existingRecord.punchOut?.toISOString() ?? null,
+        halves: existingRecord.halves.map((h) => ({ half: h.half, status: h.status, leaveTypeId: h.leaveTypeId })),
+      };
     }
     await auditLog(auditParams);
 
@@ -552,7 +564,26 @@ class AttendanceBookService {
       },
     });
 
-    return fullRecord;
+    return {
+      id: fullRecord!.id,
+      status: fullRecord!.status,
+      source: fullRecord!.source,
+      punchIn: fullRecord!.punchIn?.toISOString() ?? null,
+      punchOut: fullRecord!.punchOut?.toISOString() ?? null,
+      workedHours: fullRecord!.workedHours ? Number(fullRecord!.workedHours) : null,
+      isLate: fullRecord!.isLate,
+      lateMinutes: fullRecord!.lateMinutes,
+      isOverridden: fullRecord!.isOverridden,
+      halves: fullRecord!.halves.map((h) => ({
+        id: h.id,
+        half: h.half,
+        status: h.status,
+        leaveTypeId: h.leaveTypeId,
+        leaveTypeName: (h as any).leaveType?.name ?? null,
+        leaveRequestId: h.leaveRequestId,
+      })),
+      updatedAt: fullRecord!.updatedAt.toISOString(),
+    };
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -825,59 +856,64 @@ class AttendanceBookService {
       throw ApiError.notFound(`Leave type not found: ${leaveTypeId}`);
     }
 
-    // Row-level lock on LeaveBalance using FOR UPDATE
-    const balanceRows = await platformPrisma.$queryRaw<
-      Array<{ id: string; balance: number; taken: number }>
-    >`
-      SELECT id, balance::float as balance, taken::float as taken
-      FROM leave_balances
-      WHERE employee_id = ${employeeId}
-        AND leave_type_id = ${leaveTypeId}
-        AND year = ${year}
-      FOR UPDATE
-    `;
+    // Entire deduction + creation must be in a single transaction with row-level lock
+    const leaveRequestId = await platformPrisma.$transaction(async (tx) => {
+      // Row-level lock on LeaveBalance using FOR UPDATE
+      const balanceRows = await tx.$queryRaw<
+        Array<{ id: string; balance: number; taken: number }>
+      >`
+        SELECT id, balance::float as balance, taken::float as taken
+        FROM leave_balances
+        WHERE employee_id = ${employeeId}
+          AND leave_type_id = ${leaveTypeId}
+          AND year = ${year}
+        FOR UPDATE
+      `;
 
-    const balanceRow = balanceRows?.[0];
-    if (!balanceRow) {
-      throw ApiError.unprocessableEntity(
-        `No leave balance found for ${leaveType.name} in ${year}. Please configure leave balances first.`,
-      );
-    }
+      const balanceRow = balanceRows?.[0];
+      if (!balanceRow) {
+        throw ApiError.unprocessableEntity(
+          `No leave balance found for ${leaveType!.name} in ${year}. Please configure leave balances first.`,
+        );
+      }
 
-    if (balanceRow.balance < days) {
-      throw ApiError.unprocessableEntity(
-        `Insufficient ${leaveType.name} balance. Required: ${days} day(s), Available: ${balanceRow.balance} day(s).`,
-      );
-    }
+      if (balanceRow.balance < days) {
+        throw ApiError.unprocessableEntity(
+          `Insufficient ${leaveType!.name} balance. Required: ${days} day(s), Available: ${balanceRow.balance} day(s).`,
+        );
+      }
 
-    // Deduct balance
-    await platformPrisma.leaveBalance.update({
-      where: { id: balanceRow.id },
-      data: {
-        taken: { increment: days },
-        balance: { decrement: days },
-      },
+      // Deduct balance
+      await tx.leaveBalance.update({
+        where: { id: balanceRow.id },
+        data: {
+          taken: { increment: days },
+          balance: { decrement: days },
+        },
+      });
+
+      // Create leave request
+      const leaveRequest = await tx.leaveRequest.create({
+        data: {
+          employeeId,
+          leaveTypeId,
+          fromDate: dateAsUtc,
+          toDate: dateAsUtc,
+          days,
+          isHalfDay,
+          halfDayType,
+          reason: `Marked via Attendance Book${isHalfDay ? ` (${halfDayType === 'FIRST_HALF' ? 'First Half' : 'Second Half'})` : ''}`,
+          status: 'AUTO_APPROVED',
+          approvedBy: userId,
+          approvedAt: new Date(),
+          companyId,
+        },
+      });
+
+      return leaveRequest.id;
     });
 
-    // Create leave request
-    const leaveRequest = await platformPrisma.leaveRequest.create({
-      data: {
-        employeeId,
-        leaveTypeId,
-        fromDate: dateAsUtc,
-        toDate: dateAsUtc,
-        days,
-        isHalfDay,
-        halfDayType,
-        reason: `Marked via Attendance Book${isHalfDay ? ` (${halfDayType === 'FIRST_HALF' ? 'First Half' : 'Second Half'})` : ''}`,
-        status: 'AUTO_APPROVED',
-        approvedBy: userId,
-        approvedAt: new Date(),
-        companyId,
-      },
-    });
-
-    return leaveRequest.id;
+    return leaveRequestId;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -908,26 +944,27 @@ class AttendanceBookService {
 
     const daysToRefund = Number(leaveRequest.days);
 
-    // Refund balance
-    await platformPrisma.leaveBalance.updateMany({
-      where: {
-        employeeId,
-        leaveTypeId: leaveRequest.leaveTypeId,
-        year,
-      },
-      data: {
-        taken: { decrement: daysToRefund },
-        balance: { increment: daysToRefund },
-      },
-    });
+    // Refund balance + cancel request atomically
+    await platformPrisma.$transaction(async (tx) => {
+      await tx.leaveBalance.updateMany({
+        where: {
+          employeeId,
+          leaveTypeId: leaveRequest!.leaveTypeId,
+          year,
+        },
+        data: {
+          taken: { decrement: daysToRefund },
+          balance: { increment: daysToRefund },
+        },
+      });
 
-    // Cancel the leave request
-    await platformPrisma.leaveRequest.update({
-      where: { id: leaveRequestId },
-      data: {
-        status: 'CANCELLED',
-        cancelledAt: new Date(),
-      },
+      await tx.leaveRequest.update({
+        where: { id: leaveRequestId },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+        },
+      });
     });
 
     logger.info(
