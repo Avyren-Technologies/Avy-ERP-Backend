@@ -169,9 +169,12 @@ class AttendanceBookService {
               id: record.id,
               status: record.status,
               source: record.source,
-              punchIn: record.punchIn,
-              punchOut: record.punchOut,
+              punchIn: record.punchIn?.toISOString() ?? null,
+              punchOut: record.punchOut?.toISOString() ?? null,
               workedHours: record.workedHours ? Number(record.workedHours) : null,
+              isLate: record.isLate,
+              lateMinutes: record.lateMinutes,
+              isOverridden: record.isOverridden,
               remarks: record.remarks,
               updatedAt: record.updatedAt.toISOString(),
               isLocked: record.source !== 'HR_BOOK',
@@ -187,25 +190,28 @@ class AttendanceBookService {
               })),
             }
           : null,
-        existingLeave: empLeaves.map((lr) => ({
-          id: lr.id,
-          leaveTypeId: lr.leaveTypeId,
-          leaveTypeName: lr.leaveType?.name ?? null,
-          leaveTypeCode: lr.leaveType?.code ?? null,
-          fromDate: lr.fromDate,
-          toDate: lr.toDate,
-          days: Number(lr.days),
-          isHalfDay: lr.isHalfDay,
-          halfDayType: lr.halfDayType,
-          status: lr.status,
-        })),
-        leaveBalances: empBalances.map((lb) => ({
-          leaveTypeId: lb.leaveTypeId,
-          leaveTypeName: lb.leaveType?.name ?? null,
-          leaveTypeCode: lb.leaveType?.code ?? null,
-          balance: Number(lb.balance),
-          taken: Number(lb.taken),
-        })),
+        existingLeave: (() => {
+          const firstLeave = empLeaves[0];
+          if (!firstLeave) return null;
+          return {
+            id: firstLeave.id,
+            leaveTypeId: firstLeave.leaveTypeId,
+            leaveTypeName: firstLeave.leaveType?.name ?? null,
+            status: firstLeave.status,
+            isHalfDay: firstLeave.isHalfDay,
+            halfDayType: firstLeave.halfDayType,
+            days: Number(firstLeave.days),
+          };
+        })(),
+        leaveBalances: empBalances.map((lb) => {
+          const lt = leaveTypes.find((t) => t.id === lb.leaveTypeId);
+          return {
+            leaveTypeId: lb.leaveTypeId,
+            leaveTypeName: lb.leaveType?.name ?? null,
+            balance: Number(lb.balance),
+            allowHalfDay: lt?.allowHalfDay ?? true,
+          };
+        }),
       };
     });
 
