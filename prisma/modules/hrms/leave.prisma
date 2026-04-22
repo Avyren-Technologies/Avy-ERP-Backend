@@ -40,6 +40,7 @@ model LeaveType {
   balances LeaveBalance[]
   requests LeaveRequest[]
   policies LeavePolicy[]
+  attendanceHalves  AttendanceHalf[]
 
   @@unique([companyId, code])
   @@map("leave_types")
@@ -104,6 +105,8 @@ model LeaveRequest {
   company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+
+  attendanceHalves  AttendanceHalf[]
 
   @@map("leave_requests")
 }

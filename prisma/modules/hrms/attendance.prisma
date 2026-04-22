@@ -73,10 +73,50 @@ model AttendanceRecord {
   overrides       AttendanceOverride[]
   overtimeRequest OvertimeRequest?
 
+  // ── Attendance Book: split-half relation ──
+  halves            AttendanceHalf[]
+
+  // ── Override tracking ──
+  isOverridden      Boolean            @default(false)
+  overriddenBy      String?
+  overriddenAt      DateTime?
+  previousSource    AttendanceSource?
+
   @@unique([employeeId, date, shiftSequence])
   @@index([companyId, date])
   @@index([companyId, status])
   @@map("attendance_records")
+}
+
+model AttendanceHalf {
+  id                  String            @id @default(cuid())
+  attendanceRecordId  String
+  attendanceRecord    AttendanceRecord  @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  half                DayHalf
+  status              HalfDayStatus
+  leaveTypeId         String?
+  leaveType           LeaveType?        @relation(fields: [leaveTypeId], references: [id])
+  leaveRequestId      String?
+  leaveRequest        LeaveRequest?     @relation(fields: [leaveRequestId], references: [id])
+  overrideTime        String?
+  remarks             String?
+  markedBy            String
+  markedAt            DateTime          @default(now())
+
+  @@unique([attendanceRecordId, half])
+  @@index([attendanceRecordId])
+  @@map("attendance_half")
+}
+
+enum DayHalf {
+  FIRST_HALF
+  SECOND_HALF
+}
+
+enum HalfDayStatus {
+  PRESENT
+  ABSENT
+  ON_LEAVE
 }
 
 model AttendanceOverride {
@@ -327,6 +367,7 @@ enum AttendanceSource {
   MANUAL
   IOT
   SMART_CARD
+  HR_BOOK
 }
 
 enum OverrideStatus {
