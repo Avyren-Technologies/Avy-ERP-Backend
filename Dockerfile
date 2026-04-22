@@ -59,7 +59,7 @@ COPY src ./src
 
 # Create necessary directories with proper ownership
 RUN mkdir -p logs uploads && \
-    chown -R appuser:appgroup /app
+    chown appuser:appgroup logs uploads
 
 # Switch to non-root user
 USER appuser
