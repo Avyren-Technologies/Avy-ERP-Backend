@@ -3,6 +3,7 @@ import { requirePermissions } from '../../../middleware/auth.middleware';
 import { requireModuleEnabled } from '../../../shared/middleware/config-enforcement.middleware';
 import { attendanceController as controller } from './attendance.controller';
 import { adminAttendanceRoutes } from './admin-attendance.routes';
+import { attendanceBookRoutes } from './attendance-book.routes';
 
 const router = Router();
 
@@ -11,6 +12,9 @@ router.use(requireModuleEnabled('attendance'));
 
 // ── Admin Attendance (kiosk / manual mark) ────────────────────────────────────
 router.use('/attendance/admin', adminAttendanceRoutes);
+
+// ── Attendance Book (HR mark attendance per day) ──────────────────────────
+router.use('/attendance/book', attendanceBookRoutes);
 
 // ── Attendance Rules (must be before :id to avoid "rules" matching as an ID) ──
 router.get('/attendance/rules', requirePermissions(['hr:read']), controller.getRules);
