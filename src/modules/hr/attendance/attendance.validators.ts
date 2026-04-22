@@ -52,7 +52,7 @@ export const createAttendanceSchema = z.object({
   punchIn: z.string().optional(), // ISO datetime
   punchOut: z.string().optional(), // ISO datetime
   status: z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LATE', 'EARLY_EXIT', 'INCOMPLETE', 'ON_LEAVE', 'HOLIDAY', 'WEEK_OFF', 'LOP', 'REGULARIZED']),
-  source: z.enum(['BIOMETRIC', 'FACE_RECOGNITION', 'MOBILE_GPS', 'WEB_PORTAL', 'MANUAL', 'IOT', 'SMART_CARD']),
+  source: z.enum(['BIOMETRIC', 'FACE_RECOGNITION', 'MOBILE_GPS', 'WEB_PORTAL', 'MANUAL', 'IOT', 'SMART_CARD', 'HR_BOOK']),
   remarks: z.string().optional(),
   locationId: z.string().optional(),
 });
