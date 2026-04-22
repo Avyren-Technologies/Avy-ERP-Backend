@@ -1257,6 +1257,7 @@ export class ESSController {
         assignedGeofence,
         recentAttendance: recentAttendanceNotCheckedIn,
         attendanceMode: attendanceRulesForStatus.attendanceMode,
+        checkInUIMode: attendanceRulesForStatus.checkInUIMode,
         companyShifts,
       }, 'Not checked in today'));
       return;
@@ -1349,7 +1350,7 @@ export class ESSController {
       });
     }
 
-    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy, recentAttendance, canStartNewShift, completedShifts, attendanceMode: attendanceRulesForStatus.attendanceMode, companyShifts: companyShiftsForStatus }, `Attendance status: ${status}`));
+    res.json(createSuccessResponse({ status, record, elapsedSeconds, resolvedPolicy, recentAttendance, canStartNewShift, completedShifts, attendanceMode: attendanceRulesForStatus.attendanceMode, checkInUIMode: attendanceRulesForStatus.checkInUIMode, companyShifts: companyShiftsForStatus }, `Attendance status: ${status}`));
   });
 
   checkIn = asyncHandler(async (req: Request, res: Response) => {

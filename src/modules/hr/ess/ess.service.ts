@@ -2474,11 +2474,13 @@ export class ESSService {
     let multiShiftEnabled = false;
     let maxShiftsPerDay: number | null = null;
     let attendanceMode = 'SHIFT_STRICT';
+    let checkInUIMode = 'SLIDE';
     try {
       const rules = await getCachedAttendanceRules(companyId);
       multiShiftEnabled = rules.multipleShiftsPerDayEnabled;
       maxShiftsPerDay = rules.maxShiftsPerDay;
       attendanceMode = rules.attendanceMode;
+      checkInUIMode = rules.checkInUIMode;
     } catch {
       // Rules not configured yet — safe to continue with defaults
     }
@@ -2544,7 +2546,7 @@ export class ESSService {
           orderBy: { startTime: 'asc' },
         });
       }
-      return { status: 'NOT_CHECKED_IN' as const, record: null, elapsedSeconds: 0, canStartNewShift: false, completedShifts: 0, attendanceMode, companyShifts };
+      return { status: 'NOT_CHECKED_IN' as const, record: null, elapsedSeconds: 0, canStartNewShift: false, completedShifts: 0, attendanceMode, checkInUIMode, companyShifts };
     }
 
     let elapsedSeconds = 0;
@@ -2576,7 +2578,7 @@ export class ESSService {
       });
     }
 
-    return { status, record, elapsedSeconds, canStartNewShift, completedShifts, attendanceMode, companyShifts: companyShiftsForCheckedOut };
+    return { status, record, elapsedSeconds, canStartNewShift, completedShifts, attendanceMode, checkInUIMode, companyShifts: companyShiftsForCheckedOut };
   }
 
   // ── Dashboard helper: Leave Balance Summary ──

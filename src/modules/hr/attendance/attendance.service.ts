@@ -1151,6 +1151,9 @@ export class AttendanceService {
         ...(data.geofenceEnforcementMode !== undefined && { geofenceEnforcementMode: data.geofenceEnforcementMode }),
         ...(data.missingPunchAlert !== undefined && { missingPunchAlert: data.missingPunchAlert }),
 
+        // Check-In UI Mode
+        ...(data.checkInUIMode !== undefined && { checkInUIMode: data.checkInUIMode }),
+
         // Attendance Mode & Flexibility
         ...(data.attendanceMode !== undefined && { attendanceMode: data.attendanceMode }),
         ...(data.leaveCheckInMode !== undefined && { leaveCheckInMode: data.leaveCheckInMode }),

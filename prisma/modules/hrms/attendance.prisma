@@ -150,6 +150,9 @@ model AttendanceRule {
   geofenceEnforcementMode GeofenceEnforcementMode @default(OFF)
   missingPunchAlert Boolean @default(true)
 
+  // ── Check-In UI Mode ──
+  checkInUIMode CheckInUIMode @default(SLIDE)
+
   // ── Attendance Mode & Flexibility ──
   attendanceMode             AttendanceMode       @default(SHIFT_STRICT)
   leaveCheckInMode           LeaveCheckInMode     @default(STRICT)
@@ -442,4 +445,9 @@ enum LeaveCheckInMode {
 
 enum ShiftMappingStrategy {
   BEST_FIT_HOURS
+}
+
+enum CheckInUIMode {
+  SLIDE
+  BUTTON
 }

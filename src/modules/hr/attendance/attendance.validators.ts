@@ -12,6 +12,7 @@ import {
   AttendanceMode,
   LeaveCheckInMode,
   ShiftMappingStrategy,
+  CheckInUIMode,
 } from '@prisma/client';
 
 const coerceOptionalInt = () => z.coerce.number().int().min(0).optional();
@@ -107,6 +108,9 @@ export const attendanceRulesSchema = z.object({
   gpsRequired: z.boolean().optional(),
   geofenceEnforcementMode: z.nativeEnum(GeofenceEnforcementMode).optional(),
   missingPunchAlert: z.boolean().optional(),
+
+  // Check-In UI Mode
+  checkInUIMode: z.nativeEnum(CheckInUIMode).optional(),
 
   // Attendance Mode & Flexibility
   attendanceMode: z.nativeEnum(AttendanceMode).optional(), // SHIFT_STRICT | SHIFT_RELAXED | FULLY_FLEXIBLE | EMPLOYEE_CHOICE
