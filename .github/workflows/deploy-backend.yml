@@ -1,0 +1,33 @@
+name: Deploy Backend to Production
+
+on:
+  push:
+    branches:
+      - main  # Make sure this matches your production branch name
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Deploy to Server Directory
+        run: |
+          # 1. Navigate to your EXISTING project directory on the server
+          # IMPORTANT: Update this path to where your project actually lives on the server!
+          cd /home/a/Documents/Avyren-Technologies/Avy-ERP-Backend
+          
+          # 2. Capture the current git commit BEFORE pulling
+          OLD_COMMIT=$(git rev-parse HEAD)
+          
+          # 3. Pull the latest code
+          git pull origin main
+          
+          # 4. Check what specific backend files changed
+          # We look for changes in docker-compose, prisma schemas/migrations, or the deploy script
+          if git diff --name-only $OLD_COMMIT HEAD | grep -E "^prisma/|^docker-compose\.yml|^deploy\.sh"; then
+            echo "Infrastructure or database changes detected. Running deploy.sh up..."
+            ./deploy.sh up
+          else
+            echo "Only application code changed. Running deploy.sh restart..."
+            ./deploy.sh restart
+          fi
