@@ -454,3 +454,21 @@ function buildResult(
     ...overrides,
   };
 }
+
+/**
+ * Derive overall AttendanceStatus from two half-day statuses.
+ * Rule: matching pairs → that status. Any mix of different statuses → HALF_DAY.
+ */
+export function deriveStatusFromHalves(
+  firstHalf: 'PRESENT' | 'ABSENT' | 'ON_LEAVE',
+  secondHalf: 'PRESENT' | 'ABSENT' | 'ON_LEAVE',
+): string {
+  if (firstHalf === secondHalf) {
+    switch (firstHalf) {
+      case 'PRESENT': return 'PRESENT';
+      case 'ABSENT': return 'ABSENT';
+      case 'ON_LEAVE': return 'ON_LEAVE';
+    }
+  }
+  return 'HALF_DAY';
+}
