@@ -41,7 +41,8 @@ export class EmployeeService {
     const where: any = { companyId };
 
     if (status) {
-      where.status = status.toUpperCase() as any;
+      const statuses = status.split(',').map((s: string) => s.trim().toUpperCase());
+      where.status = statuses.length === 1 ? (statuses[0] as any) : { in: statuses };
     }
     if (departmentId) {
       where.departmentId = departmentId;
