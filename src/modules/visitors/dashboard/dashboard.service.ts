@@ -97,7 +97,20 @@ class DashboardService {
       platformPrisma.visit.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    // Resolve host employee names from IDs
+    const hostIds = [...new Set(data.map(v => v.hostEmployeeId).filter(Boolean))] as string[];
+    const hosts = hostIds.length > 0 ? await platformPrisma.employee.findMany({
+      where: { id: { in: hostIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }) : [];
+    const hostMap = new Map(hosts.map(h => [h.id, `${h.firstName} ${h.lastName}`]));
+
+    const enrichedData = data.map(v => ({
+      ...v,
+      hostEmployeeName: v.hostEmployeeId ? (hostMap.get(v.hostEmployeeId) ?? null) : null,
+    }));
+
+    return { data: enrichedData, total, page, limit };
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -108,11 +121,24 @@ class DashboardService {
     const where: any = { companyId, status: 'CHECKED_IN' };
     if (plantId) where.plantId = plantId;
 
-    return platformPrisma.visit.findMany({
+    const data = await platformPrisma.visit.findMany({
       where,
       orderBy: { checkInTime: 'desc' },
       include: { visitorType: true, checkInGate: true },
     });
+
+    // Resolve host employee names from IDs
+    const hostIds = [...new Set(data.map(v => v.hostEmployeeId).filter(Boolean))] as string[];
+    const hosts = hostIds.length > 0 ? await platformPrisma.employee.findMany({
+      where: { id: { in: hostIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }) : [];
+    const hostMap = new Map(hosts.map(h => [h.id, `${h.firstName} ${h.lastName}`]));
+
+    return data.map(v => ({
+      ...v,
+      hostEmployeeName: v.hostEmployeeId ? (hostMap.get(v.hostEmployeeId) ?? null) : null,
+    }));
   }
 
   // ────────────────────────────────────────────────────────────────────

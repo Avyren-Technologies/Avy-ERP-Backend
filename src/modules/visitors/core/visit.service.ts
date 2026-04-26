@@ -45,11 +45,13 @@ class VisitService {
     });
     if (!visitorType) throw ApiError.notFound('Visitor type not found');
 
-    // Validate host employee exists for this company
-    const hostEmployee = await platformPrisma.employee.findFirst({
-      where: { id: input.hostEmployeeId, companyId },
-    });
-    if (!hostEmployee) throw ApiError.notFound('Host employee not found');
+    // Validate host employee exists for this company (optional for walk-in visitors)
+    if (input.hostEmployeeId) {
+      const hostEmployee = await platformPrisma.employee.findFirst({
+        where: { id: input.hostEmployeeId, companyId },
+      });
+      if (!hostEmployee) throw ApiError.notFound('Host employee not found');
+    }
 
     // Validate plant (location) exists for this company
     const plant = await platformPrisma.location.findFirst({
@@ -83,11 +85,11 @@ class VisitService {
           expectedDate: new Date(input.expectedDate),
           expectedTime: n(input.expectedTime),
           expectedDurationMinutes: input.expectedDurationMinutes ?? visitorType.defaultMaxDurationMinutes ?? null,
-          hostEmployeeId: input.hostEmployeeId,
+          hostEmployeeId: input.hostEmployeeId ?? createdBy,
           plantId: input.plantId,
           gateId: n(input.gateId),
           registrationMethod: 'PRE_REGISTERED',
-          approvalStatus: visitorType.requireHostApproval ? 'PENDING' : 'AUTO_APPROVED',
+          approvalStatus: (visitorType.requireHostApproval && input.hostEmployeeId) ? 'PENDING' : 'AUTO_APPROVED',
           status: 'EXPECTED',
           vehicleRegNumber: n(input.vehicleRegNumber),
           vehicleType: n(input.vehicleType),
@@ -118,8 +120,8 @@ class VisitService {
         logger.warn('Failed to generate QR code for visit', { error: qrErr, visitId: visit.id });
       }
 
-      // Dispatch notification to host (non-blocking)
-      try {
+      // Dispatch notification to host (non-blocking, only if host is assigned)
+      if (input.hostEmployeeId) try {
         const { notificationService } = await import('../../../core/notifications/notification.service');
         await notificationService.dispatch({
           companyId,
@@ -137,6 +139,33 @@ class VisitService {
         });
       } catch (err) {
         logger.warn('Failed to dispatch VMS pre-registration notification', { error: err, visitId: visit.id });
+      }
+
+      // Send invitation email to visitor (non-blocking)
+      if (input.visitorEmail) {
+        try {
+          const { sendVisitorInvitation } = await import('../shared/vms-email.service');
+          const company = await platformPrisma.company.findFirst({ where: { id: companyId }, select: { name: true, displayName: true } });
+          const plant = await platformPrisma.location.findFirst({ where: { id: input.plantId }, select: { name: true } });
+          const host = input.hostEmployeeId ? await platformPrisma.employee.findFirst({ where: { id: input.hostEmployeeId }, select: { firstName: true, lastName: true } }) : null;
+
+          sendVisitorInvitation({
+            visitorEmail: input.visitorEmail,
+            visitorName: input.visitorName,
+            visitorCompany: input.visitorCompany,
+            companyName: company?.displayName ?? company?.name ?? 'Facility',
+            hostName: host ? `${host.firstName} ${host.lastName}` : undefined,
+            visitDate: input.expectedDate,
+            visitTime: input.expectedTime,
+            visitCode,
+            qrCodeDataUrl: visit.qrCodeUrl ?? undefined,
+            purpose: input.purpose,
+            plantName: plant?.name,
+            specialInstructions: input.specialInstructions,
+          });
+        } catch (emailErr) {
+          logger.warn('Failed to send visitor invitation email', { error: emailErr, visitId: visit.id });
+        }
       }
 
       return visit;
@@ -183,7 +212,20 @@ class VisitService {
       platformPrisma.visit.count({ where }),
     ]);
 
-    return { data, total };
+    // Resolve host employee names from IDs
+    const hostIds = [...new Set(data.map(v => v.hostEmployeeId).filter(Boolean))] as string[];
+    const hosts = hostIds.length > 0 ? await platformPrisma.employee.findMany({
+      where: { id: { in: hostIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }) : [];
+    const hostMap = new Map(hosts.map(h => [h.id, `${h.firstName} ${h.lastName}`]));
+
+    const enrichedData = data.map(v => ({
+      ...v,
+      hostEmployeeName: v.hostEmployeeId ? (hostMap.get(v.hostEmployeeId) ?? null) : null,
+    }));
+
+    return { data: enrichedData, total };
   }
 
   /**
@@ -202,7 +244,18 @@ class VisitService {
       },
     });
     if (!visit) throw ApiError.notFound('Visit not found');
-    return visit;
+
+    // Resolve host employee name
+    let hostEmployeeName: string | null = null;
+    if (visit.hostEmployeeId) {
+      const host = await platformPrisma.employee.findUnique({
+        where: { id: visit.hostEmployeeId },
+        select: { firstName: true, lastName: true },
+      });
+      if (host) hostEmployeeName = `${host.firstName} ${host.lastName}`;
+    }
+
+    return { ...visit, hostEmployeeName };
   }
 
   /**
@@ -278,12 +331,15 @@ class VisitService {
    */
   async checkIn(companyId: string, id: string, input: CheckInInput, guardId: string): Promise<any> {
     return platformPrisma.$transaction(async (tx) => {
+      // Resolve check-in gate: use provided gate, fall back to visit's assigned gate
+      const resolvedGateId = input.checkInGateId ?? null;
+
       // Atomic conditional update: only succeeds if status is valid for check-in
       const updated = await tx.$executeRaw`
         UPDATE visits
         SET status = 'CHECKED_IN',
             "checkInTime" = NOW(),
-            "checkInGateId" = ${input.checkInGateId},
+            "checkInGateId" = COALESCE(${resolvedGateId}, "gateId"),
             "checkInGuardId" = ${guardId},
             "visitorPhoto" = COALESCE(${input.visitorPhoto ?? null}, "visitorPhoto"),
             "governmentIdType" = COALESCE(${input.governmentIdType ?? null}, "governmentIdType"),
@@ -309,14 +365,23 @@ class VisitService {
         throw ApiError.badRequest(`Cannot check in a visit with status: ${existing.status}`);
       }
 
-      // Generate badge number using number series
-      const badgeNumber = await generateNextNumber(
-        tx, companyId, ['Visitor Badge', 'Badge'], 'Visitor Badge',
-      );
-      await tx.visit.update({
-        where: { id },
-        data: { badgeNumber },
-      });
+      // Generate badge number using number series (non-fatal if not configured)
+      let badgeNumber: string | undefined;
+      try {
+        badgeNumber = await generateNextNumber(
+          tx, companyId, ['Visitor Badge', 'Badge'], 'Visitor Badge',
+        );
+        await tx.visit.update({
+          where: { id },
+          data: { badgeNumber },
+        });
+      } catch (badgeErr) {
+        logger.warn('Badge number generation failed — number series may not be configured', {
+          error: badgeErr,
+          visitId: id,
+          companyId,
+        });
+      }
 
       // Check watchlist/blocklist after check-in (for warnings)
       const visit = await tx.visit.findUnique({
@@ -356,6 +421,21 @@ class VisitService {
         }
       }
 
+      // Enforce visitor type requirements — collect warnings
+      const warnings: string[] = [];
+      if (visit!.visitorType?.requirePhoto && !input.visitorPhoto && !visit!.visitorPhoto) {
+        warnings.push('Visitor photo is required but not captured');
+      }
+      if (visit!.visitorType?.requireIdVerification && !input.governmentIdType && !visit!.governmentIdType) {
+        warnings.push('ID verification is required but not completed');
+      }
+      if (visit!.visitorType?.requireNda && !visit!.ndaSigned) {
+        warnings.push('NDA signing is required but not completed');
+      }
+      if (visit!.visitorType?.requireEscort) {
+        warnings.push('This visitor requires an escort at all times');
+      }
+
       // Dispatch host notification (non-blocking)
       try {
         const { notificationService } = await import('../../../core/notifications/notification.service');
@@ -376,7 +456,24 @@ class VisitService {
         logger.warn('Failed to dispatch VMS check-in notification', { error: err, visitId: id });
       }
 
-      return { ...visit, badgeNumber, watchlistWarning };
+      // Send digital badge email to visitor (non-blocking)
+      if (visit!.visitorEmail) {
+        try {
+          const { sendDigitalBadgeEmail } = await import('../shared/vms-email.service');
+          const company = await platformPrisma.company.findFirst({ where: { id: companyId }, select: { name: true, displayName: true } });
+          sendDigitalBadgeEmail({
+            visitorEmail: visit!.visitorEmail,
+            visitorName: visit!.visitorName,
+            companyName: company?.displayName ?? company?.name ?? 'Facility',
+            visitCode: visit!.visitCode,
+            badgeNumber,
+          });
+        } catch (emailErr) {
+          logger.warn('Failed to send digital badge email', { error: emailErr, visitId: id });
+        }
+      }
+
+      return { ...visit, badgeNumber, watchlistWarning, warnings: warnings.length > 0 ? warnings : undefined };
     });
   }
 

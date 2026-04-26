@@ -10,8 +10,6 @@ interface ListFilters {
   limit: number;
 }
 
-const APP_URL = process.env.APP_URL || 'https://app.avyerp.com';
-
 class GateService {
   async list(companyId: string, filters: ListFilters) {
     const { page, limit, plantId, isActive } = filters;
@@ -20,7 +18,7 @@ class GateService {
     if (plantId) where.plantId = plantId;
     if (isActive !== undefined) where.isActive = isActive;
 
-    const [data, total] = await Promise.all([
+    const [gates, total, locations] = await Promise.all([
       platformPrisma.visitorGate.findMany({
         where,
         skip: offset,
@@ -28,14 +26,32 @@ class GateService {
         orderBy: { name: 'asc' },
       }),
       platformPrisma.visitorGate.count({ where }),
+      platformPrisma.location.findMany({
+        where: { companyId },
+        select: { id: true, name: true, code: true },
+      }),
     ]);
+
+    const locationMap = new Map(locations.map((l) => [l.id, { name: l.name, code: l.code }]));
+    const appUrl = process.env.APP_URL || 'https://app.avyerp.com';
+    const data = gates.map((g) => {
+      const loc = locationMap.get(g.plantId);
+      return {
+        ...g,
+        locationName: loc?.name ?? null,
+        qrPosterUrl: `${appUrl}/visit/register/${loc?.code ?? g.plantId}`,
+      };
+    });
+
     return { data, total };
   }
 
   async getById(companyId: string, id: string) {
     const gate = await platformPrisma.visitorGate.findFirst({ where: { id, companyId } });
     if (!gate) throw ApiError.notFound('Gate not found');
-    return gate;
+    const plant = await platformPrisma.location.findFirst({ where: { id: gate.plantId }, select: { code: true } });
+    const appUrl = process.env.APP_URL || 'https://app.avyerp.com';
+    return { ...gate, qrPosterUrl: `${appUrl}/visit/register/${plant?.code ?? gate.plantId}` };
   }
 
   async create(companyId: string, input: any) {
@@ -45,8 +61,13 @@ class GateService {
     });
     if (existing) throw ApiError.conflict(`Gate code "${input.code}" already exists`);
 
-    // Auto-generate QR poster URL
-    const qrPosterUrl = `${APP_URL}/visit/register/${input.code}`;
+    // Look up the plant's code for the QR poster URL (endpoint expects plant code, not gate code)
+    const plant = await platformPrisma.location.findFirst({
+      where: { id: input.plantId },
+      select: { code: true },
+    });
+    const appUrl = process.env.APP_URL || 'https://app.avyerp.com';
+    const qrPosterUrl = `${appUrl}/visit/register/${plant?.code ?? input.plantId}`;
 
     const gate = await platformPrisma.visitorGate.create({
       data: {
@@ -58,6 +79,7 @@ class GateService {
         openTime: n(input.openTime),
         closeTime: n(input.closeTime),
         allowedVisitorTypeIds: input.allowedVisitorTypeIds ?? [],
+        isActive: input.isActive ?? true,
         qrPosterUrl,
       },
     });
@@ -78,8 +100,17 @@ class GateService {
       if (dup) throw ApiError.conflict(`Gate code "${input.code}" already exists`);
     }
 
-    // If code changes, regenerate QR poster URL
-    const codeChanged = input.code && input.code !== existing.code;
+    // Regenerate QR poster URL if plantId changes (URL uses plant code, not gate code)
+    const plantIdChanged = input.plantId && input.plantId !== existing.plantId;
+    let qrPosterUrl: string | undefined;
+    if (plantIdChanged) {
+      const plant = await platformPrisma.location.findFirst({
+        where: { id: input.plantId },
+        select: { code: true },
+      });
+      const appUrl = process.env.APP_URL || 'https://app.avyerp.com';
+      qrPosterUrl = `${appUrl}/visit/register/${plant?.code ?? input.plantId}`;
+    }
 
     return platformPrisma.visitorGate.update({
       where: { id },
@@ -91,7 +122,8 @@ class GateService {
         ...(input.openTime !== undefined && { openTime: n(input.openTime) }),
         ...(input.closeTime !== undefined && { closeTime: n(input.closeTime) }),
         ...(input.allowedVisitorTypeIds && { allowedVisitorTypeIds: input.allowedVisitorTypeIds }),
-        ...(codeChanged && { qrPosterUrl: `${APP_URL}/visit/register/${input.code}` }),
+        ...(input.isActive !== undefined && { isActive: input.isActive }),
+        ...(qrPosterUrl && { qrPosterUrl }),
       },
     });
   }

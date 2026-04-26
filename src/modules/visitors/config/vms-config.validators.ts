@@ -8,6 +8,7 @@ export const updateVmsConfigSchema = z.object({
   idVerification: z.enum(['ALWAYS', 'PER_VISITOR_TYPE', 'NEVER']).optional(),
   safetyInduction: z.enum(['ALWAYS', 'PER_VISITOR_TYPE', 'NEVER']).optional(),
   ndaRequired: z.enum(['ALWAYS', 'PER_VISITOR_TYPE', 'NEVER']).optional(),
+  ndaTemplateContent: z.string().max(10000).nullable().optional(),
   badgePrintingEnabled: z.boolean().optional(),
   digitalBadgeEnabled: z.boolean().optional(),
   walkInApprovalRequired: z.boolean().optional(),

@@ -543,6 +543,7 @@ model VisitorManagementConfig {
   idVerification              ConfigRequirement @default(PER_VISITOR_TYPE)
   safetyInduction             ConfigRequirement @default(PER_VISITOR_TYPE)
   ndaRequired                 ConfigRequirement @default(PER_VISITOR_TYPE)
+  ndaTemplateContent          String?
 
   badgePrintingEnabled        Boolean           @default(true)
   digitalBadgeEnabled         Boolean           @default(true)

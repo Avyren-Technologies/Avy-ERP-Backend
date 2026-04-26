@@ -107,9 +107,10 @@ router.post(
     const schema = z.object({
       visitorName: z.string().min(1).max(200),
       visitorMobile: z.string().min(10).max(15),
+      visitorEmail: z.string().email().max(200).optional(),
       visitorCompany: z.string().max(200).optional(),
       purpose: z.string().min(1).max(500),
-      hostEmployeeName: z.string().min(1).max(200),
+      hostEmployeeId: z.string().optional(),
       visitorPhoto: z.string().optional(),
       visitorTypeId: z.string().optional(),
     });
@@ -132,6 +133,38 @@ router.get(
     if (!visitCode) throw ApiError.badRequest('Visit code is required');
     const result = await visitorPublicService.getVisitStatus(visitCode);
     res.json(createSuccessResponse(result, 'Visit status retrieved'));
+  }),
+);
+
+// ── Safety Induction ───────────────────────────────────────────────
+
+/** GET /public/visit/:visitCode/induction — Get safety induction content */
+router.get(
+  '/visit/:visitCode/induction',
+  asyncHandler(async (req: Request, res: Response) => {
+    const visitCode = req.params.visitCode;
+    if (!visitCode) throw ApiError.badRequest('Visit code is required');
+    const result = await visitorPublicService.getInductionContent(visitCode);
+    res.json(createSuccessResponse(result, 'Induction content retrieved'));
+  }),
+);
+
+/** POST /public/visit/:visitCode/induction — Complete safety induction */
+router.post(
+  '/visit/:visitCode/induction',
+  asyncHandler(async (req: Request, res: Response) => {
+    const visitCode = req.params.visitCode;
+    if (!visitCode) throw ApiError.badRequest('Visit code is required');
+    const schema = z.object({
+      score: z.number().int().min(0).max(100).optional(),
+      passed: z.boolean(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+    const result = await visitorPublicService.completeInduction(visitCode, parsed.data);
+    res.json(createSuccessResponse(result, 'Induction completed'));
   }),
 );
 

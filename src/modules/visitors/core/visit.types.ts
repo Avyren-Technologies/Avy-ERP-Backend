@@ -23,7 +23,7 @@ export interface CreateVisitInput {
 }
 
 export interface CheckInInput {
-  checkInGateId: string;
+  checkInGateId?: string | undefined;
   checkInGuardId?: string | undefined;
   visitorPhoto?: string | undefined;
   governmentIdType?: string | undefined;

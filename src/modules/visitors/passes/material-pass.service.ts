@@ -2,6 +2,8 @@ import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { n } from '../../../shared/utils/prisma-helpers';
+import QRCode from 'qrcode';
+import { logger } from '../../../config/logger';
 
 class MaterialPassService {
 
@@ -33,7 +35,37 @@ class MaterialPassService {
       }),
       platformPrisma.materialGatePass.count({ where }),
     ]);
-    return { data, total };
+
+    // Resolve authorizedBy employee names from IDs
+    const authIds = [...new Set(data.map(p => p.authorizedBy).filter(Boolean))] as string[];
+    const employees = authIds.length > 0 ? await platformPrisma.employee.findMany({
+      where: { id: { in: authIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }) : [];
+    const empMap = new Map(employees.map(e => [e.id, `${e.firstName} ${e.lastName}`]));
+
+    // Enrich with employee names and QR codes
+    const enrichedData = await Promise.all(data.map(async (p) => {
+      let qrCode: string | null = null;
+      if (p.passNumber) {
+        try {
+          qrCode = await QRCode.toDataURL(p.passNumber, {
+            width: 200,
+            margin: 1,
+            color: { dark: '#000000', light: '#FFFFFF' },
+          });
+        } catch (err) {
+          logger.warn('Failed to generate QR for material pass', { passId: p.id });
+        }
+      }
+      return {
+        ...p,
+        authorizedByName: p.authorizedBy ? (empMap.get(p.authorizedBy) ?? null) : null,
+        qrCode,
+      };
+    }));
+
+    return { data: enrichedData, total };
   }
 
   async getById(companyId: string, id: string) {
@@ -42,7 +74,32 @@ class MaterialPassService {
       include: { gate: true },
     });
     if (!pass) throw ApiError.notFound('Material gate pass not found');
-    return pass;
+
+    // Resolve authorizedBy employee name
+    let authorizedByName: string | null = null;
+    if (pass.authorizedBy) {
+      const emp = await platformPrisma.employee.findUnique({
+        where: { id: pass.authorizedBy },
+        select: { firstName: true, lastName: true },
+      });
+      if (emp) authorizedByName = `${emp.firstName} ${emp.lastName}`;
+    }
+
+    // Generate QR code dynamically
+    let qrCode: string | null = null;
+    if (pass.passNumber) {
+      try {
+        qrCode = await QRCode.toDataURL(pass.passNumber, {
+          width: 300,
+          margin: 2,
+          color: { dark: '#000000', light: '#FFFFFF' },
+        });
+      } catch (err) {
+        logger.warn('Failed to generate QR for material pass', { passId: pass.id });
+      }
+    }
+
+    return { ...pass, authorizedByName, qrCode };
   }
 
   async create(companyId: string, input: any, createdBy: string) {

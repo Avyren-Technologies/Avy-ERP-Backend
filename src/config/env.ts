@@ -78,6 +78,7 @@ const envSchema = z.object({
   // File Upload Limits (bytes)
   UPLOAD_MAX_IMAGE_SIZE: z.coerce.number().default(5242880),
   UPLOAD_MAX_DOCUMENT_SIZE: z.coerce.number().default(10485760),
+  UPLOAD_MAX_VIDEO_SIZE: z.coerce.number().default(104857600), // 100 MB
 
   // Application
   APP_NAME: z.string().default('Avy ERP'),

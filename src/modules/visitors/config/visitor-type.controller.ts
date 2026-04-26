@@ -58,6 +58,22 @@ class VisitorTypeController {
     const result = await visitorTypeService.deactivate(companyId, req.params.id!);
     res.json(createSuccessResponse(result, 'Visitor type deactivated'));
   });
+
+  activate = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await visitorTypeService.activate(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Visitor type activated'));
+  });
+
+  remove = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await visitorTypeService.remove(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Visitor type deleted'));
+  });
 }
 
 export const visitorTypeController = new VisitorTypeController();

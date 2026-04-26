@@ -2,6 +2,8 @@ import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { n } from '../../../shared/utils/prisma-helpers';
+import QRCode from 'qrcode';
+import { logger } from '../../../config/logger';
 
 class VehiclePassService {
 
@@ -32,7 +34,25 @@ class VehiclePassService {
       }),
       platformPrisma.vehicleGatePass.count({ where }),
     ]);
-    return { data, total };
+
+    // Generate QR codes dynamically for each pass
+    const enrichedData = await Promise.all(data.map(async (p) => {
+      let qrCode: string | null = null;
+      if (p.passNumber) {
+        try {
+          qrCode = await QRCode.toDataURL(p.passNumber, {
+            width: 200,
+            margin: 1,
+            color: { dark: '#000000', light: '#FFFFFF' },
+          });
+        } catch (err) {
+          logger.warn('Failed to generate QR for vehicle pass', { passId: p.id });
+        }
+      }
+      return { ...p, qrCode };
+    }));
+
+    return { data: enrichedData, total };
   }
 
   async getById(companyId: string, id: string) {
@@ -41,7 +61,22 @@ class VehiclePassService {
       include: { entryGate: true, exitGate: true },
     });
     if (!pass) throw ApiError.notFound('Vehicle gate pass not found');
-    return pass;
+
+    // Generate QR code dynamically
+    let qrCode: string | null = null;
+    if (pass.passNumber) {
+      try {
+        qrCode = await QRCode.toDataURL(pass.passNumber, {
+          width: 300,
+          margin: 2,
+          color: { dark: '#000000', light: '#FFFFFF' },
+        });
+      } catch (err) {
+        logger.warn('Failed to generate QR for vehicle pass', { passId: pass.id });
+      }
+    }
+
+    return { ...pass, qrCode };
   }
 
   async create(companyId: string, input: any, createdBy: string) {

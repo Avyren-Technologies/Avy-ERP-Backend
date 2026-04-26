@@ -14,7 +14,7 @@ export const createVisitSchema = z.object({
   expectedDate: z.string().min(1, 'Expected date is required'),
   expectedTime: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be HH:mm format').optional(),
   expectedDurationMinutes: z.number().int().min(15).max(1440).optional(),
-  hostEmployeeId: z.string().min(1, 'Host employee is required'),
+  hostEmployeeId: z.string().optional(),
   plantId: z.string().min(1, 'Plant is required'),
   gateId: z.string().optional(),
   vehicleRegNumber: z.preprocess(trimString, z.string().max(20)).optional(),
@@ -29,7 +29,7 @@ export const createVisitSchema = z.object({
 export const updateVisitSchema = createVisitSchema.partial();
 
 export const checkInSchema = z.object({
-  checkInGateId: z.string().min(1, 'Gate is required'),
+  checkInGateId: z.string().min(1, 'Gate is required').optional(),
   checkInGuardId: z.string().optional(),
   visitorPhoto: z.string().url().optional(),
   governmentIdType: z.enum(['AADHAAR', 'PAN', 'DRIVING_LICENCE', 'PASSPORT', 'VOTER_ID']).optional(),

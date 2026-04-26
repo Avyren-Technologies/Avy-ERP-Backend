@@ -1,7 +1,9 @@
 import { platformPrisma } from '../../../config/database';
 import { ApiError } from '../../../shared/errors';
+import { logger } from '../../../config/logger';
 import { generateNextNumber } from '../../../shared/utils/number-series';
 import { n } from '../../../shared/utils/prisma-helpers';
+import QRCode from 'qrcode';
 
 class RecurringPassService {
 
@@ -23,17 +25,42 @@ class RecurringPassService {
       platformPrisma.recurringVisitorPass.findMany({ where, skip: offset, take: limit, orderBy: { createdAt: 'desc' } }),
       platformPrisma.recurringVisitorPass.count({ where }),
     ]);
-    return { data, total };
+
+    // Resolve host employee names from IDs
+    const hostIds = [...new Set(data.map(p => p.hostEmployeeId).filter(Boolean))] as string[];
+    const hosts = hostIds.length > 0 ? await platformPrisma.employee.findMany({
+      where: { id: { in: hostIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }) : [];
+    const hostMap = new Map(hosts.map(h => [h.id, `${h.firstName} ${h.lastName}`]));
+
+    const enrichedData = data.map(p => ({
+      ...p,
+      hostEmployeeName: p.hostEmployeeId ? (hostMap.get(p.hostEmployeeId) ?? null) : null,
+    }));
+
+    return { data: enrichedData, total };
   }
 
   async getById(companyId: string, id: string) {
     const pass = await platformPrisma.recurringVisitorPass.findFirst({ where: { id, companyId } });
     if (!pass) throw ApiError.notFound('Recurring pass not found');
-    return pass;
+
+    // Resolve host employee name
+    let hostEmployeeName: string | null = null;
+    if (pass.hostEmployeeId) {
+      const host = await platformPrisma.employee.findUnique({
+        where: { id: pass.hostEmployeeId },
+        select: { firstName: true, lastName: true },
+      });
+      if (host) hostEmployeeName = `${host.firstName} ${host.lastName}`;
+    }
+
+    return { ...pass, hostEmployeeName };
   }
 
   async create(companyId: string, input: any, createdBy: string) {
-    return platformPrisma.$transaction(async (tx) => {
+    const pass = await platformPrisma.$transaction(async (tx) => {
       const passNumber = await generateNextNumber(
         tx, companyId, ['Recurring Visitor Pass', 'Recurring Pass'], 'Recurring Visitor Pass',
       );
@@ -63,6 +90,61 @@ class RecurringPassService {
         },
       });
     });
+
+    // Generate QR code as data URL (non-blocking — pass is still usable without it)
+    try {
+      const qrCode = await QRCode.toDataURL(pass.passNumber, {
+        width: 300,
+        margin: 2,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      });
+      await platformPrisma.recurringVisitorPass.update({
+        where: { id: pass.id },
+        data: { qrCode },
+      });
+      pass.qrCode = qrCode;
+    } catch (err) {
+      logger.warn('Failed to generate QR code for recurring pass', { passId: pass.id, error: err });
+    }
+
+    // Send pass email to visitor (non-blocking)
+    if (input.visitorEmail) {
+      try {
+        const { sendRecurringPassEmail } = await import('../shared/vms-email.service');
+        const company = await platformPrisma.company.findFirst({ where: { id: companyId }, select: { name: true, displayName: true } });
+        const host = input.hostEmployeeId ? await platformPrisma.employee.findFirst({ where: { id: input.hostEmployeeId }, select: { firstName: true, lastName: true } }) : null;
+        const plantRecord = input.plantId ? await platformPrisma.location.findFirst({ where: { id: input.plantId }, select: { name: true } }) : null;
+
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const allowedDaysStr = input.allowedDays?.length > 0
+          ? input.allowedDays.map((d: number) => dayNames[d]).join(', ')
+          : 'All days';
+        const allowedTimeStr = input.allowedTimeFrom && input.allowedTimeTo
+          ? `${input.allowedTimeFrom} - ${input.allowedTimeTo}`
+          : undefined;
+
+        sendRecurringPassEmail({
+          visitorEmail: input.visitorEmail,
+          visitorName: input.visitorName,
+          visitorCompany: input.visitorCompany,
+          companyName: company?.displayName ?? company?.name ?? 'Facility',
+          passNumber: pass.passNumber,
+          passType: input.passType,
+          validFrom: input.validFrom,
+          validUntil: input.validUntil,
+          hostName: host ? `${host.firstName} ${host.lastName}` : undefined,
+          purpose: input.purpose,
+          plantName: plantRecord?.name,
+          qrCodeDataUrl: pass.qrCode ?? undefined,
+          allowedDays: allowedDaysStr,
+          allowedTime: allowedTimeStr,
+        });
+      } catch (emailErr) {
+        logger.warn('Failed to send recurring pass email', { error: emailErr, passId: pass.id });
+      }
+    }
+
+    return pass;
   }
 
   async update(companyId: string, id: string, input: any) {
@@ -121,6 +203,14 @@ class RecurringPassService {
       const today = now.getDay(); // 0=Sun
       if (!pass.allowedDays.includes(today)) {
         throw ApiError.badRequest('Pass is not valid for today');
+      }
+    }
+
+    // Check allowed time window
+    if (pass.allowedTimeFrom && pass.allowedTimeTo) {
+      const currentTime = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+      if (currentTime < pass.allowedTimeFrom || currentTime > pass.allowedTimeTo) {
+        throw ApiError.badRequest(`Pass is only valid between ${pass.allowedTimeFrom} and ${pass.allowedTimeTo}`);
       }
     }
 

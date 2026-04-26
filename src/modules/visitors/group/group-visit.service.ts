@@ -61,7 +61,21 @@ class GroupVisitService {
       }),
       platformPrisma.groupVisit.count({ where }),
     ]);
-    return { data, total };
+
+    // Resolve host employee names from IDs
+    const hostIds = [...new Set(data.map(g => g.hostEmployeeId).filter(Boolean))] as string[];
+    const hosts = hostIds.length > 0 ? await platformPrisma.employee.findMany({
+      where: { id: { in: hostIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }) : [];
+    const hostMap = new Map(hosts.map(h => [h.id, `${h.firstName} ${h.lastName}`]));
+
+    const enrichedData = data.map(g => ({
+      ...g,
+      hostEmployeeName: g.hostEmployeeId ? (hostMap.get(g.hostEmployeeId) ?? null) : null,
+    }));
+
+    return { data: enrichedData, total };
   }
 
   async getById(companyId: string, id: string) {
@@ -70,7 +84,18 @@ class GroupVisitService {
       include: { members: { include: { visit: true } } },
     });
     if (!group) throw ApiError.notFound('Group visit not found');
-    return group;
+
+    // Resolve host employee name
+    let hostEmployeeName: string | null = null;
+    if (group.hostEmployeeId) {
+      const host = await platformPrisma.employee.findUnique({
+        where: { id: group.hostEmployeeId },
+        select: { firstName: true, lastName: true },
+      });
+      if (host) hostEmployeeName = `${host.firstName} ${host.lastName}`;
+    }
+
+    return { ...group, hostEmployeeName };
   }
 
   async create(companyId: string, input: any, createdBy: string) {

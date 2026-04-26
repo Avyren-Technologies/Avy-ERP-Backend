@@ -115,12 +115,40 @@ class VisitorTypeService {
   async deactivate(companyId: string, id: string) {
     const existing = await platformPrisma.visitorType.findFirst({ where: { id, companyId } });
     if (!existing) throw ApiError.notFound('Visitor type not found');
-    if (existing.isDefault) throw ApiError.badRequest('Cannot deactivate a default visitor type');
+    if (!existing.isActive) throw ApiError.badRequest('Visitor type is already inactive');
 
     return platformPrisma.visitorType.update({
       where: { id },
       data: { isActive: false },
     });
+  }
+
+  async activate(companyId: string, id: string) {
+    const existing = await platformPrisma.visitorType.findFirst({ where: { id, companyId } });
+    if (!existing) throw ApiError.notFound('Visitor type not found');
+    if (existing.isActive) throw ApiError.badRequest('Visitor type is already active');
+
+    return platformPrisma.visitorType.update({
+      where: { id },
+      data: { isActive: true },
+    });
+  }
+
+  async remove(companyId: string, id: string) {
+    const existing = await platformPrisma.visitorType.findFirst({ where: { id, companyId } });
+    if (!existing) throw ApiError.notFound('Visitor type not found');
+
+    // Check if any visits reference this type
+    const visitCount = await platformPrisma.visit.count({ where: { visitorTypeId: id } });
+    if (visitCount > 0) {
+      throw ApiError.badRequest(
+        `Cannot delete "${existing.name}" — it has ${visitCount} associated visit(s). Deactivate it instead.`,
+      );
+    }
+
+    await platformPrisma.visitorType.delete({ where: { id } });
+    logger.info(`Visitor type deleted: ${existing.code} for company ${companyId}`);
+    return { deleted: true };
   }
 
   /**

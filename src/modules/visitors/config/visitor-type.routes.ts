@@ -8,6 +8,8 @@ router.get('/', requirePermissions(['visitors:read']), visitorTypeController.lis
 router.post('/', requirePermissions(['visitors:configure']), visitorTypeController.create);
 router.get('/:id', requirePermissions(['visitors:read']), visitorTypeController.getById);
 router.put('/:id', requirePermissions(['visitors:configure']), visitorTypeController.update);
-router.delete('/:id', requirePermissions(['visitors:configure']), visitorTypeController.deactivate);
+router.patch('/:id/deactivate', requirePermissions(['visitors:configure']), visitorTypeController.deactivate);
+router.patch('/:id/activate', requirePermissions(['visitors:configure']), visitorTypeController.activate);
+router.delete('/:id', requirePermissions(['visitors:configure']), visitorTypeController.remove);
 
 export { router as visitorTypeRoutes };

@@ -18,13 +18,20 @@ export type FileCategory =
   | 'offboarding-doc'
   | 'transfer-letter'
   | 'policy-document'
-  | 'billing-invoice';
+  | 'billing-invoice'
+  | 'induction-content';
 
 export const IMAGE_MIME_TYPES = [
   'image/jpeg',
   'image/png',
   'image/gif',
   'image/webp',
+];
+
+export const VIDEO_MIME_TYPES = [
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
 ];
 
 export const DOCUMENT_MIME_TYPES = [
@@ -39,7 +46,7 @@ export const ALL_MIME_TYPES = [...IMAGE_MIME_TYPES, ...DOCUMENT_MIME_TYPES];
 
 interface CategoryConfig {
   allowedMimeTypes: string[];
-  maxSizeEnvKey: 'UPLOAD_MAX_IMAGE_SIZE' | 'UPLOAD_MAX_DOCUMENT_SIZE';
+  maxSizeEnvKey: 'UPLOAD_MAX_IMAGE_SIZE' | 'UPLOAD_MAX_DOCUMENT_SIZE' | 'UPLOAD_MAX_VIDEO_SIZE';
   keyTemplate: string;
 }
 
@@ -134,6 +141,11 @@ export const FILE_CATEGORY_CONFIG: Record<FileCategory, CategoryConfig> = {
     maxSizeEnvKey: 'UPLOAD_MAX_DOCUMENT_SIZE',
     keyTemplate: '{companyId}/billing/{entityId}.pdf',
   },
+  'induction-content': {
+    allowedMimeTypes: [...VIDEO_MIME_TYPES, ...IMAGE_MIME_TYPES, 'application/pdf'],
+    maxSizeEnvKey: 'UPLOAD_MAX_VIDEO_SIZE',
+    keyTemplate: '{companyId}/inductions/{entityId}/{filename}',
+  },
 };
 
 export function getMaxFileSize(category: FileCategory): number {
@@ -152,6 +164,9 @@ export function getExtensionFromMime(mimeType: string): string {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
     'application/vnd.ms-excel': 'xls',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/quicktime': 'mov',
   };
   return map[mimeType] || 'bin';
 }
@@ -172,6 +187,9 @@ export function getMimeFromExtension(ext: string): string {
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     xls: 'application/vnd.ms-excel',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mov: 'video/quicktime',
   };
   return map[ext] || 'application/octet-stream';
 }

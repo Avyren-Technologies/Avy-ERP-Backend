@@ -10,6 +10,7 @@ export const createGateSchema = z.object({
   openTime: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be HH:mm').optional(),
   closeTime: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be HH:mm').optional(),
   allowedVisitorTypeIds: z.array(z.string()).default([]),
+  isActive: z.boolean().default(true),
 });
 
 export const updateGateSchema = createGateSchema.partial();

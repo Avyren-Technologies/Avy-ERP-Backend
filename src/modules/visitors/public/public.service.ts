@@ -21,6 +21,16 @@ export class VisitorPublicService {
       throw ApiError.notFound('Visit not found. Please check your visit code.');
     }
 
+    // If the visitor type requires NDA, fetch the NDA template from VMS config
+    let ndaTemplateContent: string | null = null;
+    if (visit.visitorType?.requireNda) {
+      const vmsConfig = await platformPrisma.visitorManagementConfig.findUnique({
+        where: { companyId: visit.companyId },
+        select: { ndaTemplateContent: true },
+      });
+      ndaTemplateContent = vmsConfig?.ndaTemplateContent ?? null;
+    }
+
     // Return only what the visitor needs to see
     return {
       visitCode: visit.visitCode,
@@ -34,6 +44,7 @@ export class VisitorPublicService {
       approvalStatus: visit.approvalStatus,
       visitorType: visit.visitorType,
       company: visit.company,
+      ndaTemplateContent,
     };
   }
 
@@ -121,10 +132,24 @@ export class VisitorPublicService {
       orderBy: { sortOrder: 'asc' },
     });
 
+    // Get active employees for the company (for host selection dropdown)
+    const employees = await platformPrisma.employee.findMany({
+      where: {
+        companyId: location.companyId,
+        status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED'] },
+      },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: { firstName: 'asc' },
+    });
+
     return {
       company: location.company,
       plant: { id: location.id, name: location.name, code: location.code },
       visitorTypes,
+      employees: employees.map(e => ({
+        id: e.id,
+        name: `${e.firstName} ${e.lastName}`.trim(),
+      })),
       config: {
         photoRequired: config.photoCapture === 'ALWAYS',
         privacyConsentText: config.privacyConsentText,
@@ -139,9 +164,10 @@ export class VisitorPublicService {
   async submitSelfRegistration(plantCode: string, data: {
     visitorName: string;
     visitorMobile: string;
+    visitorEmail?: string | undefined;
     visitorCompany?: string | undefined;
     purpose: string;
-    hostEmployeeName: string;
+    hostEmployeeId?: string | undefined;
     visitorPhoto?: string | undefined;
     visitorTypeId?: string | undefined;
   }) {
@@ -156,25 +182,19 @@ export class VisitorPublicService {
 
     const companyId = location.companyId;
 
-    // Try to find host employee by name (fuzzy match)
-    const employees = await platformPrisma.employee.findMany({
-      where: {
-        companyId,
-        status: { in: ['ACTIVE', 'PROBATION', 'CONFIRMED'] },
-        OR: [
-          { firstName: { contains: data.hostEmployeeName, mode: 'insensitive' } },
-          { lastName: { contains: data.hostEmployeeName, mode: 'insensitive' } },
-        ],
-      },
-      take: 5,
-      select: { id: true, firstName: true, lastName: true, departmentId: true },
-    });
-
-    if (employees.length === 0) {
-      throw ApiError.badRequest(`Could not find employee "${data.hostEmployeeName}". Please contact the facility reception.`);
+    // Validate host employee if provided
+    let hostEmployeeId = data.hostEmployeeId;
+    let hostName: string | undefined;
+    if (hostEmployeeId) {
+      const hostEmployee = await platformPrisma.employee.findFirst({
+        where: { id: hostEmployeeId, companyId },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      if (!hostEmployee) {
+        throw ApiError.badRequest('Selected host employee not found. Please contact the facility reception.');
+      }
+      hostName = `${hostEmployee.firstName} ${hostEmployee.lastName}`.trim();
     }
-
-    const hostEmployee = employees[0]!; // Best match (guaranteed by length check above)
 
     // Get default visitor type if not specified
     let visitorTypeId = data.visitorTypeId;
@@ -195,18 +215,21 @@ export class VisitorPublicService {
     const visit = await visitService.createVisit(companyId, {
       visitorName: data.visitorName,
       visitorMobile: data.visitorMobile,
+      visitorEmail: data.visitorEmail,
       visitorCompany: data.visitorCompany,
       visitorTypeId,
       purpose: data.purpose as any,
       expectedDate: new Date().toISOString(),
-      hostEmployeeId: hostEmployee.id,
+      hostEmployeeId,
       plantId: location.id,
     }, 'system');
 
     return {
       visitCode: visit.visitCode,
-      message: 'Registration submitted. Waiting for host approval.',
-      hostName: `${hostEmployee.firstName} ${hostEmployee.lastName}`,
+      message: hostEmployeeId
+        ? 'Registration submitted. Waiting for host approval.'
+        : 'Registration submitted successfully.',
+      hostName: hostName ?? undefined,
     };
   }
 
@@ -241,7 +264,7 @@ export class VisitorPublicService {
     const visit = await platformPrisma.visit.findUnique({
       where: { visitCode },
       include: {
-        visitorType: { select: { name: true, code: true, badgeColour: true } },
+        visitorType: { select: { name: true, code: true, badgeColour: true, requireEscort: true } },
         company: { select: { name: true, displayName: true, logoUrl: true } },
       },
     });
@@ -251,7 +274,7 @@ export class VisitorPublicService {
     }
 
     // Badge behavior based on status
-    if (visit.status === 'EXPECTED') {
+    if (visit.status === 'EXPECTED' || visit.status === 'ARRIVED') {
       return {
         status: 'NOT_STARTED',
         message: 'Visit not yet started. Please check in at the gate.',
@@ -269,6 +292,7 @@ export class VisitorPublicService {
         checkInTime: visit.checkInTime,
         expectedDurationMinutes: visit.expectedDurationMinutes,
         qrCodeData: visit.visitCode,
+        safetyInductionStatus: visit.safetyInductionStatus,
       };
     }
 
@@ -291,6 +315,126 @@ export class VisitorPublicService {
     return {
       status: visit.status,
       message: 'Visit status: ' + visit.status,
+    };
+  }
+
+  /**
+   * Get safety induction content for a visit (public — no auth).
+   * Returns induction requirements and content based on the visitor type's linked induction.
+   */
+  async getInductionContent(visitCode: string) {
+    const visit = await platformPrisma.visit.findUnique({
+      where: { visitCode },
+      include: {
+        visitorType: {
+          select: {
+            id: true,
+            name: true,
+            requireSafetyInduction: true,
+            safetyInductionId: true,
+          },
+        },
+      },
+    });
+
+    if (!visit) {
+      throw ApiError.notFound('Visit not found. Please check your visit code.');
+    }
+
+    // If induction is not pending, return current status
+    if (visit.safetyInductionStatus !== 'PENDING') {
+      return {
+        required: false,
+        status: visit.safetyInductionStatus,
+      };
+    }
+
+    // Find the linked safety induction via visitor type
+    const inductionId = visit.visitorType?.safetyInductionId;
+    let induction = null;
+
+    if (inductionId) {
+      induction = await platformPrisma.safetyInduction.findFirst({
+        where: { id: inductionId, isActive: true },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          contentUrl: true,
+          questions: true,
+          durationSeconds: true,
+          passingScore: true,
+        },
+      });
+    }
+
+    // Fallback: if no specific induction linked, find any active induction for this company
+    if (!induction && visit.visitorType?.requireSafetyInduction) {
+      induction = await platformPrisma.safetyInduction.findFirst({
+        where: { companyId: visit.companyId, isActive: true },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          contentUrl: true,
+          questions: true,
+          durationSeconds: true,
+          passingScore: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    if (!induction) {
+      return {
+        required: true,
+        status: 'PENDING',
+        message: 'Safety induction is required but no content is configured yet. Please contact the facility.',
+      };
+    }
+
+    return {
+      required: true,
+      induction: {
+        name: induction.name,
+        type: induction.type,
+        contentUrl: induction.contentUrl,
+        questions: induction.questions,
+        durationSeconds: induction.durationSeconds,
+        passingScore: induction.passingScore,
+      },
+    };
+  }
+
+  /**
+   * Complete safety induction for a visit (public — no auth).
+   */
+  async completeInduction(visitCode: string, data: { score?: number | undefined; passed: boolean }) {
+    const visit = await platformPrisma.visit.findUnique({
+      where: { visitCode },
+    });
+
+    if (!visit) {
+      throw ApiError.notFound('Visit not found.');
+    }
+
+    if (visit.safetyInductionStatus !== 'PENDING') {
+      throw ApiError.badRequest('Safety induction is not pending for this visit.');
+    }
+
+    const updated = await platformPrisma.visit.update({
+      where: { visitCode },
+      data: {
+        safetyInductionStatus: data.passed ? 'COMPLETED' : 'FAILED',
+        safetyInductionScore: data.score ?? null,
+        safetyInductionTimestamp: new Date(),
+      },
+    });
+
+    return {
+      status: updated.safetyInductionStatus,
+      score: updated.safetyInductionScore,
+      passed: data.passed,
     };
   }
 
