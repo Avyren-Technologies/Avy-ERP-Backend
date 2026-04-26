@@ -10,7 +10,7 @@ export interface CreateVisitInput {
   expectedDate: string; // ISO date string
   expectedTime?: string | undefined; // HH:mm
   expectedDurationMinutes?: number | undefined;
-  hostEmployeeId: string;
+  hostEmployeeId?: string | undefined;
   plantId: string;
   gateId?: string | undefined;
   vehicleRegNumber?: string | undefined;
