@@ -43,8 +43,8 @@ RUN addgroup -g 1001 -S appgroup && \
 
 # Copy dependency files
 COPY package.json package-lock.json ./
-COPY prisma ./prisma/
-COPY scripts/merge-prisma.js ./scripts/merge-prisma.js
+COPY --chown=appuser:appgroup prisma ./prisma/
+COPY --chown=appuser:appgroup scripts/merge-prisma.js ./scripts/merge-prisma.js
 
 # Install production dependencies only
 RUN npm ci --omit=dev
@@ -55,11 +55,11 @@ RUN node scripts/merge-prisma.js && npx prisma generate
 # Copy compiled JavaScript from builder
 COPY --from=builder /app/dist ./dist
 # Keep source for runtime seed script imports (prisma/seed.ts imports src constants)
-COPY src ./src
+COPY --chown=appuser:appgroup src ./src
 
 # Create necessary directories with proper ownership
 RUN mkdir -p logs uploads && \
-    chown appuser:appgroup logs uploads
+    chown -R appuser:appgroup logs uploads prisma scripts
 
 # Switch to non-root user
 USER appuser
