@@ -45,7 +45,6 @@ services:
       --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}
       --maxmemory 512mb
       --maxmemory-policy noeviction
-      --maxmemory-reserved 50mb
       --appendonly yes
       --appendfsync everysec
     volumes:
