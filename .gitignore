@@ -18,6 +18,10 @@ out/
 .env.test.local
 .env.production.local
 
+graphify-out/cache/
+graphify-out/manifest.json
+graphify-out/cost.json
+
 # Logs
 logs/
 *.log
