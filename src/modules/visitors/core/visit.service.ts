@@ -180,7 +180,10 @@ class VisitService {
     const offset = (page - 1) * limit;
 
     const where: any = { companyId };
-    if (status) where.status = status;
+    if (status) {
+      const statuses = status.split(',').map((s: string) => s.trim()).filter(Boolean);
+      where.status = statuses.length > 1 ? { in: statuses } : statuses[0];
+    }
     if (visitorTypeId) where.visitorTypeId = visitorTypeId;
     if (hostEmployeeId) where.hostEmployeeId = hostEmployeeId;
     if (plantId) where.plantId = plantId;

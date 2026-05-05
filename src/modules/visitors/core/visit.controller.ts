@@ -136,6 +136,7 @@ class VisitController {
     const result = await visitService.completeInduction(companyId, id, parsed.data.score, parsed.data.passed);
     res.json(createSuccessResponse(result, 'Induction recorded'));
   });
+
 }
 
 export const visitController = new VisitController();

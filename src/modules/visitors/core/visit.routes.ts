@@ -7,6 +7,7 @@ const router = Router();
 // List visits (with filters)
 router.get('/', requirePermissions(['visitors:read']), visitController.listVisits);
 
+
 // Named routes BEFORE :id routes
 router.get('/code/:visitCode', requirePermissions(['visitors:read']), visitController.getVisitByCode);
 
