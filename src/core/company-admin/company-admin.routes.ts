@@ -79,8 +79,8 @@ router.get('/controls', requirePermissions(['company:read']), controller.getCont
 router.patch('/controls', requirePermissions(['company:update']), controller.updateControls);
 
 // ── Settings ────────────────────────────────────────────────────────
-// All authenticated users need settings for locale/timezone/date-format (useCompanyFormatter)
-router.get('/settings', requirePermissions(['company:read', 'ess:view-profile']), controller.getSettings);
+// All authenticated users need settings for locale/timezone/date-format (useCompanyFormatter) — no permission gate
+router.get('/settings', controller.getSettings);
 router.patch('/settings', requirePermissions(['company:update']), controller.updateSettings);
 
 // ── Users ───────────────────────────────────────────────────────────
