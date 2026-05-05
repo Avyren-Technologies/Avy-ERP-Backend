@@ -1084,6 +1084,20 @@ export class PayrollRunService {
     });
     const pfInclusionCodes = new Set(pfInclusionComponents.map((c) => c.code));
 
+    // Fetch salary components with esiInclusion ONCE before the loop
+    const esiInclusionComponents = await platformPrisma.salaryComponent.findMany({
+      where: { companyId, esiInclusion: true, isActive: true },
+      select: { code: true },
+    });
+    const esiInclusionCodes = new Set(esiInclusionComponents.map((c) => c.code));
+
+    // Fetch salary components with gratuityInclusion ONCE before the loop
+    const gratuityInclusionComponents = await platformPrisma.salaryComponent.findMany({
+      where: { companyId, gratuityInclusion: true, isActive: true },
+      select: { code: true },
+    });
+    const gratuityInclusionCodes = new Set(gratuityInclusionComponents.map((c) => c.code));
+
     // Build PT slab lookup by state (with monthly overrides)
     const ptSlabsByState = new Map<string, any[]>();
     const ptMonthlyOverridesByState = new Map<string, Record<string, number>>();
@@ -1368,8 +1382,19 @@ export class PayrollRunService {
         }
 
         if (esiApplicable) {
-          esiEmployee = round(grossEarnings * Number(esiConfig.employeeRate) / 100);
-          esiEmployer = round(grossEarnings * Number(esiConfig.employerRate) / 100);
+          // Use esiInclusion components to build ESI wage base
+          let esiWageBase = 0;
+          for (const [code, amount] of Object.entries(earningsObj)) {
+            if (esiInclusionCodes.has(code)) {
+              esiWageBase += amount;
+            }
+          }
+          // Fallback to grossEarnings if no esiInclusion components configured
+          if (esiWageBase === 0) {
+            esiWageBase = grossEarnings;
+          }
+          esiEmployee = round(esiWageBase * Number(esiConfig.employeeRate) / 100);
+          esiEmployer = round(esiWageBase * Number(esiConfig.employerRate) / 100);
         }
       }
 
@@ -1554,20 +1579,29 @@ export class PayrollRunService {
         if (joiningDate) {
           const yearsOfService = DateTime.now().diff(DateTime.fromJSDate(new Date(joiningDate)), 'years').years;
           const effectiveYears = Math.max(yearsOfService, 1);
-          // C1: Respect gratuityConfig.baseSalary — "Basic" or "Basic + DA"
-          const basicAmount = Object.entries(earningsObj).find(([code]) =>
-            code.toUpperCase() === 'BASIC'
-          )?.[1] ?? Object.entries(earningsObj).find(([code]) =>
-            code.toLowerCase().includes('basic')
-          )?.[1] ?? 0;
-          let gratuityBase = basicAmount;
-          if (gratuityConfig.baseSalary === 'Basic + DA') {
-            const daAmount = Object.entries(earningsObj).find(([code]) =>
-              code.toUpperCase() === 'DA'
+          // Use gratuityInclusion components to build gratuity wage base
+          let gratuityBase = 0;
+          for (const [code, amount] of Object.entries(earningsObj)) {
+            if (gratuityInclusionCodes.has(code)) {
+              gratuityBase += amount;
+            }
+          }
+          // Fallback to legacy string matching if no gratuityInclusion components configured
+          if (gratuityBase === 0) {
+            const basicAmount = Object.entries(earningsObj).find(([code]) =>
+              code.toUpperCase() === 'BASIC'
             )?.[1] ?? Object.entries(earningsObj).find(([code]) =>
-              code.toLowerCase().includes('dearness')
+              code.toLowerCase().includes('basic')
             )?.[1] ?? 0;
-            gratuityBase = basicAmount + daAmount;
+            gratuityBase = basicAmount;
+            if (gratuityConfig.baseSalary === 'Basic + DA') {
+              const daAmount = Object.entries(earningsObj).find(([code]) =>
+                code.toUpperCase() === 'DA'
+              )?.[1] ?? Object.entries(earningsObj).find(([code]) =>
+                code.toLowerCase().includes('dearness')
+              )?.[1] ?? 0;
+              gratuityBase = basicAmount + daAmount;
+            }
           }
           if (gratuityBase > 0) {
             const annualGratuity = (gratuityBase * 15 * effectiveYears) / 26;

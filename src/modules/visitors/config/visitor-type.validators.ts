@@ -13,7 +13,7 @@ export const createVisitorTypeSchema = z.object({
   requireHostApproval: z.boolean().default(true),
   requireEscort: z.boolean().default(false),
   defaultMaxDurationMinutes: z.number().int().min(15).max(1440).optional(),
-  safetyInductionId: z.string().optional(),
+  safetyInductionId: z.string().nullable().optional(),
   sortOrder: z.number().int().default(0),
 });
 

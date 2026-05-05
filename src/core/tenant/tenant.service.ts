@@ -15,6 +15,7 @@ import { n } from '../../shared/utils/prisma-helpers';
 import { logger } from '../../config/logger';
 import { seedCompanyConfigs } from '../../shared/services/config-seeder.service';
 import { seedDefaultTemplatesForCompany } from '../notifications/templates/seed-defaults';
+import { visitorTypeService } from '../../modules/visitors/config/visitor-type.service';
 import type {
   OnboardTenantPayload,
   CompanySectionKey,
@@ -707,6 +708,14 @@ export class TenantService {
     // OvertimeRule, ESSConfig) with industry-appropriate defaults.
     // Uses upsert — idempotent and safe to re-run.
     await seedCompanyConfigs(result.company.id, result.company.businessType ?? undefined);
+
+    // Seed default visitor types (Business Guest, Vendor, Contractor, etc.)
+    try {
+      await visitorTypeService.seedDefaults(result.company.id);
+      logger.info(`Seeded default visitor types for company ${result.company.id}`);
+    } catch (err) {
+      logger.warn('Visitor type seeding failed (non-fatal)', { error: err, companyId: result.company.id });
+    }
 
     // Seed default notification templates + rules so push/email/in-app
     // channels fire out of the box for every standard trigger event.
