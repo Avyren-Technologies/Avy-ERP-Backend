@@ -4,7 +4,7 @@ import { vmsConfigController } from './vms-config.controller';
 
 const router = Router();
 
-router.get('/', requirePermissions(['visitors:read']), vmsConfigController.get);
-router.put('/', requirePermissions(['visitors:configure']), vmsConfigController.update);
+router.get('/', requirePermissions(['visitors.settings:read']), vmsConfigController.get);
+router.put('/', requirePermissions(['visitors.settings:configure']), vmsConfigController.update);
 
 export { router as vmsConfigRoutes };

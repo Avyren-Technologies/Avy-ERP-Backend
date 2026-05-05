@@ -4,11 +4,11 @@ import { watchlistController } from './watchlist.controller';
 
 const router = Router();
 
-router.get('/', requirePermissions(['visitors:read']), watchlistController.list);
-router.post('/', requirePermissions(['visitors:configure']), watchlistController.create);
-router.post('/check', requirePermissions(['visitors:read']), watchlistController.check);
-router.get('/:id', requirePermissions(['visitors:read']), watchlistController.getById);
-router.put('/:id', requirePermissions(['visitors:configure']), watchlistController.update);
-router.delete('/:id', requirePermissions(['visitors:configure']), watchlistController.remove);
+router.get('/', requirePermissions(['visitors.watchlist:read']), watchlistController.list);
+router.post('/', requirePermissions(['visitors.watchlist:create']), watchlistController.create);
+router.post('/check', requirePermissions(['visitors.watchlist:read']), watchlistController.check);
+router.get('/:id', requirePermissions(['visitors.watchlist:read']), watchlistController.getById);
+router.put('/:id', requirePermissions(['visitors.watchlist:update']), watchlistController.update);
+router.delete('/:id', requirePermissions(['visitors.watchlist:delete']), watchlistController.remove);
 
 export { router as watchlistRoutes };

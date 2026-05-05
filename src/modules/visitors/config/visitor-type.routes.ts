@@ -4,12 +4,12 @@ import { visitorTypeController } from './visitor-type.controller';
 
 const router = Router();
 
-router.get('/', requirePermissions(['visitors:read']), visitorTypeController.list);
-router.post('/', requirePermissions(['visitors:configure']), visitorTypeController.create);
-router.get('/:id', requirePermissions(['visitors:read']), visitorTypeController.getById);
-router.put('/:id', requirePermissions(['visitors:configure']), visitorTypeController.update);
-router.patch('/:id/deactivate', requirePermissions(['visitors:configure']), visitorTypeController.deactivate);
-router.patch('/:id/activate', requirePermissions(['visitors:configure']), visitorTypeController.activate);
-router.delete('/:id', requirePermissions(['visitors:configure']), visitorTypeController.remove);
+router.get('/', requirePermissions(['visitors.types:read']), visitorTypeController.list);
+router.post('/', requirePermissions(['visitors.types:configure']), visitorTypeController.create);
+router.get('/:id', requirePermissions(['visitors.types:read']), visitorTypeController.getById);
+router.put('/:id', requirePermissions(['visitors.types:configure']), visitorTypeController.update);
+router.patch('/:id/deactivate', requirePermissions(['visitors.types:configure']), visitorTypeController.deactivate);
+router.patch('/:id/activate', requirePermissions(['visitors.types:configure']), visitorTypeController.activate);
+router.delete('/:id', requirePermissions(['visitors.types:configure']), visitorTypeController.remove);
 
 export { router as visitorTypeRoutes };

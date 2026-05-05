@@ -93,16 +93,38 @@ export function suppressByModules(permissions: string[], activeModuleIds: string
 
   return permissions.filter(perm => {
     if (perm === '*') return true;
-    const [module] = perm.split(':');
-    if (!module) return false;
-    return allowedPermModules.has(module);
+    const [moduleOrSub] = perm.split(':');
+    if (!moduleOrSub) return false;
+    const parentModule = moduleOrSub.includes('.') ? moduleOrSub.split('.')[0]! : moduleOrSub;
+    return allowedPermModules.has(parentModule);
   });
+}
+
+export interface SubModule {
+  label: string;
+  group: string;
+  actions: readonly string[];
 }
 
 export const PERMISSION_MODULES = {
   hr: {
     label: 'HR Management',
     actions: ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'],
+    subModules: {
+      'hr.org-structure':  { label: 'Org Structure',          group: 'HRMS Core',       actions: ['read', 'create', 'update', 'delete'] },
+      'hr.employees':      { label: 'Employee Directory',     group: 'HRMS Core',       actions: ['read', 'create', 'update', 'delete', 'export'] },
+      'hr.attendance':     { label: 'Attendance',             group: 'Attendance',       actions: ['read', 'create', 'update', 'configure'] },
+      'hr.leave':          { label: 'Leave Management',       group: 'Leave',            actions: ['read', 'create', 'update', 'approve', 'export'] },
+      'hr.payroll-config': { label: 'Payroll Config',         group: 'Payroll',          actions: ['read', 'configure'] },
+      'hr.payroll-ops':    { label: 'Payroll Operations',     group: 'Payroll',          actions: ['read', 'create', 'approve', 'export'] },
+      'hr.ess-config':     { label: 'ESS & Workflows',       group: 'Configuration',    actions: ['read', 'configure'] },
+      'hr.transfers':      { label: 'Transfers & Promotions', group: 'People',           actions: ['read', 'create', 'update'] },
+      'hr.performance':    { label: 'Performance',            group: 'Talent',           actions: ['read', 'create', 'update', 'approve'] },
+      'hr.recruitment':    { label: 'Recruitment & Training', group: 'Talent',           actions: ['read', 'create', 'update', 'approve', 'export'] },
+      'hr.exit':           { label: 'Exit & Separation',      group: 'People',           actions: ['read', 'create', 'update', 'approve'] },
+      'hr.advanced':       { label: 'Advanced HR',            group: 'Advanced',         actions: ['read', 'create', 'update', 'configure'] },
+      'hr.analytics':      { label: 'HR Analytics',           group: 'Analytics',        actions: ['read', 'export'] },
+    },
   },
   production: {
     label: 'Production',
@@ -135,6 +157,24 @@ export const PERMISSION_MODULES = {
   visitors: {
     label: 'Visitor Management',
     actions: ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'],
+    subModules: {
+      'visitors.dashboard':        { label: 'Visitors Dashboard',    group: 'VMS Operations', actions: ['read'] },
+      'visitors.gate-checkin':     { label: 'Gate Check-In',         group: 'VMS Operations', actions: ['read', 'create'] },
+      'visitors.visits':           { label: 'All Visits',            group: 'VMS Operations', actions: ['read', 'create', 'update', 'delete', 'approve'] },
+      'visitors.pre-register':     { label: 'Pre-Register Visitor',  group: 'VMS Operations', actions: ['read', 'create'] },
+      'visitors.recurring-passes': { label: 'Recurring Passes',      group: 'VMS Passes',     actions: ['read', 'create', 'update', 'delete'] },
+      'visitors.group-visits':     { label: 'Group Visits',          group: 'VMS Passes',     actions: ['read', 'create', 'update', 'delete'] },
+      'visitors.vehicle-passes':   { label: 'Vehicle Passes',        group: 'VMS Passes',     actions: ['read', 'create', 'update', 'delete'] },
+      'visitors.material-passes':  { label: 'Material Passes',       group: 'VMS Passes',     actions: ['read', 'create', 'update', 'delete'] },
+      'visitors.watchlist':        { label: 'Watchlist & Blocklist', group: 'VMS Security',   actions: ['read', 'create', 'update', 'delete'] },
+      'visitors.denied-entries':   { label: 'Denied Entries',        group: 'VMS Security',   actions: ['read'] },
+      'visitors.emergency':        { label: 'Emergency Muster',      group: 'VMS Security',   actions: ['read', 'create'] },
+      'visitors.reports':          { label: 'Visitor Reports',       group: 'VMS Reports',    actions: ['read', 'export'] },
+      'visitors.types':            { label: 'Visitor Types',         group: 'VMS Settings',   actions: ['read', 'configure'] },
+      'visitors.gates':            { label: 'Gates',                 group: 'VMS Settings',   actions: ['read', 'configure'] },
+      'visitors.inductions':       { label: 'Safety Inductions',     group: 'VMS Settings',   actions: ['read', 'configure'] },
+      'visitors.settings':         { label: 'VMS Settings',          group: 'VMS Settings',   actions: ['read', 'configure'] },
+    },
   },
   masters: {
     label: 'Masters',
@@ -227,7 +267,7 @@ export const COMPANY_ADMIN_PERMISSIONS: string[] = [
 
 /**
  * Generate flat list of all available permissions.
- * e.g. ["hr:read", "hr:create", "hr:update", ...]
+ * e.g. ["hr:read", "hr:create", "hr:update", ..., "hr.attendance:read", ...]
  */
 export function getAllPermissions(): string[] {
   const permissions: string[] = [];
@@ -235,35 +275,80 @@ export function getAllPermissions(): string[] {
     for (const action of config.actions) {
       permissions.push(`${module}:${action}`);
     }
+    // Include sub-module permissions
+    if ('subModules' in config && config.subModules) {
+      const subModules = config.subModules as Record<string, SubModule>;
+      for (const [subKey, subConfig] of Object.entries(subModules)) {
+        for (const action of subConfig.actions) {
+          permissions.push(`${subKey}:${action}`);
+        }
+      }
+    }
   }
   return permissions;
 }
 
 /**
  * Generate the permission catalogue with module metadata.
- * Returns { module, label, actions[] } for each module.
+ * Returns { module, label, actions[], subModules? } for each module.
  */
-export function getPermissionCatalogue(): { module: string; label: string; actions: readonly string[] }[] {
-  return Object.entries(PERMISSION_MODULES).map(([module, config]) => ({
-    module,
-    label: config.label,
-    actions: config.actions,
-  }));
+export function getPermissionCatalogue(): {
+  module: string;
+  label: string;
+  actions: readonly string[];
+  subModules?: { key: string; label: string; group: string; actions: readonly string[] }[];
+}[] {
+  return Object.entries(PERMISSION_MODULES).map(([module, config]) => {
+    const entry: {
+      module: string;
+      label: string;
+      actions: readonly string[];
+      subModules?: { key: string; label: string; group: string; actions: readonly string[] }[];
+    } = {
+      module,
+      label: config.label,
+      actions: config.actions,
+    };
+
+    if ('subModules' in config && config.subModules) {
+      const subModules = config.subModules as Record<string, SubModule>;
+      entry.subModules = Object.entries(subModules).map(([subKey, subConfig]) => ({
+        key: subKey,
+        label: subConfig.label,
+        group: subConfig.group,
+        actions: subConfig.actions,
+      }));
+    }
+
+    return entry;
+  });
 }
 
 /**
  * Check if a user's permissions array includes a required permission.
  * Supports wildcard: ['*'] grants access to everything.
  * Supports module wildcard: ['hr:*'] grants all hr actions.
+ * Supports sub-module permissions: 'visitors.dashboard:read' is covered by 'visitors:read'.
+ * Supports sub-module wildcard: 'visitors.dashboard:*' grants all dashboard actions.
  */
 export function hasPermission(userPermissions: string[], required: string): boolean {
   if (userPermissions.includes('*')) return true;
-
   if (userPermissions.includes(required)) return true;
 
-  // Check module wildcard: "hr:*" matches "hr:read"
-  const [module] = required.split(':');
-  if (module && userPermissions.includes(`${module}:*`)) return true;
+  const [moduleOrSub, action] = required.split(':');
+  if (!moduleOrSub || !action) return false;
+
+  // Sub-module wildcard: "visitors.dashboard:*"
+  if (userPermissions.includes(`${moduleOrSub}:*`)) return true;
+
+  // If this is a sub-module permission (has dot), check parent module
+  if (moduleOrSub.includes('.')) {
+    const parentModule = moduleOrSub.split('.')[0]!;
+    // Parent module action: "visitors:read" covers "visitors.dashboard:read"
+    if (userPermissions.includes(`${parentModule}:${action}`)) return true;
+    // Parent module wildcard: "visitors:*" covers everything
+    if (userPermissions.includes(`${parentModule}:*`)) return true;
+  }
 
   return false;
 }
@@ -309,7 +394,13 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   },
   'Security Personnel': {
     description: 'Security and Visitor Management',
-    permissions: ['security:*', 'visitors:*', 'attendance:mark'],
+    permissions: [
+      'security:*',
+      'visitors.dashboard:read', 'visitors.gate-checkin:read', 'visitors.gate-checkin:create',
+      'visitors.visits:read', 'visitors.denied-entries:read',
+      'visitors.emergency:read', 'visitors.emergency:create',
+      'attendance:mark',
+    ],
   },
   'Stores Clerk': {
     description: 'Inventory module',
