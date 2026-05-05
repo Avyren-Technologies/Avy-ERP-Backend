@@ -24,6 +24,8 @@ export const createVisitSchema = z.object({
   emergencyContact: z.preprocess(trimString, z.string().max(100)).optional(),
   meetingRef: z.preprocess(trimString, z.string().max(50)).optional(),
   purchaseOrderRef: z.preprocess(trimString, z.string().max(50)).optional(),
+  registrationMethod: z.enum(['PRE_REGISTERED', 'WALK_IN']).optional(),
+  ndaSigned: z.boolean().optional(),
 });
 
 export const updateVisitSchema = createVisitSchema.partial();

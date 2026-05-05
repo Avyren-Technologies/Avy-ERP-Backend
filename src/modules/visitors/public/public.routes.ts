@@ -45,6 +45,48 @@ const selfCheckOutLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// ── Self-Registration (MUST be before /visit/:visitCode to avoid collision) ──
+
+/** GET /public/visit/register/:plantCode — Get self-registration form config */
+router.get(
+  '/visit/register/:plantCode',
+  asyncHandler(async (req: Request, res: Response) => {
+    const plantCode = req.params.plantCode;
+    if (!plantCode) throw ApiError.badRequest('Plant code is required');
+    const result = await visitorPublicService.getSelfRegistrationConfig(plantCode);
+    res.json(createSuccessResponse(result, 'Self-registration form config'));
+  }),
+);
+
+/** POST /public/visit/register/:plantCode — Submit self-registration */
+router.post(
+  '/visit/register/:plantCode',
+  selfRegistrationLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const plantCode = req.params.plantCode;
+    if (!plantCode) throw ApiError.badRequest('Plant code is required');
+    const schema = z.object({
+      visitorName: z.string().min(1).max(200),
+      visitorMobile: z.string().min(10).max(15),
+      visitorEmail: z.string().email().max(200).optional(),
+      visitorCompany: z.string().max(200).optional(),
+      purpose: z.string().min(1).max(500),
+      hostEmployeeId: z.string().optional(),
+      visitorPhoto: z.string().optional(),
+      visitorTypeId: z.string().optional(),
+      ndaSigned: z.boolean().optional(),
+      inductionCompleted: z.boolean().optional(),
+      inductionScore: z.number().int().min(0).max(100).optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+    const result = await visitorPublicService.submitSelfRegistration(plantCode, parsed.data);
+    res.status(201).json(createSuccessResponse(result, 'Registration submitted'));
+  }),
+);
+
 // ── Pre-Arrival Form ────────────────────────────────────────────────
 
 /** GET /public/visit/:visitCode — Get visit details for pre-arrival form */
@@ -81,45 +123,6 @@ router.post(
     }
     const result = await visitorPublicService.submitPreArrivalForm(visitCode, parsed.data);
     res.json(createSuccessResponse(result, 'Pre-arrival form submitted'));
-  }),
-);
-
-// ── Self-Registration ───────────────────────────────────────────────
-
-/** GET /public/visit/register/:plantCode — Get self-registration form config */
-router.get(
-  '/visit/register/:plantCode',
-  asyncHandler(async (req: Request, res: Response) => {
-    const plantCode = req.params.plantCode;
-    if (!plantCode) throw ApiError.badRequest('Plant code is required');
-    const result = await visitorPublicService.getSelfRegistrationConfig(plantCode);
-    res.json(createSuccessResponse(result, 'Self-registration form config'));
-  }),
-);
-
-/** POST /public/visit/register/:plantCode — Submit self-registration */
-router.post(
-  '/visit/register/:plantCode',
-  selfRegistrationLimiter,
-  asyncHandler(async (req: Request, res: Response) => {
-    const plantCode = req.params.plantCode;
-    if (!plantCode) throw ApiError.badRequest('Plant code is required');
-    const schema = z.object({
-      visitorName: z.string().min(1).max(200),
-      visitorMobile: z.string().min(10).max(15),
-      visitorEmail: z.string().email().max(200).optional(),
-      visitorCompany: z.string().max(200).optional(),
-      purpose: z.string().min(1).max(500),
-      hostEmployeeId: z.string().optional(),
-      visitorPhoto: z.string().optional(),
-      visitorTypeId: z.string().optional(),
-    });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
-    }
-    const result = await visitorPublicService.submitSelfRegistration(plantCode, parsed.data);
-    res.status(201).json(createSuccessResponse(result, 'Registration submitted'));
   }),
 );
 

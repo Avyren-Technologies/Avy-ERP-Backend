@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireModuleEnabled } from '../../shared/middleware/config-enforcement.middleware';
+import { requireVmsFeature } from './shared/vms-feature-gate.middleware';
 import { visitorTypeRoutes } from './config/visitor-type.routes';
 import { gateRoutes } from './config/gate.routes';
 import { safetyInductionRoutes } from './config/safety-induction.routes';
@@ -33,19 +34,19 @@ router.use('/visits', visitRoutes);
 router.use('/watchlist', watchlistRoutes);
 router.use('/denied-entries', deniedEntryRoutes);
 
-// ── Pass routes ───────────────────────────────────────────────────
-router.use('/recurring-passes', recurringPassRoutes);
-router.use('/vehicle-passes', vehiclePassRoutes);
-router.use('/material-passes', materialPassRoutes);
+// ── Pass routes (feature-gated: GET allowed, writes blocked if disabled) ──
+router.use('/recurring-passes', requireVmsFeature('recurringPassEnabled'), recurringPassRoutes);
+router.use('/vehicle-passes', requireVmsFeature('vehicleGatePassEnabled'), vehiclePassRoutes);
+router.use('/material-passes', requireVmsFeature('materialGatePassEnabled'), materialPassRoutes);
 
-// ── Group visits ──────────────────────────────────────────────────
-router.use('/group-visits', groupVisitRoutes);
+// ── Group visits (feature-gated) ──────────────────────────────────
+router.use('/group-visits', requireVmsFeature('groupVisitEnabled'), groupVisitRoutes);
 
 // ── Dashboard & Reports ───────────────────────────────────────────
 router.use('/dashboard', dashboardRoutes);
 router.use('/reports', reportsRoutes);
 
-// ── Emergency ─────────────────────────────────────────────────────
-router.use('/emergency', emergencyRoutes);
+// ── Emergency (feature-gated) ─────────────────────────────────────
+router.use('/emergency', requireVmsFeature('emergencyMusterEnabled'), emergencyRoutes);
 
 export { router as visitorsRoutes };

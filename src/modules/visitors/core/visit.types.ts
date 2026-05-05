@@ -20,6 +20,8 @@ export interface CreateVisitInput {
   emergencyContact?: string | undefined;
   meetingRef?: string | undefined;
   purchaseOrderRef?: string | undefined;
+  registrationMethod?: 'PRE_REGISTERED' | 'WALK_IN' | 'QR_SELF_REG' | undefined;
+  ndaSigned?: boolean | undefined;
 }
 
 export interface CheckInInput {

@@ -48,7 +48,8 @@ export async function sendEmail(
   to: string,
   subject: string,
   html: string,
-  text?: string
+  text?: string,
+  attachments?: { filename: string; content: Buffer; cid: string }[],
 ): Promise<void> {
   try {
     const transport = await getTransporter();
@@ -59,6 +60,7 @@ export async function sendEmail(
       subject,
       html,
       text: text || html.replace(/<[^>]*>/g, ''),
+      ...(attachments?.length ? { attachments } : {}),
     });
 
     logger.info(`Email sent to ${to}: ${info.messageId}`);

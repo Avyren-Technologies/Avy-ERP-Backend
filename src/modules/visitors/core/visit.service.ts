@@ -39,6 +39,21 @@ class VisitService {
    * Create a pre-registration (single visitor)
    */
   async createVisit(companyId: string, input: CreateVisitInput, createdBy: string): Promise<any> {
+    // Fetch VMS config to enforce global settings
+    const vmsConfig = await platformPrisma.visitorManagementConfig.findUnique({
+      where: { companyId },
+    });
+
+    // Enforce walkInAllowed when registration method is WALK_IN
+    if (input.registrationMethod === 'WALK_IN' && vmsConfig && !vmsConfig.walkInAllowed) {
+      throw ApiError.badRequest('Walk-in registration is not allowed. Please pre-register online.');
+    }
+
+    // Enforce preRegistrationEnabled for non-walk-in, non-self-registration
+    if (input.registrationMethod !== 'WALK_IN' && vmsConfig && !vmsConfig.preRegistrationEnabled && createdBy !== 'system') {
+      throw ApiError.badRequest('Pre-registration is currently disabled for this company.');
+    }
+
     // Validate visitor type exists and is active
     const visitorType = await platformPrisma.visitorType.findFirst({
       where: { id: input.visitorTypeId, companyId, isActive: true },
@@ -88,7 +103,7 @@ class VisitService {
           hostEmployeeId: input.hostEmployeeId ?? createdBy,
           plantId: input.plantId,
           gateId: n(input.gateId),
-          registrationMethod: 'PRE_REGISTERED',
+          registrationMethod: input.registrationMethod ?? (createdBy === 'system' ? 'QR_SELF_REG' : 'PRE_REGISTERED'),
           approvalStatus: (visitorType.requireHostApproval && input.hostEmployeeId) ? 'PENDING' : 'AUTO_APPROVED',
           status: 'EXPECTED',
           vehicleRegNumber: n(input.vehicleRegNumber),
@@ -98,7 +113,10 @@ class VisitService {
           emergencyContact: n(input.emergencyContact),
           meetingRef: n(input.meetingRef),
           purchaseOrderRef: n(input.purchaseOrderRef),
-          safetyInductionStatus: visitorType.requireSafetyInduction ? 'PENDING' : 'NOT_REQUIRED',
+          ndaSigned: input.ndaSigned ?? false,
+          safetyInductionStatus: vmsConfig?.safetyInduction === 'NEVER'
+            ? 'NOT_REQUIRED'
+            : (vmsConfig?.safetyInduction === 'ALWAYS' || visitorType.requireSafetyInduction) ? 'PENDING' : 'NOT_REQUIRED',
           createdBy,
         },
         include: { visitorType: true },
@@ -149,6 +167,20 @@ class VisitService {
           const plant = await platformPrisma.location.findFirst({ where: { id: input.plantId }, select: { name: true } });
           const host = input.hostEmployeeId ? await platformPrisma.employee.findFirst({ where: { id: input.hostEmployeeId }, select: { firstName: true, lastName: true } }) : null;
 
+          // Fetch induction info for the email if induction is required
+          let inductionEmailData: { required: boolean; name?: string; type?: string; contentUrl?: string } | undefined;
+          if (visitorType.requireSafetyInduction) {
+            const induction = visitorType.safetyInductionId
+              ? await platformPrisma.safetyInduction.findFirst({ where: { id: visitorType.safetyInductionId, isActive: true }, select: { name: true, type: true, contentUrl: true } })
+              : await platformPrisma.safetyInduction.findFirst({ where: { companyId, isActive: true }, select: { name: true, type: true, contentUrl: true }, orderBy: { createdAt: 'desc' } });
+            inductionEmailData = {
+              required: true,
+              ...(induction?.name ? { name: induction.name } : {}),
+              ...(induction?.type ? { type: induction.type } : {}),
+              ...(induction?.contentUrl ? { contentUrl: induction.contentUrl } : {}),
+            };
+          }
+
           sendVisitorInvitation({
             visitorEmail: input.visitorEmail,
             visitorName: input.visitorName,
@@ -162,6 +194,8 @@ class VisitService {
             purpose: input.purpose,
             plantName: plant?.name,
             specialInstructions: input.specialInstructions,
+            safetyInduction: inductionEmailData,
+            ndaRequired: visitorType.requireNda ?? false,
           });
         } catch (emailErr) {
           logger.warn('Failed to send visitor invitation email', { error: emailErr, visitId: visit.id });
@@ -424,15 +458,22 @@ class VisitService {
         }
       }
 
-      // Enforce visitor type requirements — collect warnings
+      // Enforce visitor type + global VMS config requirements — collect warnings
+      const checkInConfig = await tx.visitorManagementConfig.findUnique({
+        where: { companyId }, select: { photoCapture: true, idVerification: true, ndaRequired: true, safetyInduction: true },
+      });
       const warnings: string[] = [];
-      if (visit!.visitorType?.requirePhoto && !input.visitorPhoto && !visit!.visitorPhoto) {
+      const photoRequired = checkInConfig?.photoCapture === 'ALWAYS' || visit!.visitorType?.requirePhoto;
+      const idRequired = checkInConfig?.idVerification === 'ALWAYS' || visit!.visitorType?.requireIdVerification;
+      const ndaRequired = checkInConfig?.ndaRequired === 'ALWAYS' || visit!.visitorType?.requireNda;
+
+      if (photoRequired && !input.visitorPhoto && !visit!.visitorPhoto) {
         warnings.push('Visitor photo is required but not captured');
       }
-      if (visit!.visitorType?.requireIdVerification && !input.governmentIdType && !visit!.governmentIdType) {
+      if (idRequired && !input.governmentIdType && !visit!.governmentIdType) {
         warnings.push('ID verification is required but not completed');
       }
-      if (visit!.visitorType?.requireNda && !visit!.ndaSigned) {
+      if (ndaRequired && !visit!.ndaSigned) {
         warnings.push('NDA signing is required but not completed');
       }
       if (visit!.visitorType?.requireEscort) {
@@ -447,7 +488,7 @@ class VisitService {
           triggerEvent: 'VMS_VISITOR_CHECKED_IN',
           entityType: 'visit',
           entityId: id,
-          explicitRecipients: [visit!.hostEmployeeId],
+          explicitRecipients: visit!.hostEmployeeId && visit!.hostEmployeeId !== 'system' ? [visit!.hostEmployeeId] : [],
           tokens: {
             visitorName: visit!.visitorName,
             gate: visit!.checkInGate?.name ?? 'Unknown',
@@ -534,7 +575,7 @@ class VisitService {
           triggerEvent: 'VMS_VISITOR_CHECKED_OUT',
           entityType: 'visit',
           entityId: id,
-          explicitRecipients: [final!.hostEmployeeId],
+          explicitRecipients: final!.hostEmployeeId && final!.hostEmployeeId !== 'system' ? [final!.hostEmployeeId] : [],
           tokens: {
             visitorName: final!.visitorName,
             duration: `${final!.visitDurationMinutes ?? 0} minutes`,

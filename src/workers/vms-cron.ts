@@ -4,6 +4,7 @@ import { logger } from '../config/logger';
 import { visitService } from '../modules/visitors/core/visit.service';
 
 const AUTO_CHECKOUT_INTERVAL = 5 * 60 * 1000;       // Every 5 minutes
+const APPROVAL_TIMEOUT_INTERVAL = 5 * 60 * 1000;    // Every 5 minutes
 
 /** Tracks the last date (yyyy-MM-dd) auto-checkout ran per company to avoid repeated runs. */
 const lastAutoCheckOutDate = new Map<string, string>();
@@ -101,8 +102,70 @@ async function runPassExpiry(): Promise<void> {
   }
 }
 
+/**
+ * Auto-reject visits that have been in PENDING approval status longer than
+ * the configured autoRejectAfterMinutes. Creates denied entry records for audit.
+ */
+async function runApprovalTimeouts(): Promise<void> {
+  const configs = await platformPrisma.visitorManagementConfig.findMany({
+    where: { autoRejectAfterMinutes: { gt: 0 } },
+    select: { companyId: true, autoRejectAfterMinutes: true },
+  });
+
+  for (const config of configs) {
+    try {
+      const cutoff = DateTime.utc().minus({ minutes: config.autoRejectAfterMinutes }).toJSDate();
+
+      const expiredVisits = await platformPrisma.visit.findMany({
+        where: {
+          companyId: config.companyId,
+          approvalStatus: 'PENDING',
+          createdAt: { lt: cutoff },
+          status: 'EXPECTED',
+        },
+        select: { id: true, visitorName: true, visitorMobile: true, visitorCompany: true, plantId: true },
+      });
+
+      if (expiredVisits.length === 0) continue;
+
+      // Batch update + denied entries in a single transaction for consistency
+      await platformPrisma.$transaction(async (tx) => {
+        await tx.visit.updateMany({
+          where: { id: { in: expiredVisits.map(v => v.id) } },
+          data: {
+            approvalStatus: 'REJECTED',
+            status: 'REJECTED',
+            approvalNotes: `Auto-rejected: approval not received within ${config.autoRejectAfterMinutes} minutes`,
+            approvalTimestamp: new Date(),
+          },
+        });
+
+        for (const visit of expiredVisits) {
+          await tx.deniedEntry.create({
+            data: {
+              companyId: config.companyId,
+              visitorName: visit.visitorName,
+              visitorMobile: visit.visitorMobile,
+              visitorCompany: visit.visitorCompany,
+              denialReason: 'APPROVAL_TIMEOUT',
+              denialDetails: `Auto-rejected after ${config.autoRejectAfterMinutes} minutes without host approval`,
+              visitId: visit.id,
+              plantId: visit.plantId,
+              deniedBy: 'system',
+            },
+          });
+        }
+      });
+
+      logger.info(`VMS approval timeout: auto-rejected ${expiredVisits.length} visit(s) for company ${config.companyId}`);
+    } catch (err) {
+      logger.error(`VMS approval timeout error for company ${config.companyId}:`, err);
+    }
+  }
+}
+
 export function startVMSCron(): void {
-  logger.info('Starting VMS cron jobs (auto-checkout 5m, overstay 15m, no-show 6h, pass-expiry 6h)');
+  logger.info('Starting VMS cron jobs (auto-checkout 5m, approval-timeout 5m, overstay 15m, no-show 6h, pass-expiry 6h)');
 
   setInterval(async () => {
     try {
@@ -136,8 +199,17 @@ export function startVMSCron(): void {
     }
   }, PASS_EXPIRY_INTERVAL);
 
+  setInterval(async () => {
+    try {
+      await runApprovalTimeouts();
+    } catch (err) {
+      logger.error('VMS approval timeout cron error:', err);
+    }
+  }, APPROVAL_TIMEOUT_INTERVAL);
+
   // Run all immediately on startup
   runAutoCheckOut().catch(err => logger.error('Initial VMS auto-checkout error:', err));
+  runApprovalTimeouts().catch(err => logger.error('Initial VMS approval timeout error:', err));
   runOverstayDetection().catch(err => logger.error('Initial VMS overstay detection error:', err));
   runNoShowMarking().catch(err => logger.error('Initial VMS no-show marking error:', err));
   runPassExpiry().catch(err => logger.error('Initial VMS pass expiry error:', err));

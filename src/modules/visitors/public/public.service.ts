@@ -89,7 +89,7 @@ export class VisitorPublicService {
       data: updateData,
     });
 
-    return { success: true, message: 'Pre-arrival information submitted successfully.' };
+    return { message: 'Pre-arrival information submitted successfully.' };
   }
 
   /**
@@ -125,10 +125,10 @@ export class VisitorPublicService {
       throw ApiError.badRequest('Self-registration is not enabled at this facility.');
     }
 
-    // Get active visitor types for this company
+    // Get active visitor types for this company (include NDA/induction flags for PER_VISITOR_TYPE mode)
     const visitorTypes = await platformPrisma.visitorType.findMany({
       where: { companyId: location.companyId, isActive: true },
-      select: { id: true, name: true, code: true },
+      select: { id: true, name: true, code: true, requireNda: true, requireSafetyInduction: true, safetyInductionId: true },
       orderBy: { sortOrder: 'asc' },
     });
 
@@ -142,6 +142,20 @@ export class VisitorPublicService {
       orderBy: { firstName: 'asc' },
     });
 
+    // Get active safety inductions for this company (filtered by plant if available)
+    const safetyInductions = await platformPrisma.safetyInduction.findMany({
+      where: {
+        companyId: location.companyId,
+        isActive: true,
+        OR: [{ plantId: null }, { plantId: location.id }],
+      },
+      select: {
+        id: true, name: true, type: true, contentUrl: true,
+        questions: true, passingScore: true, durationSeconds: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
     return {
       company: location.company,
       plant: { id: location.id, name: location.name, code: location.code },
@@ -150,9 +164,13 @@ export class VisitorPublicService {
         id: e.id,
         name: `${e.firstName} ${e.lastName}`.trim(),
       })),
+      safetyInductions,
       config: {
         photoRequired: config.photoCapture === 'ALWAYS',
         privacyConsentText: config.privacyConsentText,
+        ndaRequired: config.ndaRequired,
+        ndaTemplateContent: config.ndaRequired !== 'NEVER' ? config.ndaTemplateContent : null,
+        safetyInductionRequired: config.safetyInduction,
       },
     };
   }
@@ -170,6 +188,9 @@ export class VisitorPublicService {
     hostEmployeeId?: string | undefined;
     visitorPhoto?: string | undefined;
     visitorTypeId?: string | undefined;
+    ndaSigned?: boolean | undefined;
+    inductionCompleted?: boolean | undefined;
+    inductionScore?: number | undefined;
   }) {
     // Find location
     const location = await platformPrisma.location.findFirst({
@@ -222,7 +243,20 @@ export class VisitorPublicService {
       expectedDate: new Date().toISOString(),
       hostEmployeeId,
       plantId: location.id,
+      ndaSigned: data.ndaSigned,
     }, 'system');
+
+    // If induction was completed during self-registration, mark it on the visit
+    if (data.inductionCompleted) {
+      try {
+        await visitService.completeInduction(
+          companyId, visit.id,
+          data.inductionScore, data.inductionCompleted,
+        );
+      } catch (err) {
+        logger.warn('Failed to record induction during self-registration', { error: err, visitId: visit.id });
+      }
+    }
 
     return {
       visitCode: visit.visitCode,

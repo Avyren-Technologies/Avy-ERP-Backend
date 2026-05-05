@@ -5,7 +5,7 @@ const trimString = (val: unknown) => (typeof val === 'string' ? val.trim() : val
 export const createSafetyInductionSchema = z.object({
   name: z.preprocess(trimString, z.string().min(1, 'Name is required').max(200)),
   type: z.enum(['VIDEO', 'SLIDES', 'QUESTIONNAIRE', 'DECLARATION']),
-  contentUrl: z.string().url().optional(),
+  contentUrl: z.string().max(10000).optional(),
   questions: z.array(z.object({
     question: z.string(),
     options: z.array(z.string()),
