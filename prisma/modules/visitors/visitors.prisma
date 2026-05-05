@@ -240,7 +240,7 @@ model SafetyInduction {
 model Visit {
   id                        String              @id @default(cuid())
   companyId                 String
-  visitNumber               String              @unique
+  visitNumber               String
   visitCode                 String              @unique
   qrCodeUrl                 String?
 
@@ -344,6 +344,7 @@ model Visit {
   groupVisitMember          GroupVisitMember?
   deniedEntries             DeniedEntry[]
 
+  @@unique([companyId, visitNumber])
   @@index([companyId, status])
   @@index([companyId, expectedDate])
   @@index([companyId, hostEmployeeId])
@@ -430,7 +431,7 @@ model GroupVisitMember {
 model RecurringVisitorPass {
   id                           String              @id @default(cuid())
   companyId                    String
-  passNumber                   String              @unique
+  passNumber                   String
   qrCode                       String?
 
   visitorName                  String
@@ -468,6 +469,7 @@ model RecurringVisitorPass {
   company                      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   visits                       Visit[]
 
+  @@unique([companyId, passNumber])
   @@index([companyId, status])
   @@index([companyId, visitorMobile])
   @@map("recurring_visitor_passes")
@@ -476,7 +478,7 @@ model RecurringVisitorPass {
 model VehicleGatePass {
   id                 String      @id @default(cuid())
   companyId          String
-  passNumber         String      @unique
+  passNumber         String
   vehicleRegNumber   String
   vehicleType        VehicleType
   driverName         String
@@ -498,6 +500,7 @@ model VehicleGatePass {
   entryGate          VisitorGate @relation("VehicleEntryGate", fields: [entryGateId], references: [id])
   exitGate           VisitorGate? @relation("VehicleExitGate", fields: [exitGateId], references: [id])
 
+  @@unique([companyId, passNumber])
   @@index([companyId, entryTime])
   @@index([companyId, vehicleRegNumber])
   @@map("vehicle_gate_passes")
@@ -506,7 +509,7 @@ model VehicleGatePass {
 model MaterialGatePass {
   id                  String              @id @default(cuid())
   companyId           String
-  passNumber          String              @unique
+  passNumber          String
   type                MaterialGatePassType
   description         String
   quantityIssued      String?
@@ -526,6 +529,7 @@ model MaterialGatePass {
   company             Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   gate                VisitorGate         @relation(fields: [gateId], references: [id])
 
+  @@unique([companyId, passNumber])
   @@index([companyId, type])
   @@index([companyId, returnStatus])
   @@map("material_gate_passes")
