@@ -1409,189 +1409,325 @@ export class LeaveService {
   // Leave Accrual (M2)
   // ────────────────────────────────────────────────────────────────────
 
-  async accrueBalances(companyId: string, month: number, year: number, dayOfMonth?: number) {
-    const today = dayOfMonth ?? new Date().getDate();
+  async accrueBalances(companyId: string, month: number, year: number, dayOfMonth?: number, userId?: string) {
+    const periodKey = `${year}-${String(month).padStart(2, '0')}`;
 
-    // Fetch all active leave types with accrualFrequency
-    const leaveTypes = await platformPrisma.leaveType.findMany({
-      where: {
-        companyId,
-        isActive: true,
-        accrualFrequency: { not: null },
-      },
+    // ── Idempotency check ──────────────────────────────────────────────
+    const existing = await platformPrisma.jobExecution.findUnique({
+      where: { jobType_companyId_periodKey: { jobType: 'ACCRUAL', companyId, periodKey } },
     });
-
-    // Fetch all active employees
-    const employees = await platformPrisma.employee.findMany({
-      where: { companyId, status: 'ACTIVE' },
-      select: { id: true, employeeId: true, firstName: true, lastName: true },
-    });
-
-    const results: any[] = [];
-
-    for (const employee of employees) {
-      for (const lt of leaveTypes) {
-        // Check if accrual is due based on frequency
-        const isDue = this.isAccrualDue(lt.accrualFrequency!, month);
-        if (!isDue) continue;
-
-        // Check accrualDay: if set, only accrue on that specific day of the month
-        if (lt.accrualDay !== null && lt.accrualDay !== undefined && today !== Number(lt.accrualDay)) {
-          continue;
-        }
-
-        // Calculate accrual amount
-        const accrualAmount = this.calculateAccrualAmount(
-          lt.accrualFrequency!,
-          Number(lt.annualEntitlement)
-        );
-
-        // Find or create balance record
-        let balance = await platformPrisma.leaveBalance.findUnique({
-          where: {
-            employeeId_leaveTypeId_year: {
-              employeeId: employee.id,
-              leaveTypeId: lt.id,
-              year,
-            },
-          },
-        });
-
-        if (!balance) {
-          balance = await platformPrisma.leaveBalance.create({
-            data: {
-              companyId,
-              employeeId: employee.id,
-              leaveTypeId: lt.id,
-              year,
-              openingBalance: 0,
-              accrued: 0,
-              taken: 0,
-              adjusted: 0,
-              balance: 0,
-            },
-          });
-        }
-
-        // Increment accrued and balance
-        await platformPrisma.leaveBalance.update({
-          where: { id: balance.id },
-          data: {
-            accrued: { increment: accrualAmount },
-            balance: { increment: accrualAmount },
-          },
-        });
-
-        results.push({
-          employeeId: employee.id,
-          employeeCode: employee.employeeId,
-          leaveTypeId: lt.id,
-          leaveTypeCode: lt.code,
-          accrualAmount,
-        });
-      }
+    if (existing?.status === 'COMPLETED') {
+      return { skipped: true, message: `Accrual already completed for ${periodKey}` };
     }
 
-    return {
-      month,
-      year,
-      totalAccrued: results.length,
-      results,
-    };
+    // ── Mark job as RUNNING ────────────────────────────────────────────
+    await platformPrisma.jobExecution.upsert({
+      where: { jobType_companyId_periodKey: { jobType: 'ACCRUAL', companyId, periodKey } },
+      create: { jobType: 'ACCRUAL', companyId, periodKey, status: 'RUNNING' },
+      update: { status: 'RUNNING', error: null, startedAt: new Date() },
+    });
+
+    try {
+      const today = dayOfMonth ?? new Date().getDate();
+
+      // Fetch all active leave types with accrualFrequency
+      const leaveTypes = await platformPrisma.leaveType.findMany({
+        where: {
+          companyId,
+          isActive: true,
+          accrualFrequency: { not: null },
+        },
+      });
+
+      // Fetch all active employees
+      const employees = await platformPrisma.employee.findMany({
+        where: { companyId, status: 'ACTIVE' },
+        select: { id: true, employeeId: true, firstName: true, lastName: true },
+      });
+
+      const results: any[] = [];
+
+      for (const employee of employees) {
+        for (const lt of leaveTypes) {
+          // Check if accrual is due based on frequency
+          const isDue = this.isAccrualDue(lt.accrualFrequency!, month);
+          if (!isDue) continue;
+
+          // Check accrualDay: if set, only accrue on that specific day of the month
+          if (lt.accrualDay !== null && lt.accrualDay !== undefined && today !== Number(lt.accrualDay)) {
+            continue;
+          }
+
+          // Calculate accrual amount
+          const accrualAmount = this.calculateAccrualAmount(
+            lt.accrualFrequency!,
+            Number(lt.annualEntitlement)
+          );
+
+          const idempotencyKey = `accrual-${employee.id}-${lt.id}-${periodKey}`;
+
+          await platformPrisma.$transaction(async (tx) => {
+            // Check per-record idempotency
+            const existingTx = await (tx as any).leaveBalanceTransaction.findUnique({
+              where: { idempotencyKey },
+            });
+            if (existingTx) return; // already processed
+
+            // Find or create balance record
+            let balance = await (tx as any).leaveBalance.findUnique({
+              where: {
+                employeeId_leaveTypeId_year: {
+                  employeeId: employee.id,
+                  leaveTypeId: lt.id,
+                  year,
+                },
+              },
+            });
+
+            if (!balance) {
+              balance = await (tx as any).leaveBalance.create({
+                data: {
+                  companyId,
+                  employeeId: employee.id,
+                  leaveTypeId: lt.id,
+                  year,
+                  openingBalance: 0,
+                  accrued: 0,
+                  taken: 0,
+                  adjusted: 0,
+                  booked: 0,
+                  balance: 0,
+                  version: 0,
+                },
+              });
+            }
+
+            // Use mutateBalance to apply accrual increment
+            await mutateBalance(
+              tx,
+              balance.id,
+              Number(balance.version),
+              { accrued: Number(balance.accrued) + accrualAmount },
+              {
+                type: 'ACCRUAL',
+                delta: accrualAmount,
+                changedBy: userId ?? 'system',
+                source: 'CRON',
+                idempotencyKey,
+                reason: `Monthly accrual for ${periodKey}`,
+              },
+              companyId,
+            );
+          });
+
+          results.push({
+            employeeId: employee.id,
+            employeeCode: employee.employeeId,
+            leaveTypeId: lt.id,
+            leaveTypeCode: lt.code,
+            accrualAmount,
+          });
+        }
+      }
+
+      // ── Mark job as COMPLETED ──────────────────────────────────────────
+      await platformPrisma.jobExecution.update({
+        where: { jobType_companyId_periodKey: { jobType: 'ACCRUAL', companyId, periodKey } },
+        data: { status: 'COMPLETED', completedAt: new Date(), result: { totalAccrued: results.length } },
+      });
+
+      return {
+        month,
+        year,
+        totalAccrued: results.length,
+        results,
+      };
+    } catch (err) {
+      // ── Mark job as FAILED ───────────────────────────────────────────
+      await platformPrisma.jobExecution.update({
+        where: { jobType_companyId_periodKey: { jobType: 'ACCRUAL', companyId, periodKey } },
+        data: { status: 'FAILED', completedAt: new Date(), error: (err as Error).message },
+      });
+      throw err;
+    }
   }
 
-  async carryForwardBalances(companyId: string, fromYear: number, toYear: number) {
-    // Get all leave types where carryForward is allowed
-    const leaveTypes = await platformPrisma.leaveType.findMany({
-      where: {
-        companyId,
-        isActive: true,
-        carryForwardAllowed: true,
-      },
+  async carryForwardBalances(companyId: string, fromYear: number, toYear: number, userId?: string) {
+    const periodKey = `${fromYear}-${toYear}`;
+
+    // ── Idempotency check ──────────────────────────────────────────────
+    const existing = await platformPrisma.jobExecution.findUnique({
+      where: { jobType_companyId_periodKey: { jobType: 'CARRY_FORWARD', companyId, periodKey } },
     });
-
-    // Get all active employees
-    const employees = await platformPrisma.employee.findMany({
-      where: { companyId, status: 'ACTIVE' },
-      select: { id: true, employeeId: true },
-    });
-
-    const results: any[] = [];
-
-    for (const employee of employees) {
-      for (const lt of leaveTypes) {
-        // Get balance for fromYear
-        const fromBalance = await platformPrisma.leaveBalance.findUnique({
-          where: {
-            employeeId_leaveTypeId_year: {
-              employeeId: employee.id,
-              leaveTypeId: lt.id,
-              year: fromYear,
-            },
-          },
-        });
-
-        if (!fromBalance || Number(fromBalance.balance) <= 0) continue;
-
-        // Calculate carry-forward amount
-        const remaining = Number(fromBalance.balance);
-        const maxCF = lt.maxCarryForwardDays ? Number(lt.maxCarryForwardDays) : remaining;
-        const carryForwardAmount = Math.min(remaining, maxCF);
-
-        if (carryForwardAmount <= 0) continue;
-
-        // Find or create toYear balance
-        let toBalance = await platformPrisma.leaveBalance.findUnique({
-          where: {
-            employeeId_leaveTypeId_year: {
-              employeeId: employee.id,
-              leaveTypeId: lt.id,
-              year: toYear,
-            },
-          },
-        });
-
-        if (toBalance) {
-          // Update existing balance with carry-forward as opening balance
-          await platformPrisma.leaveBalance.update({
-            where: { id: toBalance.id },
-            data: {
-              openingBalance: { increment: carryForwardAmount },
-              balance: { increment: carryForwardAmount },
-            },
-          });
-        } else {
-          await platformPrisma.leaveBalance.create({
-            data: {
-              companyId,
-              employeeId: employee.id,
-              leaveTypeId: lt.id,
-              year: toYear,
-              openingBalance: carryForwardAmount,
-              accrued: 0,
-              taken: 0,
-              adjusted: 0,
-              balance: carryForwardAmount,
-            },
-          });
-        }
-
-        results.push({
-          employeeId: employee.id,
-          employeeCode: employee.employeeId,
-          leaveTypeId: lt.id,
-          leaveTypeCode: lt.code,
-          carryForwardAmount,
-        });
-      }
+    if (existing?.status === 'COMPLETED') {
+      return { skipped: true, message: `Carry-forward already completed for ${periodKey}` };
     }
 
-    return {
-      fromYear,
-      toYear,
-      totalCarriedForward: results.length,
-      results,
-    };
+    // ── Mark job as RUNNING ────────────────────────────────────────────
+    await platformPrisma.jobExecution.upsert({
+      where: { jobType_companyId_periodKey: { jobType: 'CARRY_FORWARD', companyId, periodKey } },
+      create: { jobType: 'CARRY_FORWARD', companyId, periodKey, status: 'RUNNING' },
+      update: { status: 'RUNNING', error: null, startedAt: new Date() },
+    });
+
+    try {
+      // Get all leave types where carryForward is allowed
+      const leaveTypes = await platformPrisma.leaveType.findMany({
+        where: {
+          companyId,
+          isActive: true,
+          carryForwardAllowed: true,
+        },
+      });
+
+      // Get all active employees
+      const employees = await platformPrisma.employee.findMany({
+        where: { companyId, status: 'ACTIVE' },
+        select: { id: true, employeeId: true },
+      });
+
+      const results: any[] = [];
+
+      for (const employee of employees) {
+        for (const lt of leaveTypes) {
+          // Get balance for fromYear
+          const fromBalance = await platformPrisma.leaveBalance.findUnique({
+            where: {
+              employeeId_leaveTypeId_year: {
+                employeeId: employee.id,
+                leaveTypeId: lt.id,
+                year: fromYear,
+              },
+            },
+          });
+
+          if (!fromBalance || Number(fromBalance.balance) <= 0) continue;
+
+          // Calculate carry-forward amount
+          const remaining = Number(fromBalance.balance);
+          const maxCF = lt.maxCarryForwardDays ? Number(lt.maxCarryForwardDays) : remaining;
+          const carryForwardAmount = Math.min(remaining, maxCF);
+
+          if (carryForwardAmount <= 0) continue;
+
+          // Calculate expiry date if configured
+          const expiresAt = lt.carryForwardExpiryDays
+            ? new Date(toYear, 0, 1 + Number(lt.carryForwardExpiryDays))
+            : undefined;
+
+          const idempotencyKey = `cf-${employee.id}-${lt.id}-${periodKey}`;
+
+          await platformPrisma.$transaction(async (tx) => {
+            // Check per-record idempotency
+            const existingTx = await (tx as any).leaveBalanceTransaction.findUnique({
+              where: { idempotencyKey },
+            });
+            if (existingTx) return; // already processed
+
+            // Find or create toYear balance
+            let toBalance = await (tx as any).leaveBalance.findUnique({
+              where: {
+                employeeId_leaveTypeId_year: {
+                  employeeId: employee.id,
+                  leaveTypeId: lt.id,
+                  year: toYear,
+                },
+              },
+            });
+
+            if (toBalance) {
+              // Update existing balance: increment openingBalance via mutateBalance
+              await mutateBalance(
+                tx,
+                toBalance.id,
+                Number(toBalance.version),
+                { openingBalance: Number(toBalance.openingBalance) + carryForwardAmount },
+                {
+                  type: 'CARRY_FORWARD',
+                  delta: carryForwardAmount,
+                  changedBy: userId ?? 'system',
+                  source: 'CRON',
+                  idempotencyKey,
+                  reason: `Carry-forward from ${fromYear} to ${toYear}`,
+                },
+                companyId,
+              );
+
+              // Set expiresAt if configured
+              if (expiresAt) {
+                await (tx as any).leaveBalance.update({
+                  where: { id: toBalance.id },
+                  data: { expiresAt },
+                });
+              }
+            } else {
+              // Create new toYear balance
+              const newBalance = await (tx as any).leaveBalance.create({
+                data: {
+                  companyId,
+                  employeeId: employee.id,
+                  leaveTypeId: lt.id,
+                  year: toYear,
+                  openingBalance: carryForwardAmount,
+                  accrued: 0,
+                  taken: 0,
+                  adjusted: 0,
+                  booked: 0,
+                  balance: carryForwardAmount,
+                  version: 0,
+                  ...(expiresAt ? { expiresAt } : {}),
+                },
+              });
+
+              // Create transaction record manually for new balance
+              await (tx as any).leaveBalanceTransaction.create({
+                data: {
+                  leaveBalanceId: newBalance.id,
+                  type: 'CARRY_FORWARD',
+                  delta: carryForwardAmount,
+                  resultingBalance: carryForwardAmount,
+                  beforeState: { openingBalance: 0, accrued: 0, taken: 0, adjusted: 0, booked: 0, balance: 0 },
+                  afterState: { openingBalance: carryForwardAmount, accrued: 0, taken: 0, adjusted: 0, booked: 0, balance: carryForwardAmount },
+                  changedBy: userId ?? 'system',
+                  source: 'CRON',
+                  idempotencyKey,
+                  reason: `Carry-forward from ${fromYear} to ${toYear}`,
+                  companyId,
+                },
+              });
+            }
+          });
+
+          results.push({
+            employeeId: employee.id,
+            employeeCode: employee.employeeId,
+            leaveTypeId: lt.id,
+            leaveTypeCode: lt.code,
+            carryForwardAmount,
+          });
+        }
+      }
+
+      // ── Mark job as COMPLETED ──────────────────────────────────────────
+      await platformPrisma.jobExecution.update({
+        where: { jobType_companyId_periodKey: { jobType: 'CARRY_FORWARD', companyId, periodKey } },
+        data: { status: 'COMPLETED', completedAt: new Date(), result: { totalCarriedForward: results.length } },
+      });
+
+      return {
+        fromYear,
+        toYear,
+        totalCarriedForward: results.length,
+        results,
+      };
+    } catch (err) {
+      // ── Mark job as FAILED ───────────────────────────────────────────
+      await platformPrisma.jobExecution.update({
+        where: { jobType_companyId_periodKey: { jobType: 'CARRY_FORWARD', companyId, periodKey } },
+        data: { status: 'FAILED', completedAt: new Date(), error: (err as Error).message },
+      });
+      throw err;
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────

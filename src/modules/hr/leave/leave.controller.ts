@@ -299,8 +299,10 @@ export class LeaveController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const result = await leaveService.accrueBalances(companyId, parsed.data.month, parsed.data.year, parsed.data.dayOfMonth);
-    res.json(createSuccessResponse(result, 'Leave balances accrued'));
+    const userId = req.user?.id;
+    const result = await leaveService.accrueBalances(companyId, parsed.data.month, parsed.data.year, parsed.data.dayOfMonth, userId);
+    const message = (result as any).skipped ? (result as any).message : 'Leave balances accrued';
+    res.json(createSuccessResponse(result, message));
   });
 
   carryForwardBalances = asyncHandler(async (req: Request, res: Response) => {
@@ -312,8 +314,10 @@ export class LeaveController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const result = await leaveService.carryForwardBalances(companyId, parsed.data.fromYear, parsed.data.toYear);
-    res.json(createSuccessResponse(result, 'Leave balances carried forward'));
+    const userId = req.user?.id;
+    const result = await leaveService.carryForwardBalances(companyId, parsed.data.fromYear, parsed.data.toYear, userId);
+    const message = (result as any).skipped ? (result as any).message : 'Leave balances carried forward';
+    res.json(createSuccessResponse(result, message));
   });
 
   // ── Summary ─────────────────────────────────────────────────────────
