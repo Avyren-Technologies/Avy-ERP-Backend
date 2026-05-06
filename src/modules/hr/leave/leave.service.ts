@@ -11,6 +11,12 @@ import {
   getCurrentStepApproverIds,
   getRequesterUserId,
 } from '../../../core/notifications/dispatch/approver-resolver';
+import {
+  mutateBalance,
+  recalculateBalance,
+  checkPayrollLock,
+} from './leave-balance.helpers';
+import { emitBalanceEdited } from '../../../shared/events/leave-events';
 
 interface ListOptions {
   page?: number;
@@ -347,7 +353,7 @@ export class LeaveService {
   }
 
   async adjustBalance(companyId: string, data: any) {
-    const { employeeId, leaveTypeId, year, action, days, reason } = data;
+    const { employeeId, leaveTypeId, year, action, days, reason, userId } = data;
 
     // Validate employee belongs to company
     const employee = await platformPrisma.employee.findUnique({ where: { id: employeeId } });
@@ -361,54 +367,77 @@ export class LeaveService {
       throw ApiError.badRequest('Leave type not found');
     }
 
-    // Find or create balance record
-    let balance = await platformPrisma.leaveBalance.findUnique({
-      where: {
-        employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year },
-      },
-    });
+    const updated = await platformPrisma.$transaction(async (tx) => {
+      // Check payroll lock before mutation
+      await checkPayrollLock(tx, companyId, year);
 
-    if (!balance) {
-      // Create balance record first
-      balance = await platformPrisma.leaveBalance.create({
-        data: {
-          companyId,
-          employeeId,
-          leaveTypeId,
-          year,
-          openingBalance: 0,
-          accrued: 0,
-          taken: 0,
-          adjusted: 0,
-          balance: 0,
+      // Find or create balance record
+      let balance = await (tx as any).leaveBalance.findUnique({
+        where: {
+          employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year },
         },
       });
-    }
 
-    const adjustmentDelta = action === 'credit' ? days : -days;
-    const newAdjusted = Number(balance.adjusted) + adjustmentDelta;
-    const newBalance = Number(balance.openingBalance) + Number(balance.accrued) - Number(balance.taken) + newAdjusted;
+      if (!balance) {
+        balance = await (tx as any).leaveBalance.create({
+          data: {
+            companyId,
+            employeeId,
+            leaveTypeId,
+            year,
+            openingBalance: 0,
+            accrued: 0,
+            taken: 0,
+            adjusted: 0,
+            booked: 0,
+            balance: 0,
+            version: 0,
+          },
+        });
+      }
 
-    if (newBalance < 0 && action === 'debit') {
-      throw ApiError.badRequest('Insufficient balance for debit adjustment');
-    }
-
-    const updated = await platformPrisma.leaveBalance.update({
-      where: { id: balance.id },
-      data: {
+      const adjustmentDelta = action === 'credit' ? days : -days;
+      const newAdjusted = Number(balance.adjusted) + adjustmentDelta;
+      const newBalance = recalculateBalance({
+        openingBalance: Number(balance.openingBalance),
+        accrued: Number(balance.accrued),
+        taken: Number(balance.taken),
         adjusted: newAdjusted,
-        balance: newBalance,
-      },
-      include: {
-        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
-        leaveType: { select: { id: true, name: true, code: true } },
-      },
+      });
+
+      if (newBalance < 0 && action === 'debit') {
+        throw ApiError.badRequest('Insufficient balance for debit adjustment');
+      }
+
+      return mutateBalance(
+        tx,
+        balance.id,
+        balance.version,
+        { adjusted: newAdjusted },
+        {
+          type: 'ADJUSTMENT',
+          delta: adjustmentDelta,
+          changedBy: userId ?? 'system',
+          reason,
+          source: 'MANUAL',
+          includeSnapshot: true,
+        },
+        companyId,
+      );
+    });
+
+    emitBalanceEdited({
+      employeeId,
+      leaveTypeId,
+      changedBy: userId ?? 'system',
+      changes: { action, days, reason },
+      companyId,
     });
 
     return { ...updated, adjustmentAction: action, adjustmentDays: days, adjustmentReason: reason };
   }
 
-  async initializeBalances(companyId: string, data: { employeeId: string; year: number }) {
+  async initializeBalances(companyId: string, data: { employeeId: string; year: number }, userId?: string) {
     const { employeeId, year } = data;
 
     // Validate employee
@@ -457,7 +486,24 @@ export class LeaveService {
           accrued: entitlement,
           taken: 0,
           adjusted: 0,
+          booked: 0,
           balance: entitlement,
+          version: 0,
+        },
+      });
+
+      // Create ledger transaction for initialization
+      await platformPrisma.leaveBalanceTransaction.create({
+        data: {
+          leaveBalanceId: balance.id,
+          type: 'INITIALIZED',
+          delta: entitlement,
+          resultingBalance: entitlement,
+          beforeState: { openingBalance: 0, accrued: 0, taken: 0, adjusted: 0, booked: 0, balance: 0 },
+          afterState: { openingBalance: 0, accrued: entitlement, taken: 0, adjusted: 0, booked: 0, balance: entitlement },
+          changedBy: userId ?? 'system',
+          source: 'MANUAL',
+          companyId,
         },
       });
 

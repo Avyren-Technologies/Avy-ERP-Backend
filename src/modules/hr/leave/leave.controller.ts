@@ -148,7 +148,8 @@ export class LeaveController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const result = await leaveService.adjustBalance(companyId, parsed.data);
+    const userId = req.user?.id;
+    const result = await leaveService.adjustBalance(companyId, { ...parsed.data, userId });
     res.json(createSuccessResponse(result, 'Leave balance adjusted'));
   });
 
@@ -161,7 +162,8 @@ export class LeaveController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const result = await leaveService.initializeBalances(companyId, parsed.data);
+    const userId = req.user?.id;
+    const result = await leaveService.initializeBalances(companyId, parsed.data, userId);
     res.status(201).json(createSuccessResponse(result, 'Leave balances initialized'));
   });
 
