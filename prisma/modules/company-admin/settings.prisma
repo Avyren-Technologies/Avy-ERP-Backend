@@ -33,6 +33,10 @@ model CompanySettings {
   biometricIntegration  Boolean @default(false)
   eSignIntegration      Boolean @default(false)
 
+  // ── Leave Controls ──
+  maxBackdatedDays  Int  @default(7)
+  maxFutureDays     Int  @default(90)
+
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdBy String?
   updatedBy String?

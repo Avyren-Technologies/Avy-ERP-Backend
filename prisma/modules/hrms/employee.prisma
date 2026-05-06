@@ -113,6 +113,7 @@ model Employee {
   overtimeRequests  OvertimeRequest[]
   leaveBalances     LeaveBalance[]
   leaveRequests     LeaveRequest[]
+  leaveEncashments  LeaveEncashment[]
 
   // Payroll Relations
   salaryRecords EmployeeSalary[]

@@ -125,7 +125,10 @@ model Company {
   leaveTypes          LeaveType[]
   leavePolicies       LeavePolicy[]
   leaveBalances       LeaveBalance[]
-  leaveRequests       LeaveRequest[]
+  leaveRequests               LeaveRequest[]
+  leaveBalanceTransactions    LeaveBalanceTransaction[]
+  jobExecutions               JobExecution[]
+  leaveEncashments            LeaveEncashment[]
 
   // Payroll Relations
   salaryComponents SalaryComponent[]
