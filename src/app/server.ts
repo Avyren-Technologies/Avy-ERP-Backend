@@ -14,6 +14,7 @@ import { notificationCronService } from '../core/notifications/cron/notification
 import { registerHRListeners } from '../shared/events/listeners/hr-listeners';
 import { attendanceCronService } from '../shared/jobs/attendance-cron.service';
 import { compOffExpiryCronService } from '../shared/jobs/compoff-expiry.job';
+import { leaveCronService } from '../shared/jobs/leave-cron.service';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -65,6 +66,9 @@ async function startServer(): Promise<void> {
 
       // Start comp-off expiry cron job (daily@1AM)
       compOffExpiryCronService.startAll();
+
+      // Start leave cron jobs (accrual, expiry cleanup, carry-forward)
+      leaveCronService.startAll();
 
       // Initialize Firebase Admin for push notifications
       notificationService.initFirebase();
