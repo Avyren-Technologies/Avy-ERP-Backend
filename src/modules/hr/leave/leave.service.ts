@@ -17,7 +17,15 @@ import {
   checkPayrollLock,
   BalanceFields,
 } from './leave-balance.helpers';
-import { emitBalanceEdited } from '../../../shared/events/leave-events';
+import {
+  emitLeaveApproved,
+  emitLeaveRejected,
+  emitAccrualCompleted,
+  emitEncashmentProcessed,
+  emitBalanceEdited,
+  emitCarryForwardCompleted,
+} from '../../../shared/events/leave-events';
+import { resolveEffectivePolicy } from './policy-resolver';
 
 interface ListOptions {
   page?: number;
@@ -538,8 +546,12 @@ export class LeaveService {
         continue;
       }
 
+      // Resolve effective policy (policy overrides > base leave type)
+      const effectiveConfig = await resolveEffectivePolicy(companyId, employeeId, lt.id);
+      const resolvedLt = effectiveConfig ?? lt;
+
       // Pro-rata calculation: if joining mid-year
-      let entitlement = Number(lt.annualEntitlement);
+      let entitlement = Number(resolvedLt.annualEntitlement);
       if (joiningDate > yearStart && joiningDate.getFullYear() === year) {
         const joiningMonth = joiningDate.getMonth(); // 0-indexed
         const remainingMonths = 12 - joiningMonth;
@@ -603,6 +615,15 @@ export class LeaveService {
     if (!leaveType || leaveType.companyId !== companyId) throw ApiError.badRequest('Leave type not found');
     if (!leaveType.encashmentAllowed) throw ApiError.badRequest('Encashment not allowed for this leave type');
 
+    if ((leaveType as any).yearEndOnly) {
+      const now = new Date();
+      const currentMonth = now.getMonth(); // 0-indexed
+      // Last month of fiscal year (assuming calendar year = December = month 11)
+      if (currentMonth !== 11) {
+        throw ApiError.badRequest('Encashment is only allowed in the last month of the fiscal year (December)');
+      }
+    }
+
     const maxDays = leaveType.maxEncashableDays ? Number(leaveType.maxEncashableDays) : Infinity;
     if (days > maxDays) throw ApiError.badRequest(`Maximum encashable days: ${maxDays}`);
 
@@ -653,6 +674,14 @@ export class LeaveService {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
           leaveType: { select: { id: true, name: true, code: true } },
         },
+      });
+
+      emitEncashmentProcessed({
+        employeeId,
+        leaveTypeId,
+        days,
+        totalAmount,
+        companyId,
       });
 
       return encashment;
@@ -731,16 +760,20 @@ export class LeaveService {
       throw ApiError.badRequest('This leave type is no longer active');
     }
 
+    // Resolve effective policy (policy overrides > base leave type)
+    const effectiveConfig = await resolveEffectivePolicy(companyId, employeeId, leaveTypeId);
+    const effectiveLt = effectiveConfig ?? leaveType;
+
     // ── Eligibility checks ──
 
     // Gender restriction
-    if (leaveType.applicableGender && employee.gender !== leaveType.applicableGender) {
-      throw ApiError.badRequest(`This leave type is only available for ${leaveType.applicableGender} employees`);
+    if (effectiveLt.applicableGender && employee.gender !== effectiveLt.applicableGender) {
+      throw ApiError.badRequest(`This leave type is only available for ${effectiveLt.applicableGender} employees`);
     }
 
     // Employee type restriction
-    if (leaveType.applicableTypeIds && leaveType.applicableTypeIds !== null) {
-      const typeIds = leaveType.applicableTypeIds as string[];
+    if (effectiveLt.applicableTypeIds && effectiveLt.applicableTypeIds !== null) {
+      const typeIds = effectiveLt.applicableTypeIds as string[];
       if (Array.isArray(typeIds) && typeIds.length > 0) {
         if (!employee.employeeTypeId || !typeIds.includes(employee.employeeTypeId)) {
           throw ApiError.badRequest('This leave type is not available for your employee type');
@@ -749,18 +782,18 @@ export class LeaveService {
     }
 
     // Probation restriction
-    if (leaveType.probationRestricted && employee.status === 'PROBATION') {
+    if (effectiveLt.probationRestricted && employee.status === 'PROBATION') {
       throw ApiError.badRequest('This leave type is not available during probation period');
     }
 
     // Minimum tenure check
-    if (leaveType.minTenureDays) {
+    if (effectiveLt.minTenureDays) {
       const joiningDate = new Date(employee.joiningDate);
       const today = new Date();
       const tenureDays = Math.floor((today.getTime() - joiningDate.getTime()) / (1000 * 3600 * 24));
-      if (tenureDays < leaveType.minTenureDays) {
+      if (tenureDays < effectiveLt.minTenureDays) {
         throw ApiError.badRequest(
-          `Minimum ${leaveType.minTenureDays} days of tenure required. Current tenure: ${tenureDays} days`
+          `Minimum ${effectiveLt.minTenureDays} days of tenure required. Current tenure: ${tenureDays} days`
         );
       }
     }
@@ -795,7 +828,7 @@ export class LeaveService {
       throw ApiError.badRequest('Half-day leave must be for a single day');
     }
 
-    if (isHalfDay && !leaveType.allowHalfDay) {
+    if (isHalfDay && !effectiveLt.allowHalfDay) {
       throw ApiError.badRequest('Half-day is not allowed for this leave type');
     }
 
@@ -843,33 +876,33 @@ export class LeaveService {
     }
 
     // Check min advance notice
-    if (leaveType.minAdvanceNotice) {
+    if (effectiveLt.minAdvanceNotice) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const diffDays = Math.ceil((from.getTime() - today.getTime()) / (1000 * 3600 * 24));
-      if (diffDays < leaveType.minAdvanceNotice) {
-        throw ApiError.badRequest(`Minimum ${leaveType.minAdvanceNotice} days advance notice required`);
+      if (diffDays < effectiveLt.minAdvanceNotice) {
+        throw ApiError.badRequest(`Minimum ${effectiveLt.minAdvanceNotice} days advance notice required`);
       }
     }
 
     // Check max consecutive days
-    if (leaveType.maxConsecutiveDays && days > leaveType.maxConsecutiveDays) {
-      throw ApiError.badRequest(`Maximum ${leaveType.maxConsecutiveDays} consecutive days allowed`);
+    if (effectiveLt.maxConsecutiveDays && days > effectiveLt.maxConsecutiveDays) {
+      throw ApiError.badRequest(`Maximum ${effectiveLt.maxConsecutiveDays} consecutive days allowed`);
     }
 
     // Calculate actual days considering sandwich rules
     let actualDays = days;
-    if (leaveType.weekendSandwich || leaveType.holidaySandwich) {
-      actualDays = await this.calculateLeaveDays(companyId, from, to, leaveType);
+    if (effectiveLt.weekendSandwich || effectiveLt.holidaySandwich) {
+      actualDays = await this.calculateLeaveDays(companyId, from, to, effectiveLt);
     }
 
     // Document requirement flag
     let documentRequired = false;
-    if (leaveType.documentRequired) {
-      if (leaveType.documentAfterDays === null || leaveType.documentAfterDays === undefined) {
+    if (effectiveLt.documentRequired) {
+      if (effectiveLt.documentAfterDays === null || effectiveLt.documentAfterDays === undefined) {
         // Always required
         documentRequired = true;
-      } else if (actualDays > Number(leaveType.documentAfterDays)) {
+      } else if (actualDays > Number(effectiveLt.documentAfterDays)) {
         documentRequired = true;
       }
     }
@@ -1305,6 +1338,14 @@ export class LeaveService {
       return updated;
     });
 
+    emitLeaveApproved({
+      requestId: id,
+      employeeId: request.employeeId,
+      days: Number(request.days),
+      leaveTypeName: (updatedRequest.leaveType as any)?.name ?? '',
+      companyId,
+    });
+
     // Auto-create attendance records for each leave day
     const from = new Date(request.fromDate);
     const to = new Date(request.toDate);
@@ -1479,6 +1520,13 @@ export class LeaveService {
       }
 
       return updated;
+    });
+
+    emitLeaveRejected({
+      requestId: id,
+      employeeId: request.employeeId,
+      reason: note,
+      companyId,
     });
 
     // Delete auto-created attendance records linked to this leave request
@@ -1830,10 +1878,14 @@ export class LeaveService {
             continue;
           }
 
-          // Calculate accrual amount
+          // Resolve effective policy for this employee + leave type
+          const effectiveConfig = await resolveEffectivePolicy(companyId, employee.id, lt.id);
+          const resolvedLt = effectiveConfig ?? lt;
+
+          // Calculate accrual amount using effective entitlement
           const accrualAmount = this.calculateAccrualAmount(
             lt.accrualFrequency!,
-            Number(lt.annualEntitlement)
+            Number(resolvedLt.annualEntitlement)
           );
 
           const idempotencyKey = `accrual-${employee.id}-${lt.id}-${periodKey}`;
@@ -1906,6 +1958,13 @@ export class LeaveService {
       await platformPrisma.jobExecution.update({
         where: { jobType_companyId_periodKey: { jobType: 'ACCRUAL', companyId, periodKey } },
         data: { status: 'COMPLETED', completedAt: new Date(), result: { totalAccrued: results.length } },
+      });
+
+      emitAccrualCompleted({
+        companyId,
+        month,
+        year,
+        employeesProcessed: results.length,
       });
 
       return {
@@ -2085,6 +2144,8 @@ export class LeaveService {
         where: { jobType_companyId_periodKey: { jobType: 'CARRY_FORWARD', companyId, periodKey } },
         data: { status: 'COMPLETED', completedAt: new Date(), result: { totalCarriedForward: results.length } },
       });
+
+      emitCarryForwardCompleted({ companyId, fromYear, toYear, employeesProcessed: results.length });
 
       return {
         fromYear,

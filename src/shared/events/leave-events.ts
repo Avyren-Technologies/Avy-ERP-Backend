@@ -61,6 +61,13 @@ export interface BalanceEditedPayload {
   companyId: string;
 }
 
+export interface CarryForwardCompletedPayload {
+  companyId: string;
+  fromYear: number;
+  toYear: number;
+  employeesProcessed: number;
+}
+
 // ── Emitters ─────────────────────────────────────────────────────────
 
 export function emitLeaveApproved(payload: LeaveApprovedPayload) {
@@ -85,4 +92,8 @@ export function emitEncashmentProcessed(payload: EncashmentProcessedPayload) {
 
 export function emitBalanceEdited(payload: BalanceEditedPayload) {
   eventBus.emitEvent(LEAVE_EVENTS.BALANCE_EDITED, payload);
+}
+
+export function emitCarryForwardCompleted(payload: CarryForwardCompletedPayload) {
+  eventBus.emitEvent(LEAVE_EVENTS.CARRY_FORWARD_COMPLETED, payload);
 }

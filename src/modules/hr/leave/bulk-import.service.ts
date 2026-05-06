@@ -6,7 +6,7 @@ import {
   EXCEL_COLUMN_MAP,
   bulkBalanceRowSchema,
 } from './bulk-import.validators';
-import { mutateBalance, recalculateBalance } from './leave-balance.helpers';
+import { mutateBalance, recalculateBalance, checkPayrollLock } from './leave-balance.helpers';
 import { HEADER_FILL, HEADER_FONT, ALT_ROW_FILL } from '../analytics/exports/excel-exporter';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -424,6 +424,9 @@ export class LeaveBalanceBulkImportService {
 
       try {
         await platformPrisma.$transaction(async (tx) => {
+          // Check payroll lock before upserting
+          await checkPayrollLock(tx, companyId, year);
+
           // Check for existing balance
           const existing = await (tx as any).leaveBalance.findUnique({
             where: {
