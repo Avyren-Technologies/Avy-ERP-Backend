@@ -590,6 +590,76 @@ export class LeaveService {
   }
 
   // ────────────────────────────────────────────────────────────────────
+  // Leave Encashment
+  // ────────────────────────────────────────────────────────────────────
+
+  async encashBalance(companyId: string, data: any, userId: string) {
+    const { employeeId, leaveTypeId, year, days, reason } = data;
+
+    const employee = await platformPrisma.employee.findUnique({ where: { id: employeeId } });
+    if (!employee || employee.companyId !== companyId) throw ApiError.badRequest('Employee not found');
+
+    const leaveType = await platformPrisma.leaveType.findUnique({ where: { id: leaveTypeId } });
+    if (!leaveType || leaveType.companyId !== companyId) throw ApiError.badRequest('Leave type not found');
+    if (!leaveType.encashmentAllowed) throw ApiError.badRequest('Encashment not allowed for this leave type');
+
+    const maxDays = leaveType.maxEncashableDays ? Number(leaveType.maxEncashableDays) : Infinity;
+    if (days > maxDays) throw ApiError.badRequest(`Maximum encashable days: ${maxDays}`);
+
+    return platformPrisma.$transaction(async (tx) => {
+      const balance = await tx.leaveBalance.findUnique({
+        where: { employeeId_leaveTypeId_year: { employeeId, leaveTypeId, year } },
+      });
+      if (!balance) throw ApiError.badRequest('No balance found for this leave type and year');
+
+      const available = Number(balance.balance);
+      if (days > available) throw ApiError.badRequest(`Insufficient balance. Available: ${available}`);
+
+      const minRetained = leaveType.minRetainedBalance ? Number(leaveType.minRetainedBalance) : 0;
+      if (available - days < minRetained) {
+        throw ApiError.badRequest(`Must retain minimum ${minRetained} days balance`);
+      }
+
+      if (leaveType.maxEncashmentPercent) {
+        const maxByPercent = Math.floor(available * Number(leaveType.maxEncashmentPercent) / 100);
+        if (days > maxByPercent) {
+          throw ApiError.badRequest(`Maximum ${leaveType.maxEncashmentPercent}% of balance can be encashed (${maxByPercent} days)`);
+        }
+      }
+
+      // Deduct from balance via adjusted field
+      await mutateBalance(tx, balance.id, balance.version ?? 0, {
+        adjusted: Number(balance.adjusted) - days,
+      }, {
+        type: 'ENCASHMENT',
+        delta: -days,
+        changedBy: userId,
+        reason,
+        source: 'MANUAL',
+        includeSnapshot: true,
+      }, companyId);
+
+      const rateBase = leaveType.encashmentRate ?? 'BASIC';
+      const perDayAmount = 0; // Placeholder — payroll integration will compute actual amount
+      const totalAmount = perDayAmount * days;
+
+      const encashment = await tx.leaveEncashment.create({
+        data: {
+          employeeId, leaveTypeId, year, days, rateBase,
+          perDayAmount, totalAmount,
+          status: 'PENDING', companyId,
+        },
+        include: {
+          employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
+          leaveType: { select: { id: true, name: true, code: true } },
+        },
+      });
+
+      return encashment;
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
   // Leave Requests
   // ────────────────────────────────────────────────────────────────────
 

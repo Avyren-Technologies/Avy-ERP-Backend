@@ -27,6 +27,7 @@ router.post('/leave-balances/adjust', requirePermissions(['hr:update']), control
 router.post('/leave-balances/initialize', requirePermissions(['hr:create']), controller.initializeBalances);
 router.post('/leave-balances/accrue', requirePermissions(['hr:update']), controller.accrueBalances);
 router.post('/leave-balances/carry-forward', requirePermissions(['hr:update']), controller.carryForwardBalances);
+router.post('/leave-balances/encash', requirePermissions(['hr:update']), controller.encashBalance);
 router.patch('/leave-balances/:id', requirePermissions(['hr:update']), controller.updateBalance);
 router.get('/leave-balances/:id/transactions', requirePermissions(['hr:read']), controller.listTransactions);
 

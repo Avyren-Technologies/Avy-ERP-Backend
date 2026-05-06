@@ -17,6 +17,7 @@ import {
   carryForwardSchema,
   partialCancelRequestSchema,
   updateBalanceSchema,
+  encashBalanceSchema,
 } from './leave.validators';
 
 export class LeaveController {
@@ -190,6 +191,23 @@ export class LeaveController {
     const { page, limit } = getPaginationParams(req.query);
     const result = await leaveService.listTransactions(companyId, req.params.id!, { page, limit });
     res.json(createPaginatedResponse(result.transactions, result.page, result.limit, result.total, 'Transactions retrieved'));
+  });
+
+  // ── Leave Encashment ────────────────────────────────────────────────
+
+  encashBalance = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = encashBalanceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await leaveService.encashBalance(companyId, parsed.data, userId);
+    res.json(createSuccessResponse(result, 'Leave encashment processed'));
   });
 
   // ── Leave Requests ──────────────────────────────────────────────────

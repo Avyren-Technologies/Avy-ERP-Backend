@@ -102,6 +102,16 @@ export const partialCancelRequestSchema = z.object({
   cancelFromDate: z.string().min(1), // ISO date string
 });
 
+// ── Leave Encashment ─────────────────────────────────────────────────
+
+export const encashBalanceSchema = z.object({
+  employeeId: z.string().min(1),
+  leaveTypeId: z.string().min(1),
+  year: z.number().int().min(2000).max(2100),
+  days: z.number().positive(),
+  reason: z.string().min(1).max(500),
+});
+
 // ── Leave Balance Direct Edit ────────────────────────────────────────
 
 export const updateBalanceSchema = z.object({
