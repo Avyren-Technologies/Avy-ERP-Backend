@@ -101,3 +101,16 @@ export const carryForwardSchema = z.object({
 export const partialCancelRequestSchema = z.object({
   cancelFromDate: z.string().min(1), // ISO date string
 });
+
+// ── Leave Balance Direct Edit ────────────────────────────────────────
+
+export const updateBalanceSchema = z.object({
+  openingBalance: z.number().min(0).optional(),
+  accrued: z.number().min(0).optional(),
+  taken: z.number().min(0).optional(),
+  adjusted: z.number().optional(),
+  reason: z.string().min(1).max(500),
+}).refine(
+  (data) => data.openingBalance !== undefined || data.accrued !== undefined || data.taken !== undefined || data.adjusted !== undefined,
+  'At least one balance field is required',
+);

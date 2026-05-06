@@ -438,6 +438,75 @@ export class LeaveService {
     return { ...updated, adjustmentAction: action, adjustmentDays: days, adjustmentReason: reason };
   }
 
+  async updateBalance(companyId: string, balanceId: string, data: any, userId: string) {
+    const balance = await platformPrisma.leaveBalance.findUnique({
+      where: { id: balanceId },
+      include: { leaveType: { select: { id: true, name: true, code: true } } },
+    });
+    if (!balance || balance.companyId !== companyId) {
+      throw ApiError.notFound('Leave balance not found');
+    }
+
+    return platformPrisma.$transaction(async (tx) => {
+      await checkPayrollLock(tx, companyId, balance.year);
+
+      const changes: Record<string, number> = {};
+      if (data.openingBalance !== undefined) changes.openingBalance = data.openingBalance;
+      if (data.accrued !== undefined) changes.accrued = data.accrued;
+      if (data.taken !== undefined) changes.taken = data.taken;
+      if (data.adjusted !== undefined) changes.adjusted = data.adjusted;
+
+      const newOpening = changes.openingBalance ?? Number(balance.openingBalance);
+      const newAccrued = changes.accrued ?? Number(balance.accrued);
+      const newTaken = changes.taken ?? Number(balance.taken);
+      const newAdjusted = changes.adjusted ?? Number(balance.adjusted);
+      const newBalance = recalculateBalance({ openingBalance: newOpening, accrued: newAccrued, taken: newTaken, adjusted: newAdjusted });
+      const oldBalance = Number(balance.balance);
+      const delta = newBalance - oldBalance;
+
+      const result = await mutateBalance(tx, balanceId, balance.version ?? 0, changes, {
+        type: 'DIRECT_EDIT',
+        delta,
+        changedBy: userId,
+        reason: data.reason,
+        source: 'MANUAL',
+        includeSnapshot: true,
+      }, companyId);
+
+      emitBalanceEdited({
+        employeeId: balance.employeeId,
+        leaveTypeId: balance.leaveTypeId,
+        changedBy: userId,
+        changes,
+        companyId,
+      });
+
+      return result;
+    });
+  }
+
+  async listTransactions(companyId: string, leaveBalanceId: string, options: { page?: number; limit?: number } = {}) {
+    const { page = 1, limit = 25 } = options;
+    const offset = (page - 1) * limit;
+
+    const balance = await platformPrisma.leaveBalance.findUnique({ where: { id: leaveBalanceId } });
+    if (!balance || balance.companyId !== companyId) {
+      throw ApiError.notFound('Leave balance not found');
+    }
+
+    const [transactions, total] = await Promise.all([
+      platformPrisma.leaveBalanceTransaction.findMany({
+        where: { leaveBalanceId },
+        orderBy: { sequenceNumber: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      platformPrisma.leaveBalanceTransaction.count({ where: { leaveBalanceId } }),
+    ]);
+
+    return { transactions, total, page, limit };
+  }
+
   async initializeBalances(companyId: string, data: { employeeId: string; year: number }, userId?: string) {
     const { employeeId, year } = data;
 

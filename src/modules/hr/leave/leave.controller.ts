@@ -16,6 +16,7 @@ import {
   accrueBalancesSchema,
   carryForwardSchema,
   partialCancelRequestSchema,
+  updateBalanceSchema,
 } from './leave.validators';
 
 export class LeaveController {
@@ -165,6 +166,30 @@ export class LeaveController {
     const userId = req.user?.id;
     const result = await leaveService.initializeBalances(companyId, parsed.data, userId);
     res.status(201).json(createSuccessResponse(result, 'Leave balances initialized'));
+  });
+
+  updateBalance = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+    const userId = req.user?.id;
+    if (!userId) throw ApiError.badRequest('User ID is required');
+
+    const parsed = updateBalanceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const result = await leaveService.updateBalance(companyId, req.params.id!, parsed.data, userId);
+    res.json(createSuccessResponse(result, 'Leave balance updated'));
+  });
+
+  listTransactions = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const { page, limit } = getPaginationParams(req.query);
+    const result = await leaveService.listTransactions(companyId, req.params.id!, { page, limit });
+    res.json(createPaginatedResponse(result.transactions, result.page, result.limit, result.total, 'Transactions retrieved'));
   });
 
   // ── Leave Requests ──────────────────────────────────────────────────
