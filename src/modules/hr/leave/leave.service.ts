@@ -15,6 +15,7 @@ import {
   mutateBalance,
   recalculateBalance,
   checkPayrollLock,
+  BalanceFields,
 } from './leave-balance.helpers';
 import { emitBalanceEdited } from '../../../shared/events/leave-events';
 
@@ -780,8 +781,8 @@ export class LeaveService {
       }
 
       if (leaveType.category !== 'UNPAID') {
-        const availableFrom = Number(balanceFrom.balance);
-        const availableTo = Number(balanceTo.balance);
+        const availableFrom = Number(balanceFrom.openingBalance) + Number(balanceFrom.accrued) - Number(balanceFrom.booked ?? 0) - Number(balanceFrom.taken) + Number(balanceFrom.adjusted);
+        const availableTo = Number(balanceTo.openingBalance) + Number(balanceTo.accrued) - Number(balanceTo.booked ?? 0) - Number(balanceTo.taken) + Number(balanceTo.adjusted);
         const shortfallFrom = Math.max(0, daysInFromYear - availableFrom);
         const shortfallTo = Math.max(0, daysInToYear - availableTo);
         const totalShortfall = shortfallFrom + shortfallTo;
@@ -796,18 +797,20 @@ export class LeaveService {
         }
       }
 
-      // Deduct only up to available balance per year
-      const deductFrom = leaveType.category === 'UNPAID' ? 0 : Math.min(daysInFromYear, Number(balanceFrom.balance));
-      const deductTo = leaveType.category === 'UNPAID' ? 0 : Math.min(daysInToYear, Number(balanceTo.balance));
+      // Reserve only up to available balance per year (excess becomes LOP)
+      const availFromForDeduct = Number(balanceFrom.openingBalance) + Number(balanceFrom.accrued) - Number(balanceFrom.booked ?? 0) - Number(balanceFrom.taken) + Number(balanceFrom.adjusted);
+      const availToForDeduct = Number(balanceTo.openingBalance) + Number(balanceTo.accrued) - Number(balanceTo.booked ?? 0) - Number(balanceTo.taken) + Number(balanceTo.adjusted);
+      const reserveFrom = leaveType.category === 'UNPAID' ? 0 : Math.min(daysInFromYear, Math.max(0, availFromForDeduct));
+      const reserveTo = leaveType.category === 'UNPAID' ? 0 : Math.min(daysInToYear, Math.max(0, availToForDeduct));
 
       // Generate leave reference number (safe to do before batch — atomic per-row)
       const referenceNumber = await generateNextNumber(
         platformPrisma, companyId, ['Leave Management', 'Leave'], 'Leave Request',
       );
 
-      // Create request and deduct from both years
-      const [request] = await platformPrisma.$transaction([
-        platformPrisma.leaveRequest.create({
+      // Create request and reserve balance from both years
+      const request = await platformPrisma.$transaction(async (tx) => {
+        const created = await tx.leaveRequest.create({
           data: {
             companyId,
             employeeId,
@@ -825,30 +828,44 @@ export class LeaveService {
             employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
             leaveType: { select: { id: true, name: true, code: true } },
           },
-        }),
-        ...(deductFrom > 0
-          ? [
-              platformPrisma.leaveBalance.update({
-                where: { id: balanceFrom.id },
-                data: {
-                  taken: { increment: deductFrom },
-                  balance: { decrement: deductFrom },
-                },
-              }),
-            ]
-          : []),
-        ...(deductTo > 0
-          ? [
-              platformPrisma.leaveBalance.update({
-                where: { id: balanceTo.id },
-                data: {
-                  taken: { increment: deductTo },
-                  balance: { decrement: deductTo },
-                },
-              }),
-            ]
-          : []),
-      ]);
+        });
+
+        if (reserveFrom > 0) {
+          await mutateBalance(
+            tx, balanceFrom.id, balanceFrom.version,
+            { booked: Number(balanceFrom.booked ?? 0) + reserveFrom },
+            {
+              type: 'LEAVE_RESERVED',
+              delta: -reserveFrom,
+              changedBy: employeeId,
+              reason: `Leave reserved for request ${referenceNumber}`,
+              source: 'SYSTEM',
+              referenceId: created.id,
+              referenceType: 'LeaveRequest',
+            },
+            companyId,
+          );
+        }
+
+        if (reserveTo > 0) {
+          await mutateBalance(
+            tx, balanceTo.id, balanceTo.version,
+            { booked: Number(balanceTo.booked ?? 0) + reserveTo },
+            {
+              type: 'LEAVE_RESERVED',
+              delta: -reserveTo,
+              changedBy: employeeId,
+              reason: `Leave reserved for request ${referenceNumber}`,
+              source: 'SYSTEM',
+              referenceId: created.id,
+              referenceType: 'LeaveRequest',
+            },
+            companyId,
+          );
+        }
+
+        return created;
+      });
 
       await this.dispatchLeaveSubmission(companyId, request);
       return { ...request, lopDays, documentRequired };
@@ -872,28 +889,29 @@ export class LeaveService {
     }
 
     if (leaveType.category !== 'UNPAID') {
-      const available = Number(balance.balance);
+      const available = Number(balance.openingBalance) + Number(balance.accrued) - Number(balance.booked ?? 0) - Number(balance.taken) + Number(balance.adjusted);
       if (available < actualDays) {
         if (!leaveType.lopOnExcess) {
           throw ApiError.badRequest(
-            `Insufficient balance. Available: ${balance.balance}, Requested: ${actualDays}`
+            `Insufficient balance. Available: ${available}, Requested: ${actualDays}`
           );
         }
         lopDays = actualDays - available;
       }
     }
 
-    // Deduct only up to available balance (excess becomes LOP)
-    const deductDays = leaveType.category === 'UNPAID' ? 0 : Math.min(actualDays, Number(balance.balance));
+    // Reserve only up to available balance (excess becomes LOP)
+    const availForReserve = Number(balance.openingBalance) + Number(balance.accrued) - Number(balance.booked ?? 0) - Number(balance.taken) + Number(balance.adjusted);
+    const reserveDays = leaveType.category === 'UNPAID' ? 0 : Math.min(actualDays, Math.max(0, availForReserve));
 
     // Generate leave reference number (safe to do before batch — atomic per-row)
     const refNumber = await generateNextNumber(
       platformPrisma, companyId, ['Leave Management', 'Leave'], 'Leave Request',
     );
 
-    // Create request and deduct balance (optimistic)
-    const [request] = await platformPrisma.$transaction([
-      platformPrisma.leaveRequest.create({
+    // Create request and reserve balance (optimistic)
+    const request = await platformPrisma.$transaction(async (tx) => {
+      const created = await tx.leaveRequest.create({
         data: {
           companyId,
           employeeId,
@@ -911,19 +929,27 @@ export class LeaveService {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
           leaveType: { select: { id: true, name: true, code: true } },
         },
-      }),
-      ...(deductDays > 0
-        ? [
-            platformPrisma.leaveBalance.update({
-              where: { id: balance.id },
-              data: {
-                taken: { increment: deductDays },
-                balance: { decrement: deductDays },
-              },
-            }),
-          ]
-        : []),
-    ]);
+      });
+
+      if (reserveDays > 0) {
+        await mutateBalance(
+          tx, balance.id, balance.version,
+          { booked: Number(balance.booked ?? 0) + reserveDays },
+          {
+            type: 'LEAVE_RESERVED',
+            delta: -reserveDays,
+            changedBy: employeeId,
+            reason: `Leave reserved for request ${refNumber}`,
+            source: 'SYSTEM',
+            referenceId: created.id,
+            referenceType: 'LeaveRequest',
+          },
+          companyId,
+        );
+      }
+
+      return created;
+    });
 
     await this.dispatchLeaveSubmission(companyId, request);
     return { ...request, lopDays, documentRequired };
@@ -988,17 +1014,139 @@ export class LeaveService {
       throw ApiError.badRequest(`Cannot approve a request with status "${request.status}"`);
     }
 
-    const updatedRequest = await platformPrisma.leaveRequest.update({
-      where: { id },
-      data: {
-        status: 'APPROVED',
-        approvedBy: userId,
-        approvedAt: new Date(),
-      },
-      include: {
-        employee: { select: { id: true, employeeId: true, firstName: true, lastName: true, shiftId: true } },
-        leaveType: { select: { id: true, name: true, code: true } },
-      },
+    // Convert reservation → taken via interactive transaction
+    const updatedRequest = await platformPrisma.$transaction(async (tx) => {
+      const updated = await tx.leaveRequest.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          approvedBy: userId,
+          approvedAt: new Date(),
+        },
+        include: {
+          employee: { select: { id: true, employeeId: true, firstName: true, lastName: true, shiftId: true } },
+          leaveType: { select: { id: true, name: true, code: true } },
+        },
+      });
+
+      // Convert booked → taken for each year's balance
+      const fromYear = new Date(request.fromDate).getFullYear();
+      const toYear = new Date(request.toDate).getFullYear();
+
+      if (fromYear !== toYear) {
+        // Cross-year: split days between years
+        const yearEnd = new Date(fromYear, 11, 31);
+        yearEnd.setHours(0, 0, 0, 0);
+        const fromDate = new Date(request.fromDate);
+        fromDate.setHours(0, 0, 0, 0);
+        const daysInFromYear = Math.round(
+          (yearEnd.getTime() - fromDate.getTime()) / (1000 * 3600 * 24) + 1
+        );
+        const daysInToYear = Number(request.days) - daysInFromYear;
+
+        const balanceFrom = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: fromYear,
+            },
+          },
+        });
+
+        const balanceTo = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: toYear,
+            },
+          },
+        });
+
+        // Determine how much was actually reserved per year (capped at what was available)
+        if (balanceFrom && daysInFromYear > 0) {
+          const bookedFrom = Math.min(daysInFromYear, Number(balanceFrom.booked ?? 0));
+          if (bookedFrom > 0) {
+            await mutateBalance(
+              tx, balanceFrom.id, balanceFrom.version,
+              {
+                booked: Number(balanceFrom.booked ?? 0) - bookedFrom,
+                taken: Number(balanceFrom.taken) + bookedFrom,
+              },
+              {
+                type: 'LEAVE_TAKEN',
+                delta: 0, // net zero — moved from booked to taken
+                changedBy: userId,
+                reason: `Leave approved — reservation converted to taken`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+
+        if (balanceTo && daysInToYear > 0) {
+          const bookedTo = Math.min(daysInToYear, Number(balanceTo.booked ?? 0));
+          if (bookedTo > 0) {
+            await mutateBalance(
+              tx, balanceTo.id, balanceTo.version,
+              {
+                booked: Number(balanceTo.booked ?? 0) - bookedTo,
+                taken: Number(balanceTo.taken) + bookedTo,
+              },
+              {
+                type: 'LEAVE_TAKEN',
+                delta: 0,
+                changedBy: userId,
+                reason: `Leave approved — reservation converted to taken`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+      } else {
+        // Same-year
+        const balance = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: fromYear,
+            },
+          },
+        });
+
+        if (balance) {
+          const bookedAmount = Math.min(Number(request.days), Number(balance.booked ?? 0));
+          if (bookedAmount > 0) {
+            await mutateBalance(
+              tx, balance.id, balance.version,
+              {
+                booked: Number(balance.booked ?? 0) - bookedAmount,
+                taken: Number(balance.taken) + bookedAmount,
+              },
+              {
+                type: 'LEAVE_TAKEN',
+                delta: 0,
+                changedBy: userId,
+                reason: `Leave approved — reservation converted to taken`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+      }
+
+      return updated;
     });
 
     // Auto-create attendance records for each leave day
@@ -1053,12 +1201,12 @@ export class LeaveService {
       throw ApiError.badRequest(`Cannot reject a request with status "${request.status}"`);
     }
 
-    // Refund balance — handle cross-year leave requests
+    // Release reservation — handle cross-year leave requests
     const fromYear = new Date(request.fromDate).getFullYear();
     const toYear = new Date(request.toDate).getFullYear();
 
-    const operations: any[] = [
-      platformPrisma.leaveRequest.update({
+    const updatedRequest = await platformPrisma.$transaction(async (tx) => {
+      const updated = await tx.leaveRequest.update({
         where: { id },
         data: {
           status: 'REJECTED',
@@ -1069,89 +1217,113 @@ export class LeaveService {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
           leaveType: { select: { id: true, name: true, code: true } },
         },
-      }),
-    ];
-
-    if (fromYear !== toYear) {
-      // Cross-year: split refund between both years
-      const yearEnd = new Date(fromYear, 11, 31);
-      yearEnd.setHours(0, 0, 0, 0);
-      const fromDate = new Date(request.fromDate);
-      fromDate.setHours(0, 0, 0, 0);
-      const daysInFromYear = Math.round(
-        (yearEnd.getTime() - fromDate.getTime()) / (1000 * 3600 * 24) + 1
-      );
-      const daysInToYear = Number(request.days) - daysInFromYear;
-
-      const balanceFrom = await platformPrisma.leaveBalance.findUnique({
-        where: {
-          employeeId_leaveTypeId_year: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: fromYear,
-          },
-        },
       });
 
-      const balanceTo = await platformPrisma.leaveBalance.findUnique({
-        where: {
-          employeeId_leaveTypeId_year: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: toYear,
+      if (fromYear !== toYear) {
+        // Cross-year: split release between both years
+        const yearEnd = new Date(fromYear, 11, 31);
+        yearEnd.setHours(0, 0, 0, 0);
+        const fromDate = new Date(request.fromDate);
+        fromDate.setHours(0, 0, 0, 0);
+        const daysInFromYear = Math.round(
+          (yearEnd.getTime() - fromDate.getTime()) / (1000 * 3600 * 24) + 1
+        );
+        const daysInToYear = Number(request.days) - daysInFromYear;
+
+        const balanceFrom = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: fromYear,
+            },
           },
-        },
-      });
+        });
 
-      if (balanceFrom && daysInFromYear > 0) {
-        operations.push(
-          platformPrisma.leaveBalance.update({
-            where: { id: balanceFrom.id },
-            data: {
-              taken: { decrement: daysInFromYear },
-              balance: { increment: daysInFromYear },
+        const balanceTo = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: toYear,
             },
-          })
-        );
-      }
-
-      if (balanceTo && daysInToYear > 0) {
-        operations.push(
-          platformPrisma.leaveBalance.update({
-            where: { id: balanceTo.id },
-            data: {
-              taken: { decrement: daysInToYear },
-              balance: { increment: daysInToYear },
-            },
-          })
-        );
-      }
-    } else {
-      // Same-year refund
-      const balance = await platformPrisma.leaveBalance.findUnique({
-        where: {
-          employeeId_leaveTypeId_year: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: fromYear,
           },
-        },
-      });
+        });
 
-      if (balance) {
-        operations.push(
-          platformPrisma.leaveBalance.update({
-            where: { id: balance.id },
-            data: {
-              taken: { decrement: Number(request.days) },
-              balance: { increment: Number(request.days) },
+        if (balanceFrom && daysInFromYear > 0) {
+          const releaseFrom = Math.min(daysInFromYear, Number(balanceFrom.booked ?? 0));
+          if (releaseFrom > 0) {
+            await mutateBalance(
+              tx, balanceFrom.id, balanceFrom.version,
+              { booked: Number(balanceFrom.booked ?? 0) - releaseFrom },
+              {
+                type: 'RESERVATION_RELEASED',
+                delta: releaseFrom,
+                changedBy: userId,
+                reason: `Leave rejected — reservation released`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+
+        if (balanceTo && daysInToYear > 0) {
+          const releaseTo = Math.min(daysInToYear, Number(balanceTo.booked ?? 0));
+          if (releaseTo > 0) {
+            await mutateBalance(
+              tx, balanceTo.id, balanceTo.version,
+              { booked: Number(balanceTo.booked ?? 0) - releaseTo },
+              {
+                type: 'RESERVATION_RELEASED',
+                delta: releaseTo,
+                changedBy: userId,
+                reason: `Leave rejected — reservation released`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+      } else {
+        // Same-year release
+        const balance = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: fromYear,
             },
-          })
-        );
-      }
-    }
+          },
+        });
 
-    const [updatedRequest] = await platformPrisma.$transaction(operations);
+        if (balance) {
+          const releaseAmount = Math.min(Number(request.days), Number(balance.booked ?? 0));
+          if (releaseAmount > 0) {
+            await mutateBalance(
+              tx, balance.id, balance.version,
+              { booked: Number(balance.booked ?? 0) - releaseAmount },
+              {
+                type: 'RESERVATION_RELEASED',
+                delta: releaseAmount,
+                changedBy: userId,
+                reason: `Leave rejected — reservation released`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+      }
+
+      return updated;
+    });
 
     // Delete auto-created attendance records linked to this leave request
     await platformPrisma.attendanceRecord.deleteMany({
@@ -1180,12 +1352,12 @@ export class LeaveService {
       }
     }
 
-    // Refund balance — handle cross-year leave requests
+    const wasPending = request.status === 'PENDING';
     const fromYear = new Date(request.fromDate).getFullYear();
     const toYear = new Date(request.toDate).getFullYear();
 
-    const operations: any[] = [
-      platformPrisma.leaveRequest.update({
+    const updatedRequest = await platformPrisma.$transaction(async (tx) => {
+      const updated = await tx.leaveRequest.update({
         where: { id },
         data: {
           status: 'CANCELLED',
@@ -1195,89 +1367,124 @@ export class LeaveService {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
           leaveType: { select: { id: true, name: true, code: true } },
         },
-      }),
-    ];
-
-    if (fromYear !== toYear) {
-      // Cross-year: split refund between both years
-      const yearEnd = new Date(fromYear, 11, 31);
-      yearEnd.setHours(0, 0, 0, 0);
-      const fromDate = new Date(request.fromDate);
-      fromDate.setHours(0, 0, 0, 0);
-      const daysInFromYear = Math.round(
-        (yearEnd.getTime() - fromDate.getTime()) / (1000 * 3600 * 24) + 1
-      );
-      const daysInToYear = Number(request.days) - daysInFromYear;
-
-      const balanceFrom = await platformPrisma.leaveBalance.findUnique({
-        where: {
-          employeeId_leaveTypeId_year: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: fromYear,
-          },
-        },
       });
 
-      const balanceTo = await platformPrisma.leaveBalance.findUnique({
-        where: {
-          employeeId_leaveTypeId_year: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: toYear,
+      // PENDING: release booked reservation
+      // APPROVED: refund taken
+      const txType = wasPending ? 'RESERVATION_RELEASED' : 'LEAVE_CANCELLED';
+      const fieldToDecrement = wasPending ? 'booked' : 'taken';
+      const reason = wasPending
+        ? 'Leave cancelled — reservation released'
+        : 'Leave cancelled — taken refunded';
+
+      if (fromYear !== toYear) {
+        // Cross-year: split refund between both years
+        const yearEnd = new Date(fromYear, 11, 31);
+        yearEnd.setHours(0, 0, 0, 0);
+        const fromDate = new Date(request.fromDate);
+        fromDate.setHours(0, 0, 0, 0);
+        const daysInFromYear = Math.round(
+          (yearEnd.getTime() - fromDate.getTime()) / (1000 * 3600 * 24) + 1
+        );
+        const daysInToYear = Number(request.days) - daysInFromYear;
+
+        const balanceFrom = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: fromYear,
+            },
           },
-        },
-      });
+        });
 
-      if (balanceFrom && daysInFromYear > 0) {
-        operations.push(
-          platformPrisma.leaveBalance.update({
-            where: { id: balanceFrom.id },
-            data: {
-              taken: { decrement: daysInFromYear },
-              balance: { increment: daysInFromYear },
+        const balanceTo = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: toYear,
             },
-          })
-        );
-      }
-
-      if (balanceTo && daysInToYear > 0) {
-        operations.push(
-          platformPrisma.leaveBalance.update({
-            where: { id: balanceTo.id },
-            data: {
-              taken: { decrement: daysInToYear },
-              balance: { increment: daysInToYear },
-            },
-          })
-        );
-      }
-    } else {
-      // Same-year refund
-      const balance = await platformPrisma.leaveBalance.findUnique({
-        where: {
-          employeeId_leaveTypeId_year: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: fromYear,
           },
-        },
-      });
+        });
 
-      if (balance) {
-        operations.push(
-          platformPrisma.leaveBalance.update({
-            where: { id: balance.id },
-            data: {
-              taken: { decrement: Number(request.days) },
-              balance: { increment: Number(request.days) },
+        if (balanceFrom && daysInFromYear > 0) {
+          const currentVal = Number(balanceFrom[fieldToDecrement] ?? 0);
+          const releaseFrom = Math.min(daysInFromYear, currentVal);
+          if (releaseFrom > 0) {
+            await mutateBalance(
+              tx, balanceFrom.id, balanceFrom.version,
+              { [fieldToDecrement]: currentVal - releaseFrom } as BalanceFields,
+              {
+                type: txType,
+                delta: releaseFrom,
+                changedBy: request.employeeId,
+                reason,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+
+        if (balanceTo && daysInToYear > 0) {
+          const currentVal = Number(balanceTo[fieldToDecrement] ?? 0);
+          const releaseTo = Math.min(daysInToYear, currentVal);
+          if (releaseTo > 0) {
+            await mutateBalance(
+              tx, balanceTo.id, balanceTo.version,
+              { [fieldToDecrement]: currentVal - releaseTo } as BalanceFields,
+              {
+                type: txType,
+                delta: releaseTo,
+                changedBy: request.employeeId,
+                reason,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+      } else {
+        // Same-year refund
+        const balance = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: fromYear,
             },
-          })
-        );
-      }
-    }
+          },
+        });
 
-    const [updatedRequest] = await platformPrisma.$transaction(operations);
+        if (balance) {
+          const currentVal = Number(balance[fieldToDecrement] ?? 0);
+          const releaseAmount = Math.min(Number(request.days), currentVal);
+          if (releaseAmount > 0) {
+            await mutateBalance(
+              tx, balance.id, balance.version,
+              { [fieldToDecrement]: currentVal - releaseAmount } as BalanceFields,
+              {
+                type: txType,
+                delta: releaseAmount,
+                changedBy: request.employeeId,
+                reason,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+      }
+
+      return updated;
+    });
 
     // Delete auto-created attendance records linked to this leave request
     await platformPrisma.attendanceRecord.deleteMany({
@@ -1354,20 +1561,11 @@ export class LeaveService {
     newToDate.setDate(newToDate.getDate() - 1);
     newToDate.setHours(0, 0, 0, 0);
 
-    // Find balance to refund
+    // Partial cancel is only for APPROVED requests — refund taken
     const currentYear = fromDate.getFullYear();
-    const balance = await platformPrisma.leaveBalance.findUnique({
-      where: {
-        employeeId_leaveTypeId_year: {
-          employeeId: request.employeeId,
-          leaveTypeId: request.leaveTypeId,
-          year: currentYear,
-        },
-      },
-    });
 
-    const operations: any[] = [
-      platformPrisma.leaveRequest.update({
+    const updatedRequest = await platformPrisma.$transaction(async (tx) => {
+      const updated = await tx.leaveRequest.update({
         where: { id },
         data: {
           toDate: newToDate,
@@ -1377,22 +1575,40 @@ export class LeaveService {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
           leaveType: { select: { id: true, name: true, code: true } },
         },
-      }),
-    ];
+      });
 
-    if (balance) {
-      operations.push(
-        platformPrisma.leaveBalance.update({
-          where: { id: balance.id },
-          data: {
-            taken: { decrement: cancelledDays },
-            balance: { increment: cancelledDays },
+      const balance = await tx.leaveBalance.findUnique({
+        where: {
+          employeeId_leaveTypeId_year: {
+            employeeId: request.employeeId,
+            leaveTypeId: request.leaveTypeId,
+            year: currentYear,
           },
-        })
-      );
-    }
+        },
+      });
 
-    const [updatedRequest] = await platformPrisma.$transaction(operations);
+      if (balance) {
+        const refundAmount = Math.min(cancelledDays, Number(balance.taken));
+        if (refundAmount > 0) {
+          await mutateBalance(
+            tx, balance.id, balance.version,
+            { taken: Number(balance.taken) - refundAmount },
+            {
+              type: 'LEAVE_CANCELLED',
+              delta: refundAmount,
+              changedBy: request.employeeId,
+              reason: `Partial cancellation — ${cancelledDays} days refunded`,
+              source: 'SYSTEM',
+              referenceId: id,
+              referenceType: 'LeaveRequest',
+            },
+            companyId,
+          );
+        }
+      }
+
+      return updated;
+    });
 
     // Delete attendance records for cancelled dates
     await platformPrisma.attendanceRecord.deleteMany({
