@@ -773,6 +773,23 @@ export class LeaveService {
       throw ApiError.badRequest('From date must be before or equal to to date');
     }
 
+    // Backdated leave restriction
+    const settings = await getCachedCompanySettings(companyId);
+    const maxBackdatedDays = (settings as any)?.maxBackdatedDays ?? 7;
+    const maxFutureDays = (settings as any)?.maxFutureDays ?? 90;
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+
+    const diffPast = Math.floor((todayDate.getTime() - from.getTime()) / (1000 * 3600 * 24));
+    if (diffPast > maxBackdatedDays) {
+      throw ApiError.badRequest(`Cannot apply leave more than ${maxBackdatedDays} days in the past`);
+    }
+
+    const diffFuture = Math.floor((from.getTime() - todayDate.getTime()) / (1000 * 3600 * 24));
+    if (diffFuture > maxFutureDays) {
+      throw ApiError.badRequest(`Cannot apply leave more than ${maxFutureDays} days in advance`);
+    }
+
     // Validate half-day: must be single day
     if (isHalfDay && from.getTime() !== to.getTime()) {
       throw ApiError.badRequest('Half-day leave must be for a single day');
