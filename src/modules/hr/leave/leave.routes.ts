@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requirePermissions } from '../../../middleware/auth.middleware';
 import { requireModuleEnabled, requireESSFeature } from '../../../shared/middleware/config-enforcement.middleware';
 import { leaveController as controller } from './leave.controller';
+import { leaveBalanceBulkImportController as bulkController, bulkBalanceUploadMiddleware } from './bulk-import.controller';
 
 const router = Router();
 
@@ -28,6 +29,12 @@ router.post('/leave-balances/initialize', requirePermissions(['hr:create']), con
 router.post('/leave-balances/accrue', requirePermissions(['hr:update']), controller.accrueBalances);
 router.post('/leave-balances/carry-forward', requirePermissions(['hr:update']), controller.carryForwardBalances);
 router.post('/leave-balances/encash', requirePermissions(['hr:update']), controller.encashBalance);
+
+// ── Leave Balance Bulk Import — MUST be before /:id routes ─────────
+router.get('/leave-balances/bulk/template', requirePermissions(['hr:create']), bulkController.downloadTemplate);
+router.post('/leave-balances/bulk/validate', requirePermissions(['hr:create']), bulkBalanceUploadMiddleware, bulkController.validateUpload);
+router.post('/leave-balances/bulk/import', requirePermissions(['hr:create']), bulkController.confirmImport);
+
 router.patch('/leave-balances/:id', requirePermissions(['hr:update']), controller.updateBalance);
 router.get('/leave-balances/:id/transactions', requirePermissions(['hr:read']), controller.listTransactions);
 
