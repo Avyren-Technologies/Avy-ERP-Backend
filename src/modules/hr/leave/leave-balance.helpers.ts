@@ -1,7 +1,13 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, PrismaClient, LeaveTransactionType } from '@prisma/client';
 import { ApiError } from '../../../shared/errors';
 
 // ── Types ────────────────────────────────────────────────────────────
+
+/**
+ * Transaction client type that preserves model accessors without requiring `as any` casts.
+ * Prisma.TransactionClient has the same model methods as PrismaClient, minus connection/transaction management.
+ */
+type TxClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 export interface BalanceFields {
   openingBalance?: number;
@@ -50,7 +56,7 @@ export function recalculateBalance(fields: {
 // ── Payroll Lock Check ───────────────────────────────────────────────
 
 export async function checkPayrollLock(
-  tx: Prisma.TransactionClient,
+  tx: TxClient,
   companyId: string,
   year: number,
   month?: number,
@@ -58,7 +64,9 @@ export async function checkPayrollLock(
   const where: Record<string, unknown> = { companyId, year, status: { not: 'DRAFT' } };
   if (month !== undefined) where.month = month;
 
-  const locked = await (tx as any).payrollRun.findFirst({ where });
+  const locked = await tx.payrollRun.findFirst({
+    where: where as Prisma.PayrollRunWhereInput,
+  });
   if (locked) {
     const period = month ? `${month}/${year}` : `${year}`;
     throw ApiError.badRequest(
@@ -70,14 +78,14 @@ export async function checkPayrollLock(
 // ── Optimistic Lock + Ledger Entry ───────────────────────────────────
 
 export async function mutateBalance(
-  tx: Prisma.TransactionClient,
+  tx: TxClient,
   balanceId: string,
   currentVersion: number,
   changes: BalanceFields,
   transaction: TransactionInput,
   companyId: string,
 ) {
-  const current = await (tx as any).leaveBalance.findUnique({ where: { id: balanceId } });
+  const current = await tx.leaveBalance.findUnique({ where: { id: balanceId } });
   if (!current) throw ApiError.notFound('Leave balance not found');
 
   const newOpening = changes.openingBalance ?? Number(current.openingBalance);
@@ -92,7 +100,7 @@ export async function mutateBalance(
     adjusted: newAdjusted,
   });
 
-  const updateResult = await (tx as any).leaveBalance.updateMany({
+  const updateResult = await tx.leaveBalance.updateMany({
     where: { id: balanceId, version: currentVersion },
     data: {
       openingBalance: newOpening,
@@ -114,26 +122,28 @@ export async function mutateBalance(
     ? { openingBalance: newOpening, accrued: newAccrued, taken: newTaken, adjusted: newAdjusted, booked: newBooked, balance: newBalance }
     : undefined;
 
-  await (tx as any).leaveBalanceTransaction.create({
+  // Cast data to satisfy exactOptionalPropertyTypes: optional fields in TransactionInput
+  // are `string | undefined` but Prisma expects `string | null` for nullable columns.
+  await tx.leaveBalanceTransaction.create({
     data: {
       leaveBalanceId: balanceId,
-      type: transaction.type,
+      type: transaction.type as LeaveTransactionType,
       delta: transaction.delta,
       resultingBalance: newBalance,
       beforeState: beforeSnap ?? Prisma.JsonNull,
       afterState: afterSnap ?? Prisma.JsonNull,
       changedBy: transaction.changedBy,
-      reason: transaction.reason,
+      reason: transaction.reason ?? null,
       source: transaction.source,
-      referenceId: transaction.referenceId,
-      referenceType: transaction.referenceType,
-      idempotencyKey: transaction.idempotencyKey,
-      metadata: transaction.metadata ?? Prisma.JsonNull,
+      referenceId: transaction.referenceId ?? null,
+      referenceType: transaction.referenceType ?? null,
+      idempotencyKey: transaction.idempotencyKey ?? null,
+      metadata: (transaction.metadata as Prisma.InputJsonValue) ?? Prisma.JsonNull,
       companyId,
     },
   });
 
-  return (tx as any).leaveBalance.findUnique({
+  return tx.leaveBalance.findUnique({
     where: { id: balanceId },
     include: {
       employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },

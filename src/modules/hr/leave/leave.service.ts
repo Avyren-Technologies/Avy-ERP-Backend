@@ -558,35 +558,40 @@ export class LeaveService {
         entitlement = Math.round((entitlement / 12) * remainingMonths * 10) / 10; // round to 1 decimal
       }
 
-      const balance = await platformPrisma.leaveBalance.create({
-        data: {
-          companyId,
-          employeeId,
-          leaveTypeId: lt.id,
-          year,
-          openingBalance: 0,
-          accrued: entitlement,
-          taken: 0,
-          adjusted: 0,
-          booked: 0,
-          balance: entitlement,
-          version: 0,
-        },
-      });
+      // Wrap create + ledger transaction in an atomic $transaction
+      const balance = await platformPrisma.$transaction(async (tx) => {
+        const created = await tx.leaveBalance.create({
+          data: {
+            companyId,
+            employeeId,
+            leaveTypeId: lt.id,
+            year,
+            openingBalance: 0,
+            accrued: entitlement,
+            taken: 0,
+            adjusted: 0,
+            booked: 0,
+            balance: entitlement,
+            version: 0,
+          },
+        });
 
-      // Create ledger transaction for initialization
-      await platformPrisma.leaveBalanceTransaction.create({
-        data: {
-          leaveBalanceId: balance.id,
-          type: 'INITIALIZED',
-          delta: entitlement,
-          resultingBalance: entitlement,
-          beforeState: { openingBalance: 0, accrued: 0, taken: 0, adjusted: 0, booked: 0, balance: 0 },
-          afterState: { openingBalance: 0, accrued: entitlement, taken: 0, adjusted: 0, booked: 0, balance: entitlement },
-          changedBy: userId ?? 'system',
-          source: 'MANUAL',
-          companyId,
-        },
+        // Create ledger transaction for initialization
+        await tx.leaveBalanceTransaction.create({
+          data: {
+            leaveBalanceId: created.id,
+            type: 'INITIALIZED',
+            delta: entitlement,
+            resultingBalance: entitlement,
+            beforeState: { openingBalance: 0, accrued: 0, taken: 0, adjusted: 0, booked: 0, balance: 0 },
+            afterState: { openingBalance: 0, accrued: entitlement, taken: 0, adjusted: 0, booked: 0, balance: entitlement },
+            changedBy: userId ?? 'system',
+            source: 'MANUAL',
+            companyId,
+          },
+        });
+
+        return created;
       });
 
       results.push({
@@ -1766,7 +1771,9 @@ export class LeaveService {
     newToDate.setHours(0, 0, 0, 0);
 
     // Partial cancel is only for APPROVED requests — refund taken
-    const currentYear = fromDate.getFullYear();
+    // Handle cross-year: cancelled portion may span two calendar years
+    const cancelYear = cancelFrom.getFullYear();
+    const toDateYear = toDate.getFullYear();
 
     const updatedRequest = await platformPrisma.$transaction(async (tx) => {
       const updated = await tx.leaveRequest.update({
@@ -1781,33 +1788,104 @@ export class LeaveService {
         },
       });
 
-      const balance = await tx.leaveBalance.findUnique({
-        where: {
-          employeeId_leaveTypeId_year: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: currentYear,
-          },
-        },
-      });
+      if (cancelYear !== toDateYear) {
+        // Cross-year partial cancellation: split refund between the two years
+        const yearEnd = new Date(cancelYear, 11, 31);
+        yearEnd.setHours(0, 0, 0, 0);
+        const daysInCancelYear = Math.round(
+          (yearEnd.getTime() - cancelFrom.getTime()) / (1000 * 3600 * 24) + 1
+        );
+        const daysInToYear = cancelledDays - daysInCancelYear;
 
-      if (balance) {
-        const refundAmount = Math.min(cancelledDays, Number(balance.taken));
-        if (refundAmount > 0) {
-          await mutateBalance(
-            tx, balance.id, balance.version,
-            { taken: Number(balance.taken) - refundAmount },
-            {
-              type: 'LEAVE_CANCELLED',
-              delta: refundAmount,
-              changedBy: request.employeeId,
-              reason: `Partial cancellation — ${cancelledDays} days refunded`,
-              source: 'SYSTEM',
-              referenceId: id,
-              referenceType: 'LeaveRequest',
+        const balanceCancelYear = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: cancelYear,
             },
-            companyId,
-          );
+          },
+        });
+
+        const balanceToYear = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: toDateYear,
+            },
+          },
+        });
+
+        if (balanceCancelYear && daysInCancelYear > 0) {
+          const refundAmount = Math.min(daysInCancelYear, Number(balanceCancelYear.taken));
+          if (refundAmount > 0) {
+            await mutateBalance(
+              tx, balanceCancelYear.id, balanceCancelYear.version,
+              { taken: Number(balanceCancelYear.taken) - refundAmount },
+              {
+                type: 'LEAVE_CANCELLED',
+                delta: refundAmount,
+                changedBy: request.employeeId,
+                reason: `Partial cancellation — ${refundAmount} days refunded (year ${cancelYear})`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+
+        if (balanceToYear && daysInToYear > 0) {
+          const refundAmount = Math.min(daysInToYear, Number(balanceToYear.taken));
+          if (refundAmount > 0) {
+            await mutateBalance(
+              tx, balanceToYear.id, balanceToYear.version,
+              { taken: Number(balanceToYear.taken) - refundAmount },
+              {
+                type: 'LEAVE_CANCELLED',
+                delta: refundAmount,
+                changedBy: request.employeeId,
+                reason: `Partial cancellation — ${refundAmount} days refunded (year ${toDateYear})`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
+        }
+      } else {
+        // Same-year partial cancellation
+        const balance = await tx.leaveBalance.findUnique({
+          where: {
+            employeeId_leaveTypeId_year: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: cancelYear,
+            },
+          },
+        });
+
+        if (balance) {
+          const refundAmount = Math.min(cancelledDays, Number(balance.taken));
+          if (refundAmount > 0) {
+            await mutateBalance(
+              tx, balance.id, balance.version,
+              { taken: Number(balance.taken) - refundAmount },
+              {
+                type: 'LEAVE_CANCELLED',
+                delta: refundAmount,
+                changedBy: request.employeeId,
+                reason: `Partial cancellation — ${cancelledDays} days refunded`,
+                source: 'SYSTEM',
+                referenceId: id,
+                referenceType: 'LeaveRequest',
+              },
+              companyId,
+            );
+          }
         }
       }
 
