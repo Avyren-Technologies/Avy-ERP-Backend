@@ -502,7 +502,7 @@ export class LeaveService {
       throw ApiError.notFound('Leave balance not found');
     }
 
-    const [transactions, total] = await Promise.all([
+    const [rawTransactions, total] = await Promise.all([
       platformPrisma.leaveBalanceTransaction.findMany({
         where: { leaveBalanceId },
         orderBy: { sequenceNumber: 'desc' },
@@ -511,6 +511,12 @@ export class LeaveService {
       }),
       platformPrisma.leaveBalanceTransaction.count({ where: { leaveBalanceId } }),
     ]);
+
+    // Convert BigInt sequenceNumber to Number for JSON serialization
+    const transactions = rawTransactions.map((t) => ({
+      ...t,
+      sequenceNumber: Number(t.sequenceNumber),
+    }));
 
     return { transactions, total, page, limit };
   }
@@ -811,19 +817,20 @@ export class LeaveService {
       throw ApiError.badRequest('From date must be before or equal to to date');
     }
 
-    // Backdated leave restriction
+    // Backdated leave restriction — use company timezone for accurate day diff
     const settings = await getCachedCompanySettings(companyId);
     const maxBackdatedDays = (settings as any)?.maxBackdatedDays ?? 7;
     const maxFutureDays = (settings as any)?.maxFutureDays ?? 90;
-    const todayDate = new Date();
-    todayDate.setHours(0, 0, 0, 0);
+    const companyTz = settings.timezone ?? 'Asia/Kolkata';
+    const todayInTz = DateTime.now().setZone(companyTz).startOf('day');
+    const fromInTz = DateTime.fromISO(fromDate, { zone: companyTz }).startOf('day');
 
-    const diffPast = Math.floor((todayDate.getTime() - from.getTime()) / (1000 * 3600 * 24));
+    const diffPast = Math.floor(todayInTz.diff(fromInTz, 'days').days);
     if (diffPast > maxBackdatedDays) {
       throw ApiError.badRequest(`Cannot apply leave more than ${maxBackdatedDays} days in the past`);
     }
 
-    const diffFuture = Math.floor((from.getTime() - todayDate.getTime()) / (1000 * 3600 * 24));
+    const diffFuture = Math.floor(fromInTz.diff(todayInTz, 'days').days);
     if (diffFuture > maxFutureDays) {
       throw ApiError.badRequest(`Cannot apply leave more than ${maxFutureDays} days in advance`);
     }
@@ -2062,6 +2069,10 @@ export class LeaveService {
   }
 
   async carryForwardBalances(companyId: string, fromYear: number, toYear: number, userId?: string) {
+    if (fromYear >= toYear) {
+      throw ApiError.badRequest('fromYear must be less than toYear');
+    }
+
     const periodKey = `${fromYear}-${toYear}`;
 
     // ── Idempotency check ──────────────────────────────────────────────

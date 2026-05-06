@@ -134,6 +134,49 @@ export function requireESSFeature(feature: string): RequestHandler {
   };
 }
 
+/**
+ * Like requireESSFeature but skips the check if the user has an HR admin
+ * permission (e.g. 'hr:update').  This allows admins to perform actions
+ * like cancelling leave requests even when the ESS feature flag is off,
+ * while still enforcing the flag for self-service (ESS) users.
+ */
+export function requireESSFeatureUnlessAdmin(feature: string, adminPermission = 'hr:update'): RequestHandler {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      // Skip ESS check if user has the admin permission
+      const userPermissions = req.user?.permissions as string[] | undefined;
+      if (userPermissions) {
+        const { hasPermission } = await import('../constants/permissions');
+        if (hasPermission(userPermissions, adminPermission)) {
+          return next();
+        }
+      }
+
+      const companyId = req.user?.companyId;
+      if (!companyId) {
+        throw ApiError.forbidden('Company context required to check ESS feature access');
+      }
+
+      const essConfig = await getCachedESSConfig(companyId);
+      const isEnabled = (essConfig as Record<string, unknown>)[feature];
+
+      if (isEnabled === false) {
+        logger.info(
+          `ESS feature access denied: ${feature} is disabled for company ${companyId}`,
+        );
+        throw ApiError.forbidden(
+          `${feature} is not enabled for employee self-service`,
+          'ESS_FEATURE_DISABLED',
+        );
+      }
+
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
 // ─── Payroll Lock Enforcement ───────────────────────────────────────────────
 
 /** Payroll run statuses that constitute a "locked" state. */

@@ -213,7 +213,11 @@ export class LeaveBalanceBulkImportService {
 
   async validateUpload(companyId: string, fileBuffer: Buffer | Uint8Array) {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(fileBuffer as any);
+    try {
+      await wb.xlsx.load(fileBuffer as any);
+    } catch {
+      throw ApiError.badRequest('Invalid file format. Please upload a valid .xlsx file.');
+    }
 
     const sheet = wb.getWorksheet('Balances') ?? wb.worksheets[0];
     if (!sheet) throw ApiError.badRequest('No worksheet found in the uploaded file');
