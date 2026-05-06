@@ -71,8 +71,9 @@ export class LeaveController {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
-    const result = await leaveService.deleteLeaveType(companyId, req.params.id!);
-    res.json(createSuccessResponse(result, 'Leave type deleted'));
+    const force = req.query.force === 'true';
+    const result = await leaveService.deleteLeaveType(companyId, req.params.id!, force);
+    res.json(createSuccessResponse(result, result.message));
   });
 
   // ── Leave Policies ──────────────────────────────────────────────────

@@ -178,30 +178,51 @@ export class LeaveService {
     });
   }
 
-  async deleteLeaveType(companyId: string, id: string) {
+  async deleteLeaveType(companyId: string, id: string, force = false) {
     const leaveType = await platformPrisma.leaveType.findUnique({ where: { id } });
     if (!leaveType || leaveType.companyId !== companyId) {
       throw ApiError.notFound('Leave type not found');
     }
 
-    // Check for active balances
-    const balanceCount = await platformPrisma.leaveBalance.count({
-      where: { leaveTypeId: id, balance: { gt: 0 } },
-    });
-    if (balanceCount > 0) {
-      throw ApiError.badRequest(`Cannot delete: ${balanceCount} employees have active balances for this leave type`);
+    if (!force) {
+      // Soft checks — warn the caller but allow override with ?force=true
+      const balanceCount = await platformPrisma.leaveBalance.count({
+        where: { leaveTypeId: id },
+      });
+      const pendingCount = await platformPrisma.leaveRequest.count({
+        where: { leaveTypeId: id, status: { in: ['PENDING', 'APPROVED'] } },
+      });
+
+      if (balanceCount > 0 || pendingCount > 0) {
+        const parts: string[] = [];
+        if (balanceCount > 0) parts.push(`${balanceCount} employee balance(s)`);
+        if (pendingCount > 0) parts.push(`${pendingCount} pending/approved request(s)`);
+        throw ApiError.badRequest(
+          `This leave type has ${parts.join(' and ')}. ` +
+          `All associated balances, policies, and requests will be permanently deleted. ` +
+          `Pass ?force=true to confirm deletion.`
+        );
+      }
     }
 
-    // Check for pending requests
-    const pendingCount = await platformPrisma.leaveRequest.count({
-      where: { leaveTypeId: id, status: { in: ['PENDING', 'APPROVED'] } },
-    });
-    if (pendingCount > 0) {
-      throw ApiError.badRequest(`Cannot delete: ${pendingCount} pending/approved requests exist for this leave type`);
-    }
+    // Force delete — cascade everything in a transaction
+    await platformPrisma.$transaction(async (tx) => {
+      // Nullify leaveTypeId on AttendanceHalf records (optional FK, no cascade)
+      await tx.attendanceHalf.updateMany({
+        where: { leaveTypeId: id },
+        data: { leaveTypeId: null },
+      });
 
-    await platformPrisma.leaveType.delete({ where: { id } });
-    return { message: 'Leave type deleted' };
+      // Delete all leave requests for this type (no cascade in schema)
+      await tx.leaveRequest.deleteMany({
+        where: { leaveTypeId: id },
+      });
+
+      // Delete the leave type — cascades to LeaveBalance + LeavePolicy automatically
+      await tx.leaveType.delete({ where: { id } });
+    });
+
+    return { message: 'Leave type and all associated data deleted' };
   }
 
   // ────────────────────────────────────────────────────────────────────
