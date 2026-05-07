@@ -417,13 +417,24 @@ export class LeaveBalanceBulkImportService {
       const row = validatedRows[i]!;
       const rowNum = (row.rowNum as number) ?? i + 1;
 
-      const employeeId = row.resolvedEmployeeId as string;
-      const leaveTypeId = row.resolvedLeaveTypeId as string;
-      const year = row.year as number;
-      const openingBalance = Number(row.openingBalance ?? 0);
-      const accrued = Number(row.accrued ?? 0);
-      const taken = Number(row.taken ?? 0);
-      const adjusted = Number(row.adjusted ?? 0);
+      // Skip invalid rows
+      if (row.valid === false) {
+        failureCount++;
+        results.push({ rowNum, success: false, error: 'Skipped: validation errors' });
+        continue;
+      }
+
+      // The frontend sends validated row objects with shape { rowNum, valid, data: { ... } }
+      // Extract the data from either row.data (nested) or row itself (flat)
+      const d = (row.data as Record<string, unknown>) ?? row;
+
+      const employeeId = (d.resolvedEmployeeId as string) ?? (d.employeeId as string);
+      const leaveTypeId = (d.resolvedLeaveTypeId as string) ?? (d.leaveTypeId as string);
+      const year = d.year as number;
+      const openingBalance = Number(d.openingBalance ?? 0);
+      const accrued = Number(d.accrued ?? 0);
+      const taken = Number(d.taken ?? 0);
+      const adjusted = Number(d.adjusted ?? 0);
       const balance = recalculateBalance({ openingBalance, accrued, taken, adjusted });
 
       try {
@@ -463,8 +474,8 @@ export class LeaveBalanceBulkImportService {
             results.push({
               rowNum,
               success: true,
-              employeeId: row.employeeId as string,
-              leaveTypeCode: row.leaveTypeCode as string,
+              employeeId: (d.employeeId as string) ?? '',
+              leaveTypeCode: (d.leaveTypeCode as string) ?? '',
               year,
               action: 'updated',
             });
@@ -504,8 +515,8 @@ export class LeaveBalanceBulkImportService {
             results.push({
               rowNum,
               success: true,
-              employeeId: row.employeeId as string,
-              leaveTypeCode: row.leaveTypeCode as string,
+              employeeId: (d.employeeId as string) ?? '',
+              leaveTypeCode: (d.leaveTypeCode as string) ?? '',
               year,
               action: 'created',
             });
