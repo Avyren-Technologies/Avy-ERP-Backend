@@ -208,7 +208,8 @@ model Company {
   bonusBatchItems     BonusBatchItem[]
 
   // Phase 2 Relations
-  biometricDevices           BiometricDevice[]
+  biometricDevices          BiometricDevice[]            @relation("CompanyBiometricDevices")
+  biometricMappings         EmployeeBiometricMapping[]   @relation("CompanyBiometricMappings")
   shiftRotationSchedules     ShiftRotationSchedule[]
   shiftRotationAssignments   ShiftRotationAssignment[]
   productionIncentiveConfigs ProductionIncentiveConfig[]

@@ -303,21 +303,28 @@ export async function dispatchBulk(input: DispatchBulkInput): Promise<DispatchBu
  */
 function buildFallbackRule(input: DispatchBulkInput): LoadedRule {
   const now = new Date();
-  const title = input.type ?? input.triggerEvent.replace(/_/g, ' ');
-  const body = `Event: ${input.triggerEvent}`;
+  const tokens = input.sharedTokens ?? {};
+
+  // When shared tokens provide title/body (e.g. announcements), use Handlebars
+  // placeholders so the renderer interpolates the actual values.  Otherwise fall
+  // back to the trigger event name for generic notifications.
+  const subject = tokens.title ? '{{title}}' : (input.type ?? input.triggerEvent.replace(/_/g, ' '));
+  const bodyTpl = tokens.body ? '{{body}}' : `Event: ${input.triggerEvent}`;
+  const name = input.type ?? input.triggerEvent.replace(/_/g, ' ');
+
   const template: NotificationTemplate = {
     id: 'adhoc',
-    name: title,
+    name,
     code: 'ADHOC',
-    subject: title,
-    body,
+    subject,
+    body: bodyTpl,
     channel: 'IN_APP',
     priority: input.priority ?? 'LOW',
     version: 1,
     variables: [] as Prisma.JsonValue,
     sensitiveFields: [] as Prisma.JsonValue,
-    compiledBody: body,
-    compiledSubject: title,
+    compiledBody: bodyTpl,
+    compiledSubject: subject,
     whatsappTemplateName: null,
     isSystem: false,
     isActive: true,

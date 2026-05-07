@@ -19,9 +19,6 @@ import {
   approveOvertimeRequestSchema,
   rejectOvertimeRequestSchema,
   populateMonthSchema,
-  createDeviceSchema,
-  updateDeviceSchema,
-  syncDeviceSchema,
   createRotationScheduleSchema,
   updateRotationScheduleSchema,
   assignRotationSchema,
@@ -369,71 +366,6 @@ export class AttendanceController {
 
     const result = await attendanceService.rejectOvertimeRequest(companyId, req.params.id!, userId, parsed.data.approvalNotes);
     res.json(createSuccessResponse(result, 'Overtime request rejected'));
-  });
-
-  // ── Biometric Devices ────────────────────────────────────────────────
-
-  listDevices = asyncHandler(async (req: Request, res: Response) => {
-    const companyId = req.user?.companyId;
-    if (!companyId) throw ApiError.badRequest('Company ID is required');
-
-    const devices = await attendanceService.listDevices(companyId);
-    res.json(createSuccessResponse(devices, 'Biometric devices retrieved'));
-  });
-
-  createDevice = asyncHandler(async (req: Request, res: Response) => {
-    const companyId = req.user?.companyId;
-    if (!companyId) throw ApiError.badRequest('Company ID is required');
-
-    const parsed = createDeviceSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
-    }
-
-    const device = await attendanceService.createDevice(companyId, parsed.data);
-    res.status(201).json(createSuccessResponse(device, 'Biometric device created'));
-  });
-
-  updateDevice = asyncHandler(async (req: Request, res: Response) => {
-    const companyId = req.user?.companyId;
-    if (!companyId) throw ApiError.badRequest('Company ID is required');
-
-    const parsed = updateDeviceSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
-    }
-
-    const device = await attendanceService.updateDevice(companyId, req.params.id!, parsed.data);
-    res.json(createSuccessResponse(device, 'Biometric device updated'));
-  });
-
-  deleteDevice = asyncHandler(async (req: Request, res: Response) => {
-    const companyId = req.user?.companyId;
-    if (!companyId) throw ApiError.badRequest('Company ID is required');
-
-    const result = await attendanceService.deleteDevice(companyId, req.params.id!);
-    res.json(createSuccessResponse(result, 'Biometric device deleted'));
-  });
-
-  testDeviceConnection = asyncHandler(async (req: Request, res: Response) => {
-    const companyId = req.user?.companyId;
-    if (!companyId) throw ApiError.badRequest('Company ID is required');
-
-    const result = await attendanceService.testDeviceConnection(companyId, req.params.id!);
-    res.json(createSuccessResponse(result, result.message));
-  });
-
-  syncDeviceAttendance = asyncHandler(async (req: Request, res: Response) => {
-    const companyId = req.user?.companyId;
-    if (!companyId) throw ApiError.badRequest('Company ID is required');
-
-    const parsed = syncDeviceSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
-    }
-
-    const result = await attendanceService.syncDeviceAttendance(companyId, req.params.id!, parsed.data.records);
-    res.status(201).json(createSuccessResponse(result, `Synced ${result.synced}/${result.total} records`));
   });
 
   // ── Auto Clock-Out ─────────────────────────────────────────────────

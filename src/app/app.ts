@@ -18,6 +18,7 @@ import {
   rateLimitLoggingMiddleware
 } from '../middleware/logging.middleware';
 import { routes } from './routes';
+import { admsRoutes } from '../modules/biometric/adms.routes';
 
 // Create Express application
 const app = express();
@@ -205,6 +206,19 @@ app.use(auditLoggingMiddleware);
 app.use(performanceMonitoringMiddleware);
 app.use(securityLoggingMiddleware);
 app.use(rateLimitLoggingMiddleware);
+
+// ADMS biometric device listener — text body parser + routes
+// Must be before JSON body parser so devices get text/plain parsing
+// Rate limit: relaxed (1000 req / 15 min / IP) to prevent abuse on unauthenticated endpoint
+const admsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  message: 'OK',
+  standardHeaders: false,
+  legacyHeaders: false,
+});
+app.use('/iclock', admsLimiter, express.text({ type: '*/*', limit: '1mb' }));
+app.use('/iclock', admsRoutes);
 
 // Body parsing middleware
 app.use(express.json({

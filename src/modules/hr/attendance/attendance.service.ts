@@ -161,8 +161,13 @@ export class AttendanceService {
     }
 
     // ── Step 1: Location Validation (fail fast) ──
+    // Skip geofence/location validation for sources that don't provide GPS coordinates
+    // (biometric devices, smart cards, IoT sensors, manual HR entries).
     const locationId = data.locationId ?? employee.locationId ?? null;
-    if (locationId) {
+    const locationExemptSources = ['BIOMETRIC', 'MANUAL', 'HR_BOOK', 'IOT', 'SMART_CARD'];
+    const isLocationExempt = locationExemptSources.includes(data.source);
+
+    if (locationId && !isLocationExempt) {
       const locationResult = await validateLocationConstraints(locationId, {
         latitude: data.checkInLatitude,
         longitude: data.checkInLongitude,
@@ -218,10 +223,15 @@ export class AttendanceService {
     // ── Step 3b: Enforce resolved selfie/GPS requirements ──
     // The policy resolver merges location, shift, and attendance rule settings.
     // This check ensures selfie/GPS is enforced even when no location is assigned.
-    if (policy.selfieRequired && !data.checkInPhotoUrl) {
+    // EXCEPTION: Biometric devices (source=BIOMETRIC) and HR manual entries (source=HR_BOOK/MANUAL)
+    // cannot provide selfie/GPS — skip enforcement for these sources.
+    const selfieGpsExemptSources = ['BIOMETRIC', 'MANUAL', 'HR_BOOK', 'IOT', 'SMART_CARD'];
+    const isSelfieGpsExempt = selfieGpsExemptSources.includes(data.source);
+
+    if (!isSelfieGpsExempt && policy.selfieRequired && !data.checkInPhotoUrl) {
       throw ApiError.badRequest('Selfie photo is required for check-in (per resolved attendance policy)');
     }
-    if (policy.gpsRequired && (data.checkInLatitude == null || data.checkInLongitude == null)) {
+    if (!isSelfieGpsExempt && policy.gpsRequired && (data.checkInLatitude == null || data.checkInLongitude == null)) {
       throw ApiError.badRequest('GPS coordinates are required for check-in (per resolved attendance policy)');
     }
 
@@ -2218,145 +2228,6 @@ export class AttendanceService {
       accrued: accruedCount,
       message: `Comp-off accrual processed: ${accruedCount} record(s) credited for ${month}/${year}`,
     };
-  }
-
-  // ────────────────────────────────────────────────────────────────────
-  // Biometric Devices (YEL-7)
-  // ────────────────────────────────────────────────────────────────────
-
-  async listDevices(companyId: string) {
-    return platformPrisma.biometricDevice.findMany({
-      where: { companyId },
-      orderBy: { name: 'asc' },
-    });
-  }
-
-  async createDevice(companyId: string, data: any) {
-    // Validate unique deviceId per company
-    const existing = await platformPrisma.biometricDevice.findUnique({
-      where: { companyId_deviceId: { companyId, deviceId: data.deviceId } },
-    });
-    if (existing) {
-      throw ApiError.conflict(`Device with ID "${data.deviceId}" already exists`);
-    }
-
-    return platformPrisma.biometricDevice.create({
-      data: {
-        companyId,
-        name: data.name,
-        brand: data.brand,
-        deviceId: data.deviceId,
-        ipAddress: n(data.ipAddress),
-        port: n(data.port),
-        syncMode: data.syncMode ?? 'MANUAL',
-        syncIntervalMin: n(data.syncIntervalMin),
-        locationId: n(data.locationId),
-        status: 'ACTIVE',
-      },
-    });
-  }
-
-  async updateDevice(companyId: string, id: string, data: any) {
-    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
-    if (!device || device.companyId !== companyId) {
-      throw ApiError.notFound('Biometric device not found');
-    }
-
-    // If deviceId is changing, check uniqueness
-    if (data.deviceId && data.deviceId !== device.deviceId) {
-      const existing = await platformPrisma.biometricDevice.findUnique({
-        where: { companyId_deviceId: { companyId, deviceId: data.deviceId } },
-      });
-      if (existing) {
-        throw ApiError.conflict(`Device with ID "${data.deviceId}" already exists`);
-      }
-    }
-
-    return platformPrisma.biometricDevice.update({
-      where: { id },
-      data: {
-        ...(data.name !== undefined && { name: data.name }),
-        ...(data.brand !== undefined && { brand: data.brand }),
-        ...(data.deviceId !== undefined && { deviceId: data.deviceId }),
-        ...(data.ipAddress !== undefined && { ipAddress: n(data.ipAddress) }),
-        ...(data.port !== undefined && { port: n(data.port) }),
-        ...(data.syncMode !== undefined && { syncMode: data.syncMode }),
-        ...(data.syncIntervalMin !== undefined && { syncIntervalMin: n(data.syncIntervalMin) }),
-        ...(data.locationId !== undefined && { locationId: n(data.locationId) }),
-      },
-    });
-  }
-
-  async deleteDevice(companyId: string, id: string) {
-    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
-    if (!device || device.companyId !== companyId) {
-      throw ApiError.notFound('Biometric device not found');
-    }
-
-    await platformPrisma.biometricDevice.delete({ where: { id } });
-    return { message: 'Biometric device deleted' };
-  }
-
-  async testDeviceConnection(companyId: string, id: string) {
-    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
-    if (!device || device.companyId !== companyId) {
-      throw ApiError.notFound('Biometric device not found');
-    }
-
-    // Ping placeholder — mark ACTIVE if ipAddress exists, OFFLINE otherwise
-    const newStatus = device.ipAddress ? 'ACTIVE' : 'OFFLINE';
-
-    const updated = await platformPrisma.biometricDevice.update({
-      where: { id },
-      data: { status: newStatus },
-    });
-
-    return { device: updated, status: newStatus, message: `Device is ${newStatus}` };
-  }
-
-  async syncDeviceAttendance(companyId: string, id: string, records: any[]) {
-    const device = await platformPrisma.biometricDevice.findUnique({ where: { id } });
-    if (!device || device.companyId !== companyId) {
-      throw ApiError.notFound('Biometric device not found');
-    }
-
-    let synced = 0;
-    let errors = 0;
-    const errorDetails: Array<{ index: number; employeeId: string; error: string }> = [];
-
-    for (let i = 0; i < records.length; i++) {
-      const rec = records[i];
-      try {
-        await this.createRecord(companyId, {
-          employeeId: rec.employeeId,
-          date: rec.date,
-          punchIn: rec.punchIn,
-          punchOut: rec.punchOut,
-          status: 'PRESENT',
-          source: 'BIOMETRIC',
-          locationId: device.locationId,
-        });
-        synced++;
-      } catch (err: any) {
-        errors++;
-        errorDetails.push({
-          index: i,
-          employeeId: rec.employeeId,
-          error: err.message ?? 'Unknown error',
-        });
-      }
-    }
-
-    // Update device sync metadata
-    await platformPrisma.biometricDevice.update({
-      where: { id },
-      data: {
-        lastSyncAt: new Date(),
-        lastSyncStatus: errors === 0 ? 'SUCCESS' : synced > 0 ? 'PARTIAL' : 'FAILED',
-      },
-    });
-
-    return { synced, errors, total: records.length, errorDetails };
   }
 
   // ────────────────────────────────────────────────────────────────────

@@ -492,3 +492,28 @@ enum CheckInUIMode {
   SLIDE
   BUTTON
 }
+
+// ── Employee ↔ Biometric Device Mapping ────────────────────────────
+// NOTE: This model lives in the attendance module (HRMS) because it links
+// Employee records to biometric devices. However, the BiometricDevice and
+// BiometricPunchLog models are in prisma/modules/platform/biometric.prisma
+// (platform DB level) since ADMS handshakes arrive without tenant context.
+
+model EmployeeBiometricMapping {
+  id                 String    @id @default(cuid())
+  employeeId         String
+  deviceSerialNumber String
+  deviceUserId       String
+  companyId          String
+  enrolledAt         DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  employee           Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company            Company   @relation("CompanyBiometricMappings", fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceSerialNumber, deviceUserId])
+  @@unique([employeeId, deviceSerialNumber])
+  @@index([companyId])
+  @@map("employee_biometric_mappings")
+}

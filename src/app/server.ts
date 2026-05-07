@@ -15,6 +15,7 @@ import { registerHRListeners } from '../shared/events/listeners/hr-listeners';
 import { attendanceCronService } from '../shared/jobs/attendance-cron.service';
 import { compOffExpiryCronService } from '../shared/jobs/compoff-expiry.job';
 import { leaveCronService } from '../shared/jobs/leave-cron.service';
+import { startBiometricCron } from '../workers/biometric-cron';
 
 // Server startup function
 async function startServer(): Promise<void> {
@@ -69,6 +70,9 @@ async function startServer(): Promise<void> {
 
       // Start leave cron jobs (accrual, expiry cleanup, carry-forward)
       leaveCronService.startAll();
+
+      // Start biometric ADMS punch processor
+      startBiometricCron();
 
       // Initialize Firebase Admin for push notifications
       notificationService.initFirebase();

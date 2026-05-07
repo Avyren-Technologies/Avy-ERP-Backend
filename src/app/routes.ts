@@ -29,6 +29,7 @@ import { visitorsRoutes } from '../modules/visitors/routes';
 import { maintenanceRoutes } from '../modules/maintenance/routes';
 import { reportsRoutes } from '../modules/reports/routes';
 import { uploadRoutes, uploadPlatformRoutes } from '../modules/upload/upload.routes';
+import { biometricController } from '../modules/biometric/biometric.controller';
 import { visitorPublicRoutes } from '../modules/visitors/public/public.routes';
 
 // Create main router
@@ -92,6 +93,11 @@ router.use('/platform/support', supportPlatformRoutes);
 router.use('/platform/registrations', registrationPlatformRoutes);
 router.use('/platform/app-versions', appVersionAdminRoutes);
 router.use('/platform/upload', uploadPlatformRoutes);
+
+// Platform biometric device management (super-admin only)
+router.get('/platform/biometric/devices/unassigned', biometricController.listUnassignedDevices);
+router.get('/platform/biometric/devices/unassigned/count', biometricController.countUnassigned);
+router.post('/platform/biometric/devices/:id/assign', biometricController.assignDevice);
 
 // Platform RBAC utilities (super-admin only)
 router.post('/platform/rbac/sync-admin-permissions', rbacController.syncCompanyAdminPermissions);

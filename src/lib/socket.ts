@@ -76,6 +76,13 @@ export function initSocket(server: HttpServer) {
             }
         });
 
+        // Join biometric admin room — only super admins
+        socket.on('join-biometric-admin', () => {
+            if (user?.role === 'SUPER_ADMIN') {
+                socket.join('admin:biometric');
+            }
+        });
+
         socket.on('disconnect', () => {
             // Cleanup handled by socket.io
         });
@@ -127,4 +134,36 @@ export function emitNotificationNew(
         title: payload.title,
         body: payload.body,
     });
+}
+
+/**
+ * Emit a real-time attendance punch event to the company room.
+ */
+export function emitAttendancePunch(
+    companyId: string,
+    payload: {
+        punchLogId: string;
+        deviceName: string;
+        locationName?: string | null;
+        serialNumber: string;
+        deviceUserId: string;
+        employeeName: string | null;
+        employeeId: string | null;
+        punchTime: string;
+        punchType: string;
+        verifyType: string;
+    },
+) {
+    io?.to(`company:${companyId}`).emit('attendance:punch', payload);
+}
+
+/**
+ * Emit to special room for super admin monitoring of unassigned device punches.
+ */
+export function emitUnassignedPunch(payload: {
+    serialNumber: string;
+    deviceUserId: string;
+    punchTime: string;
+}) {
+    io?.to('admin:biometric').emit('attendance:unassigned-punch', payload);
 }

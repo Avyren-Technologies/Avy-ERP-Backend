@@ -70,14 +70,6 @@ router.get('/overtime-requests', requirePermissions(['hr:read']), controller.lis
 router.patch('/overtime-requests/:id/approve', requirePermissions(['hr:approve']), controller.approveOvertimeRequest);
 router.patch('/overtime-requests/:id/reject', requirePermissions(['hr:approve']), controller.rejectOvertimeRequest);
 
-// ── Biometric Devices ────────────────────────────────────────────────
-router.get('/biometric-devices', requirePermissions(['hr:read']), controller.listDevices);
-router.post('/biometric-devices', requirePermissions(['hr:create']), controller.createDevice);
-router.patch('/biometric-devices/:id', requirePermissions(['hr:update']), controller.updateDevice);
-router.delete('/biometric-devices/:id', requirePermissions(['hr:delete']), controller.deleteDevice);
-router.post('/biometric-devices/:id/test', requirePermissions(['hr:update']), controller.testDeviceConnection);
-router.post('/biometric-devices/:id/sync', requirePermissions(['hr:create']), controller.syncDeviceAttendance);
-
 // ── Shift Rotation ───────────────────────────────────────────────────
 router.get('/shift-rotations', requirePermissions(['hr:read']), controller.listRotationSchedules);
 router.post('/shift-rotations', requirePermissions(['hr:create']), controller.createRotationSchedule);

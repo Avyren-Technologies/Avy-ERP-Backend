@@ -2389,7 +2389,7 @@ export class ESSService {
   async getDashboard(
     companyId: string,
     employeeId: string | null,
-    _userId: string,
+    userId: string,
     permissions: string[],
   ) {
     const hasPerm = (p: string) => permissions.includes(p) || permissions.includes('*') || permissions.includes('hr:*');
@@ -2400,7 +2400,7 @@ export class ESSService {
         attendanceStatus: { status: 'NOT_LINKED' as const, record: null, elapsedSeconds: 0 },
         leaveBalance: [],
         upcomingHolidays: [],
-        announcements: [], // TODO: populate once Announcement model exists
+        announcements: [],
         recentAttendance: [],
         currentShift: null,
         myGoals: null,
@@ -2419,6 +2419,7 @@ export class ESSService {
       attendanceStatus,
       leaveBalance,
       upcomingHolidays,
+      announcements,
       recentAttendance,
       currentShift,
       myGoals,
@@ -2432,6 +2433,7 @@ export class ESSService {
       this.getDashboardAttendanceStatus(companyId, employeeId),
       this.getDashboardLeaveBalance(companyId, employeeId),
       this.getDashboardUpcomingHolidays(companyId, 5),
+      this.getDashboardAnnouncements(userId),
       this.getDashboardRecentAttendance(companyId, employeeId, 7),
       this.getDashboardCurrentShift(companyId, employeeId),
       this.getDashboardGoalsSummary(companyId, employeeId),
@@ -2447,7 +2449,7 @@ export class ESSService {
       attendanceStatus: this.settledValue(attendanceStatus, 'attendanceStatus'),
       leaveBalance: this.settledValue(leaveBalance, 'leaveBalance'),
       upcomingHolidays: this.settledValue(upcomingHolidays, 'upcomingHolidays'),
-      announcements: [] as any[], // TODO: populate once Announcement model exists
+      announcements: this.settledValue(announcements, 'announcements') ?? [],
       recentAttendance: this.settledValue(recentAttendance, 'recentAttendance'),
       currentShift: this.settledValue(currentShift, 'currentShift'),
       myGoals: this.settledValue(myGoals, 'myGoals'),
@@ -2612,6 +2614,39 @@ export class ESSService {
   }
 
   // ── Dashboard helper: Upcoming Holidays ──
+
+  private async getDashboardAnnouncements(userId: string) {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const rows = await platformPrisma.notification.findMany({
+      where: {
+        userId,
+        type: 'ANNOUNCEMENTS',
+        status: { not: 'ARCHIVED' },
+        createdAt: { gte: thirtyDaysAgo },
+      },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        priority: true,
+        data: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      body: r.body,
+      priority: r.priority,
+      imageUrl: (r.data as Record<string, unknown> | null)?.image_url ?? null,
+      createdAt: r.createdAt,
+    }));
+  }
 
   private async getDashboardUpcomingHolidays(companyId: string, count: number) {
     const today = new Date();

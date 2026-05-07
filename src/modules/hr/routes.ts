@@ -14,6 +14,7 @@ import { onboardingRoutes } from './onboarding/onboarding.routes';
 import { chatbotRoutes } from './chatbot/chatbot.routes';
 import { retentionRoutes } from './retention/retention.routes';
 import { analyticsRoutes } from './analytics/analytics.routes';
+import { biometricAdminRoutes } from '../biometric/biometric.routes';
 
 const router = Router();
 
@@ -62,5 +63,8 @@ router.use('/', chatbotRoutes);
 
 // Data Retention & GDPR Controls (ORA-11)
 router.use('/', retentionRoutes);
+
+// Biometric device management & employee-device mappings
+router.use('/biometric', biometricAdminRoutes);
 
 export { router as hrRoutes };

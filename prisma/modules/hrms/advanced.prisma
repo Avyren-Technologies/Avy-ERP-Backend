@@ -1,33 +1,10 @@
 // ==========================================
-// HRMS — Advanced (Biometric, Shift Rotation, Production Incentive, Data Retention, AI Chat)
+// HRMS — Advanced (Shift Rotation, Production Incentive, Data Retention, AI Chat)
 // ==========================================
-// Models: BiometricDevice, ShiftRotationSchedule, ShiftRotationAssignment,
+// Models: ShiftRotationSchedule, ShiftRotationAssignment,
 //         ProductionIncentiveConfig, ProductionIncentiveRecord,
 //         DataRetentionPolicy, DataAccessRequest, ConsentRecord,
 //         ChatConversation, ChatMessage
-
-model BiometricDevice {
-  id              String    @id @default(cuid())
-  name            String
-  brand           String
-  deviceId        String
-  ipAddress       String?
-  port            Int?
-  syncMode        String    @default("PULL") // PUSH, PULL, MANUAL
-  syncIntervalMin Int       @default(5)
-  locationId      String?
-  status          String    @default("ACTIVE") // ACTIVE, INACTIVE, OFFLINE, ERROR
-  lastSyncAt      DateTime?
-  lastSyncStatus  String?
-  enrolledCount   Int       @default(0)
-  companyId       String
-  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  @@unique([companyId, deviceId])
-  @@map("biometric_devices")
-}
 
 model ShiftRotationSchedule {
   id              String    @id @default(cuid())

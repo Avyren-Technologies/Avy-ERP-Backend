@@ -220,30 +220,6 @@ export const processCompOffSchema = z.object({
   year: z.number().int().min(2020).max(2099),
 });
 
-// ── Biometric Devices ────────────────────────────────────────────────
-
-export const createDeviceSchema = z.object({
-  name: z.string().min(1).max(100),
-  brand: z.string().min(1),
-  deviceId: z.string().min(1),
-  ipAddress: z.string().optional(),
-  port: z.number().int().optional(),
-  syncMode: z.enum(['PUSH', 'PULL', 'MANUAL']).optional(),
-  syncIntervalMin: z.number().int().min(1).optional(),
-  locationId: z.string().optional(),
-});
-
-export const updateDeviceSchema = createDeviceSchema.partial();
-
-export const syncDeviceSchema = z.object({
-  records: z.array(z.object({
-    employeeId: z.string().min(1),
-    date: z.string().min(1),
-    punchIn: z.string().optional(),
-    punchOut: z.string().optional(),
-  })).min(1),
-});
-
 // ── Shift Rotation ───────────────────────────────────────────────────
 
 export const createRotationScheduleSchema = z.object({

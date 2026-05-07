@@ -119,7 +119,9 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-att-rules', label: 'Attendance Rules', icon: 'clipboard-list', requiredPerm: 'hr.attendance:configure', path: '/app/company/hr/attendance-rules', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 513 },
   { id: 'hr-ot-rules', label: 'Overtime Rules', icon: 'timer', requiredPerm: 'hr.attendance:configure', path: '/app/company/hr/overtime-rules', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 514 },
   { id: 'hr-biometric', label: 'Biometric Devices', icon: 'cpu', requiredPerm: 'hr.attendance:configure', path: '/app/company/hr/biometric-devices', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 515 },
-  { id: 'hr-rotations', label: 'Shift Rotations', icon: 'refresh-cw', requiredPerm: 'hr.attendance:configure', path: '/app/company/hr/shift-rotations', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 516 },
+  { id: 'hr-biometric-mapping', label: 'Employee Mapping', icon: 'users', requiredPerm: 'hr.attendance:configure', path: '/app/company/hr/biometric-mapping', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 516 },
+  { id: 'hr-biometric-live', label: 'Live Attendance', icon: 'activity', requiredPerm: 'hr.attendance:read', path: '/app/company/hr/biometric-live', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 517 },
+  { id: 'hr-rotations', label: 'Shift Rotations', icon: 'refresh-cw', requiredPerm: 'hr.attendance:configure', path: '/app/company/hr/shift-rotations', module: 'hr', group: 'Attendance', roleScope: 'company', sortOrder: 518 },
 
   { id: 'hr-leave-types', label: 'Leave Types', icon: 'file-text', requiredPerm: 'hr.leave:read', path: '/app/company/hr/leave-types', module: 'hr', group: 'Leave Management', roleScope: 'company', sortOrder: 520 },
   { id: 'hr-leave-pol', label: 'Leave Policies', icon: 'book-open', requiredPerm: 'hr.leave:read', path: '/app/company/hr/leave-policies', module: 'hr', group: 'Leave Management', roleScope: 'company', sortOrder: 521 },

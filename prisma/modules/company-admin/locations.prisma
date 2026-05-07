@@ -71,6 +71,9 @@ model Location {
   // Geofences
   geofences   Geofence[]
 
+  // Biometric Devices
+  biometricDevices BiometricDevice[] @relation("LocationBiometricDevices")
+
   @@unique([companyId, code])
   @@map("locations")
 }
