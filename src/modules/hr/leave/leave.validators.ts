@@ -71,6 +71,8 @@ export const createLeaveRequestSchema = z.object({
   isHalfDay: z.boolean().default(false),
   halfDayType: z.enum(['FIRST_HALF', 'SECOND_HALF']).optional(),
   reason: z.string().min(1).max(1000),
+  documentUrl: z.string().optional(),
+  documentName: z.string().optional(),
 });
 
 // ── Approve / Reject ──────────────────────────────────────────────────

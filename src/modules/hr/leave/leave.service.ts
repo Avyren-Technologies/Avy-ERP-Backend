@@ -750,7 +750,7 @@ export class LeaveService {
   }
 
   async createRequest(companyId: string, data: any) {
-    const { employeeId, leaveTypeId, fromDate, toDate, days, isHalfDay, halfDayType, reason } = data;
+    const { employeeId, leaveTypeId, fromDate, toDate, days, isHalfDay, halfDayType, reason, documentUrl, documentName } = data;
 
     // Validate employee
     const employee = await platformPrisma.employee.findUnique({
@@ -777,9 +777,10 @@ export class LeaveService {
 
     // ── Eligibility checks ──
 
-    // Gender restriction
-    if (effectiveLt.applicableGender && employee.gender !== effectiveLt.applicableGender) {
-      throw ApiError.badRequest(`This leave type is only available for ${effectiveLt.applicableGender} employees`);
+    // Gender restriction — "All"/"ALL"/"all" or empty means no restriction
+    const genderRestriction = effectiveLt.applicableGender;
+    if (genderRestriction && genderRestriction.toLowerCase() !== 'all' && employee.gender !== genderRestriction) {
+      throw ApiError.badRequest(`This leave type is only available for ${genderRestriction} employees`);
     }
 
     // Employee type restriction
@@ -908,14 +909,20 @@ export class LeaveService {
       actualDays = await this.calculateLeaveDays(companyId, from, to, effectiveLt);
     }
 
-    // Document requirement flag
+    // Document requirement validation
     let documentRequired = false;
     if (effectiveLt.documentRequired) {
       if (effectiveLt.documentAfterDays === null || effectiveLt.documentAfterDays === undefined) {
         // Always required
         documentRequired = true;
+        if (!documentUrl) {
+          throw ApiError.badRequest('A supporting document is required for this leave type');
+        }
       } else if (actualDays > Number(effectiveLt.documentAfterDays)) {
         documentRequired = true;
+        if (!documentUrl) {
+          throw ApiError.badRequest(`A supporting document is required for leaves exceeding ${effectiveLt.documentAfterDays} day(s)`);
+        }
       }
     }
 
@@ -924,18 +931,26 @@ export class LeaveService {
     const toYear = to.getFullYear();
 
     // Check for overlapping requests
-    const overlapping = await platformPrisma.leaveRequest.findFirst({
+    const overlappingRequests = await platformPrisma.leaveRequest.findMany({
       where: {
         employeeId,
         status: { in: ['PENDING', 'APPROVED'] },
-        OR: [
-          { fromDate: { lte: to }, toDate: { gte: from } },
-        ],
+        fromDate: { lte: to },
+        toDate: { gte: from },
       },
     });
 
-    if (overlapping) {
-      throw ApiError.badRequest('Overlapping leave request already exists');
+    for (const existing of overlappingRequests) {
+      // Allow two half-day requests for the same day if they cover different halves
+      if (isHalfDay && existing.isHalfDay && halfDayType && existing.halfDayType) {
+        const sameDay = from.getTime() === new Date(existing.fromDate).getTime();
+        if (sameDay && halfDayType !== existing.halfDayType) {
+          continue; // FIRST_HALF + SECOND_HALF on same day is allowed
+        }
+      }
+      throw ApiError.badRequest(
+        `Overlapping leave request already exists (${new Date(existing.fromDate).toISOString().slice(0, 10)} to ${new Date(existing.toDate).toISOString().slice(0, 10)}, status: ${existing.status})`,
+      );
     }
 
     // Track LOP days for insufficient balance scenarios
@@ -1024,6 +1039,8 @@ export class LeaveService {
             reason,
             status: 'PENDING',
             referenceNumber,
+            documentUrl: n(documentUrl),
+            documentName: n(documentName),
           },
           include: {
             employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },
@@ -1125,6 +1142,8 @@ export class LeaveService {
           reason,
           status: 'PENDING',
           referenceNumber: refNumber,
+          documentUrl: n(documentUrl),
+          documentName: n(documentName),
         },
         include: {
           employee: { select: { id: true, employeeId: true, firstName: true, lastName: true } },

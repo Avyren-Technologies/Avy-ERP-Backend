@@ -19,7 +19,8 @@ export type FileCategory =
   | 'transfer-letter'
   | 'policy-document'
   | 'billing-invoice'
-  | 'induction-content';
+  | 'induction-content'
+  | 'leave-document';
 
 export const IMAGE_MIME_TYPES = [
   'image/jpeg',
@@ -145,6 +146,11 @@ export const FILE_CATEGORY_CONFIG: Record<FileCategory, CategoryConfig> = {
     allowedMimeTypes: [...VIDEO_MIME_TYPES, ...IMAGE_MIME_TYPES, 'application/pdf'],
     maxSizeEnvKey: 'UPLOAD_MAX_VIDEO_SIZE',
     keyTemplate: '{companyId}/inductions/{entityId}/{filename}',
+  },
+  'leave-document': {
+    allowedMimeTypes: ALL_MIME_TYPES,
+    maxSizeEnvKey: 'UPLOAD_MAX_DOCUMENT_SIZE',
+    keyTemplate: '{companyId}/leaves/{entityId}/{filename}',
   },
 };
 

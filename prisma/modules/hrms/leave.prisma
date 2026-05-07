@@ -117,6 +117,9 @@ model LeaveRequest {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
+  documentUrl       String?
+  documentName      String?
+
   attendanceHalves  AttendanceHalf[]
 
   @@map("leave_requests")
