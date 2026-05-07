@@ -47,6 +47,7 @@ model Notification {
 
   @@index([userId, status])
   @@index([userId, isRead])
+  @@index([userId, type, createdAt])
   @@index([companyId, createdAt])
   @@index([traceId])
   @@index([dedupHash])

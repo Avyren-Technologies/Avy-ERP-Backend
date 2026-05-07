@@ -2616,8 +2616,7 @@ export class ESSService {
   // ── Dashboard helper: Upcoming Holidays ──
 
   private async getDashboardAnnouncements(userId: string) {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgo = DateTime.utc().minus({ days: 30 }).toJSDate();
 
     const rows = await platformPrisma.notification.findMany({
       where: {
