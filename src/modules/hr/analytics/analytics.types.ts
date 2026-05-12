@@ -6,6 +6,8 @@ export interface RawDashboardFilters {
   locationId?: string | undefined;
   gradeId?: string | undefined;
   employeeTypeId?: string | undefined;
+  month?: number | undefined;
+  year?: number | undefined;
   page?: number | undefined;
   limit?: number | undefined;
   sortBy?: string | undefined;
@@ -20,6 +22,8 @@ export interface DashboardFilters {
   locationId?: string;
   gradeId?: string;
   employeeTypeId?: string;
+  month?: number;
+  year?: number;
   page: number;
   limit: number;
   sortBy: string;

@@ -19,6 +19,7 @@ import { supportCompanyRoutes, supportPlatformRoutes } from '../core/support/sup
 import { registrationPublicRoutes, registrationPlatformRoutes } from '../core/registration/registration.routes';
 import { notificationRoutes } from '../core/notifications/notification.routes';
 import { appVersionPublicRoutes, appVersionAdminRoutes } from '../core/app-version/app-version.routes';
+import { platformUsersRoutes } from '../core/platform/platform-users.routes';
 
 // Import business module routes
 import { hrRoutes } from '../modules/hr/routes';
@@ -93,6 +94,7 @@ router.use('/platform/support', supportPlatformRoutes);
 router.use('/platform/registrations', registrationPlatformRoutes);
 router.use('/platform/app-versions', appVersionAdminRoutes);
 router.use('/platform/upload', uploadPlatformRoutes);
+router.use('/platform/users', platformUsersRoutes);
 
 // Platform biometric device management (super-admin only)
 router.get('/platform/biometric/devices/unassigned', biometricController.listUnassignedDevices);

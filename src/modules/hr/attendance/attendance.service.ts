@@ -92,6 +92,10 @@ export class AttendanceService {
           },
           shift: { select: { id: true, name: true, startTime: true, endTime: true } },
           location: { select: { id: true, name: true } },
+          halves: {
+            include: { leaveType: { select: { id: true, name: true, code: true } } },
+            orderBy: { half: 'asc' },
+          },
         },
         skip: offset,
         take: limit,

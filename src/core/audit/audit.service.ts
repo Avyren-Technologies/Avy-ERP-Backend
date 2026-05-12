@@ -61,12 +61,33 @@ export class AuditService {
         skip: offset,
         take: limit,
         orderBy: { changedAt: 'desc' },
+        include: { company: { select: { id: true, name: true } } },
       }),
       platformPrisma.auditLog.count({ where }),
     ]);
 
+    // Resolve changedBy user IDs to names/emails
+    const userIds = [...new Set(logs.map((l) => l.changedBy))];
+    const users = userIds.length > 0
+      ? await platformPrisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const enrichedLogs = logs.map((log) => {
+      const user = userMap.get(log.changedBy);
+      return {
+        ...log,
+        userName: user ? `${user.firstName} ${user.lastName}` : null,
+        userEmail: user?.email ?? null,
+        companyName: log.company?.name ?? null,
+      };
+    });
+
     return {
-      logs,
+      logs: enrichedLogs,
       total,
       page,
       limit,

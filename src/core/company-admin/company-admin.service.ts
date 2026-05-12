@@ -1142,6 +1142,12 @@ export class CompanyAdminService {
       }
     }
 
+    // Hash password if provided
+    let hashedPassword: string | undefined;
+    if (data.password) {
+      hashedPassword = await hashPassword(data.password);
+    }
+
     const updated = await platformPrisma.user.update({
       where: { id: userId },
       data: {
@@ -1149,6 +1155,7 @@ export class CompanyAdminService {
         ...(data.lastName !== undefined && { lastName: data.lastName }),
         ...(data.email !== undefined && { email: data.email }),
         ...(data.phone !== undefined && { phone: n(data.phone) }),
+        ...(hashedPassword !== undefined && { password: hashedPassword }),
       },
       select: {
         id: true,

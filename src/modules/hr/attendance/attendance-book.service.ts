@@ -353,6 +353,17 @@ class AttendanceBookService {
         if (shiftIsCrossDay) dt = dt.plus({ days: 1 });
         punchOut = dt.toJSDate();
       }
+
+      // Defensive cross-day handling: if punchOut is before or equal to punchIn,
+      // the shift spans midnight even if isCrossDay is false (misconfigured shift
+      // or punchOut override is an AM time like 00:30). Adjust by +1 day.
+      if (punchIn && punchOut && punchOut.getTime() <= punchIn.getTime()) {
+        const adjusted = DateTime.fromJSDate(punchOut).plus({ days: 1 });
+        punchOut = adjusted.toJSDate();
+        logger.info(
+          `Cross-day adjustment applied for employee ${input.employeeId} on ${input.date}: punchOut was before punchIn, shifted +1 day`,
+        );
+      }
     }
 
     // Step 9: Derive overall status from halves
@@ -421,9 +432,24 @@ class AttendanceBookService {
       }
     }
 
-    // Compute the final status: use derived half-based status (it accurately captures half-day semantics)
-    // but enrich with worked hours / late / early from the resolution result
-    const finalStatus = derivedStatus;
+    // Compute the final status:
+    // - When both halves are PRESENT → use resolver status (captures LATE, EARLY_EXIT, etc.)
+    // - When halves differ (HALF_DAY) → use resolver status if it determined full day worked
+    //   (the actual punch data is more accurate than the half-day marking)
+    // - When resolver is unavailable → fall back to derived status
+    // - When no punches (ABSENT, ON_LEAVE) → always use derived status
+    let finalStatus: string;
+    if (statusResult && anyPresent) {
+      // Resolver ran successfully with actual punch data — trust it over derived halves
+      // Exception: if derived says ON_LEAVE (both halves on leave), keep that
+      if (derivedStatus === 'ON_LEAVE' || derivedStatus === 'ABSENT') {
+        finalStatus = derivedStatus;
+      } else {
+        finalStatus = statusResult.status;
+      }
+    } else {
+      finalStatus = derivedStatus;
+    }
     const finalWorkedHours = statusResult?.workedHours ?? null;
 
     // Step 11: Upsert AttendanceRecord
