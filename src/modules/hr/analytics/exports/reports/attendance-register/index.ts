@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@prisma/client';
 import { generateExcelReport } from '../../excel-exporter';
 import type { DashboardFilters, DataScope } from '../../../analytics.types';
 import type { ReportSheet } from '../../excel-exporter';
@@ -15,15 +16,16 @@ import { buildAuditTrail } from './sheet-audit-trail';
 import { buildProcessingMetadata } from './sheet-processing-metadata';
 
 export async function generateAttendanceRegister(
-  tenantDb: any,
+  tenantDb: PrismaClient,
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  generatedBy?: string,
 ): Promise<Buffer> {
   const mode = detectReportMode(filters.dateFrom, filters.dateTo);
 
   // 1. Fetch and index all data
-  const dataset = await fetchReportDataset(tenantDb, companyName, filters, scope, mode);
+  const dataset = await fetchReportDataset(tenantDb, companyName, filters, scope, mode, generatedBy);
 
   // 2. Build sheets based on mode
   const sheets: ReportSheet[] = [];

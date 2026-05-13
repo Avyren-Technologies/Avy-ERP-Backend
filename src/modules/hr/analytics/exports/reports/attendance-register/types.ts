@@ -244,6 +244,8 @@ export interface ReportDataset {
   attendanceRules: Record<string, unknown>;
   overtimeRules: Record<string, unknown> | null;
   payrollRun: { id: string; status: string; lockedBy: string | null; lockedAt: Date | null; month: number; year: number } | null;
+  /** All payroll runs in the date range, keyed by "YYYY-MM" (e.g., "2026-05"). For multi-month reports. */
+  payrollRunsByMonth: Map<string, { id: string; status: string; lockedBy: string | null; lockedAt: Date | null; month: number; year: number }>;
   auditEntries: AuditEntry[];
   // Metadata
   companyName: string;

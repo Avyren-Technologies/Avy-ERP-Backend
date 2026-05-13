@@ -201,7 +201,7 @@ export function buildPayrollHandoff(dataset: ReportDataset): ReportSheet | null 
           department:             s.department,
           payrollMonth:           month + 1, // 1-based
           payrollYear:            year,
-          payrollCycleId:         dataset.payrollRun?.id ?? '',
+          payrollCycleId:         dataset.payrollRunsByMonth.get(`${year}-${String(month + 1).padStart(2, '0')}`)?.id ?? '',
           presentDays:            mini.presentDays ?? 0,
           halfDays:               mini.halfDays ?? 0,
           paidLeaveDays:          mini.paidLeaveDays ?? 0,
@@ -219,7 +219,7 @@ export function buildPayrollHandoff(dataset: ReportDataset): ReportSheet | null 
           earlyExitDays:          mini.earlyExitDays ?? 0,
           totalEarlyExitDeduction: Math.round((mini.totalEarlyExitDeduction ?? 0) * 100) / 100,
           nightShiftDays:         mini.nightShiftDays ?? 0,
-          payrollLockStatus:      dataset.payrollRun?.status ?? 'NO_PAYROLL_RUN',
+          payrollLockStatus:      dataset.payrollRunsByMonth.get(`${year}-${String(month + 1).padStart(2, '0')}`)?.status ?? 'NO_PAYROLL_RUN',
         });
       }
     }

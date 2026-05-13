@@ -30,6 +30,7 @@ import { generatePFECRReport, generateESIChallanReport, generatePTReport, genera
 import { generateAppraisalSummaryReport, generateSkillGapReport } from './exports/reports/performance-reports';
 import { generateAttritionReport, generateFnFSettlementReport } from './exports/reports/attrition-reports';
 import { generateComplianceSummaryReport } from './exports/reports/compliance-reports';
+import { generatePipDailyProductionReport, generatePipIncentiveSummaryReport, generatePipOperatorPerformanceReport, generatePipMachineUtilizationReport, generatePipShiftProductivityReport, generatePipPayrollMergeReport, generatePipExceptionReport } from './exports/reports/production-reports';
 
 // ─── Valid Dashboard Names ───
 const VALID_DASHBOARDS: DashboardName[] = [
@@ -38,7 +39,7 @@ const VALID_DASHBOARDS: DashboardName[] = [
 ];
 
 // ─── Report Type → Generator Map ───
-const REPORT_GENERATOR_MAP: Record<string, (tenantDb: any, companyName: string, filters: DashboardFilters, scope: DataScope) => Promise<Buffer>> = {
+const REPORT_GENERATOR_MAP: Record<string, (tenantDb: any, companyName: string, filters: DashboardFilters, scope: DataScope, generatedBy?: string) => Promise<Buffer>> = {
   'employee-master': generateEmployeeMasterReport,
   'headcount-movement': generateHeadcountMovementReport,
   demographics: generateDemographicsReport,
@@ -64,6 +65,13 @@ const REPORT_GENERATOR_MAP: Record<string, (tenantDb: any, companyName: string, 
   attrition: generateAttritionReport,
   'fnf-settlement': generateFnFSettlementReport,
   'compliance-summary': generateComplianceSummaryReport,
+  'pip-daily-production': generatePipDailyProductionReport,
+  'pip-incentive-summary': generatePipIncentiveSummaryReport,
+  'pip-operator-performance': generatePipOperatorPerformanceReport,
+  'pip-machine-utilization': generatePipMachineUtilizationReport,
+  'pip-shift-productivity': generatePipShiftProductivityReport,
+  'pip-payroll-merge': generatePipPayrollMergeReport,
+  'pip-exception': generatePipExceptionReport,
 };
 
 // ─── Controller ───
@@ -194,7 +202,8 @@ class AnalyticsController {
 
     // Reports query employees, attendance, payroll etc. which are in the platform DB (public schema)
     // Pass platformPrisma as the DB client since all HR tables are in the public schema
-    const buffer = await generator(platformPrisma, companyName, filters, scope);
+    const generatedBy = req.user?.firstName ? `${req.user.firstName}${req.user.lastName ? ` ${req.user.lastName}` : ''}` : 'System';
+    const buffer = await generator(platformPrisma, companyName, filters, scope, generatedBy);
 
     // Set response headers for xlsx download
     const filename = `${reportType}-${filters.dateFrom}-to-${filters.dateTo}.xlsx`;
@@ -296,6 +305,7 @@ class AnalyticsController {
       Performance: { icon: 'target', color: '#EC4899', label: 'Performance Reports' },
       Attrition: { icon: 'user-minus', color: '#EF4444', label: 'Attrition Reports' },
       Compliance: { icon: 'shield-check', color: '#14B8A6', label: 'Compliance Reports' },
+      Production: { icon: 'factory', color: '#F97316', label: 'Production Reports' },
     };
 
     const catalog: Record<

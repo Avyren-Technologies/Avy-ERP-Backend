@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@prisma/client';
 import { getCachedAttendanceRules, getCachedCompanySettings } from '../../../../../../shared/utils/config-cache';
 import { logger } from '../../../../../../config/logger';
 import type { DashboardFilters, DataScope } from '../../../analytics.types';
@@ -436,7 +437,7 @@ function buildShiftBreakdown(records: FlatRecord[]): ShiftBreakdown[] {
 // ─── Main Exported Function ───────────────────────────────────────────────────
 
 export async function fetchReportDataset(
-  tenantDb: any,
+  tenantDb: PrismaClient,
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
@@ -495,7 +496,7 @@ export async function fetchReportDataset(
     rawHolidays,
     rawRoster,
     attendanceRules,
-    rawPayrollRun,
+    rawPayrollRuns,
     rawAuditLogs,
     totalEmployeeCount,
     filteredEmployeeCount,
@@ -614,12 +615,26 @@ export async function fetchReportDataset(
     }),
     // 7. Attendance rules (cached)
     getCachedAttendanceRules(scope.companyId),
-    // 8. Payroll run for the period month
-    tenantDb.payrollRun.findFirst({
+    // 8. Payroll runs for ALL months in the date range
+    tenantDb.payrollRun.findMany({
       where: {
         companyId: scope.companyId,
-        month: new Date(filters.dateFrom).getMonth() + 1,
-        year: new Date(filters.dateFrom).getFullYear(),
+        OR: (() => {
+          // Build month/year pairs from dateFrom to dateTo
+          const pairs: Array<{ month: number; year: number }> = [];
+          const startMonth = dateFrom.getUTCMonth();
+          const startYear = dateFrom.getUTCFullYear();
+          const endMonth = dateTo.getUTCMonth();
+          const endYear = dateTo.getUTCFullYear();
+          for (let y = startYear; y <= endYear; y++) {
+            const mStart = y === startYear ? startMonth : 0;
+            const mEnd = y === endYear ? endMonth : 11;
+            for (let m = mStart; m <= mEnd; m++) {
+              pairs.push({ month: m + 1, year: y });
+            }
+          }
+          return pairs.map(p => ({ month: p.month, year: p.year }));
+        })(),
       },
       select: {
         id: true,
@@ -893,16 +908,37 @@ export async function fetchReportDataset(
     roster,
     attendanceRules: attendanceRules as unknown as Record<string, unknown>,
     overtimeRules,
-    payrollRun: rawPayrollRun
-      ? {
-          id: rawPayrollRun.id,
-          status: rawPayrollRun.status,
-          lockedBy: rawPayrollRun.lockedBy ?? null,
-          lockedAt: rawPayrollRun.lockedAt ? new Date(rawPayrollRun.lockedAt) : null,
-          month: rawPayrollRun.month,
-          year: rawPayrollRun.year,
-        }
-      : null,
+    payrollRun: (() => {
+      const runs = rawPayrollRuns as any[];
+      if (!runs || runs.length === 0) return null;
+      // Primary = the run matching dateFrom month, or first available
+      const primaryMonth = dateFrom.getUTCMonth() + 1;
+      const primaryYear = dateFrom.getUTCFullYear();
+      const primary = runs.find((r: any) => r.month === primaryMonth && r.year === primaryYear) ?? runs[0];
+      return {
+        id: primary.id as string,
+        status: primary.status as string,
+        lockedBy: (primary.lockedBy as string) ?? null,
+        lockedAt: primary.lockedAt ? new Date(primary.lockedAt) : null,
+        month: primary.month as number,
+        year: primary.year as number,
+      };
+    })(),
+    payrollRunsByMonth: (() => {
+      const map = new Map<string, { id: string; status: string; lockedBy: string | null; lockedAt: Date | null; month: number; year: number }>();
+      for (const r of (rawPayrollRuns as any[]) ?? []) {
+        const key = `${r.year}-${String(r.month).padStart(2, '0')}`;
+        map.set(key, {
+          id: r.id,
+          status: r.status,
+          lockedBy: r.lockedBy ?? null,
+          lockedAt: r.lockedAt ? new Date(r.lockedAt) : null,
+          month: r.month,
+          year: r.year,
+        });
+      }
+      return map;
+    })(),
     auditEntries,
     companyName,
     companyTimezone,
