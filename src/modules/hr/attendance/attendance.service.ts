@@ -2242,16 +2242,111 @@ export class AttendanceService {
     const schedules = await platformPrisma.shiftRotationSchedule.findMany({
       where: { companyId },
       include: {
-        _count: { select: { assignments: true } },
+        assignments: {
+          include: {
+            employee: {
+              select: { id: true, firstName: true, lastName: true, employeeId: true },
+            },
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
 
     return schedules.map((s) => ({
       ...s,
-      assignmentCount: s._count.assignments,
-      _count: undefined,
+      assignmentCount: s.assignments.length,
+      assignedEmployees: s.assignments.map((a) => ({
+        id: a.employee.id,
+        name: `${a.employee.firstName} ${a.employee.lastName}`,
+        employeeCode: a.employee.employeeId,
+      })),
+      assignments: undefined,
     }));
+  }
+
+  async getRotationSchedule(companyId: string, id: string) {
+    const schedule = await platformPrisma.shiftRotationSchedule.findUnique({
+      where: { id },
+      include: {
+        assignments: {
+          include: {
+            employee: {
+              select: { id: true, firstName: true, lastName: true, employeeId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!schedule || schedule.companyId !== companyId) {
+      throw ApiError.notFound('Shift rotation schedule not found');
+    }
+
+    return {
+      ...schedule,
+      assignmentCount: schedule.assignments.length,
+      assignedEmployees: schedule.assignments.map((a) => ({
+        id: a.employee.id,
+        name: `${a.employee.firstName} ${a.employee.lastName}`,
+        employeeCode: a.employee.employeeId,
+      })),
+      assignments: undefined,
+    };
+  }
+
+  async getRotationEmployeeOverview(companyId: string, search?: string) {
+    const whereClause: any = { companyId, status: 'ACTIVE' };
+    if (search) {
+      const q = search.trim();
+      whereClause.OR = [
+        { firstName: { contains: q, mode: 'insensitive' } },
+        { lastName: { contains: q, mode: 'insensitive' } },
+        { employeeId: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const employees = await platformPrisma.employee.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        employeeId: true,
+        department: { select: { id: true, name: true } },
+        shift: { select: { id: true, name: true, noShuffle: true } },
+        shiftRotationAssignments: {
+          include: {
+            schedule: {
+              select: { id: true, name: true, rotationPattern: true, isActive: true },
+            },
+          },
+        },
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+
+    const data = employees.map((e) => {
+      const activeAssignment = e.shiftRotationAssignments.find((a: any) => a.schedule.isActive);
+      return {
+        id: e.id,
+        firstName: e.firstName,
+        lastName: e.lastName,
+        employeeCode: e.employeeId,
+        department: e.department?.name ?? null,
+        currentShift: e.shift ? { id: e.shift.id, name: e.shift.name, noShuffle: e.shift.noShuffle } : null,
+        rotationSchedule: activeAssignment
+          ? { id: activeAssignment.schedule.id, name: activeAssignment.schedule.name, pattern: activeAssignment.schedule.rotationPattern }
+          : null,
+      };
+    });
+
+    const assigned = data.filter((e) => e.rotationSchedule !== null).length;
+
+    return {
+      summary: { total: data.length, assigned, unassigned: data.length - assigned },
+      employees: data,
+    };
   }
 
   async createRotationSchedule(companyId: string, data: any) {

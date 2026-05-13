@@ -786,6 +786,16 @@ export class ESSService {
           break;
         }
 
+        case 'PipMonthlyReport': {
+          const { pipService } = await import('../../production/pip/pip.service');
+          if (decision === 'APPROVED') {
+            await pipService.approveMonthlyReport(companyId, entityId, 'system');
+          } else {
+            await pipService.rejectMonthlyReport(companyId, entityId, 'system', 'Rejected via approval workflow');
+          }
+          break;
+        }
+
         default:
           // Unknown entity type — log but don't fail
           break;

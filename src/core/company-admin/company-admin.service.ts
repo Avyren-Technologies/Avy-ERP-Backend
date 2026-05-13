@@ -831,6 +831,7 @@ export class CompanyAdminService {
         ...(data.ncEditMode !== undefined && { ncEditMode: data.ncEditMode }),
         ...(data.loadUnload !== undefined && { loadUnload: data.loadUnload }),
         ...(data.cycleTime !== undefined && { cycleTime: data.cycleTime }),
+        ...(data.productionIncentivePlanEnabled !== undefined && { productionIncentivePlanEnabled: data.productionIncentivePlanEnabled }),
         ...(data.payrollLock !== undefined && { payrollLock: data.payrollLock }),
         ...(data.backdatedEntryControl !== undefined && { backdatedEntryControl: data.backdatedEntryControl }),
         ...(data.leaveCarryForward !== undefined && { leaveCarryForward: data.leaveCarryForward }),

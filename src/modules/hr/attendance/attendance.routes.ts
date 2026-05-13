@@ -72,6 +72,8 @@ router.patch('/overtime-requests/:id/reject', requirePermissions(['hr:approve'])
 
 // ── Shift Rotation ───────────────────────────────────────────────────
 router.get('/shift-rotations', requirePermissions(['hr:read']), controller.listRotationSchedules);
+router.get('/shift-rotations/employee-overview', requirePermissions(['hr:read']), controller.getRotationEmployeeOverview);
+router.get('/shift-rotations/:id', requirePermissions(['hr:read']), controller.getRotationSchedule);
 router.post('/shift-rotations', requirePermissions(['hr:create']), controller.createRotationSchedule);
 router.post('/shift-rotations/execute', requirePermissions(['hr:update']), controller.executeShiftRotation);
 router.patch('/shift-rotations/:id', requirePermissions(['hr:update']), controller.updateRotationSchedule);

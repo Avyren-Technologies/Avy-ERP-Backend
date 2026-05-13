@@ -29,6 +29,7 @@ import { inventoryRoutes } from '../modules/inventory/routes';
 import { visitorsRoutes } from '../modules/visitors/routes';
 import { maintenanceRoutes } from '../modules/maintenance/routes';
 import { reportsRoutes } from '../modules/reports/routes';
+import { mastersRoutes } from '../modules/masters/masters.routes';
 import { uploadRoutes, uploadPlatformRoutes } from '../modules/upload/upload.routes';
 import { biometricController } from '../modules/biometric/biometric.controller';
 import { visitorPublicRoutes } from '../modules/visitors/public/public.routes';
@@ -155,6 +156,9 @@ router.use(
   requireTenant(),
   validateTenantAccess()
 );
+
+// Masters (shared across production, inventory, etc.)
+router.use('/masters', mastersRoutes);
 
 // Business module routes
 router.use('/hr', hrRoutes);

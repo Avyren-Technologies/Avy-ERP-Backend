@@ -1,0 +1,121 @@
+// ==========================================
+// MASTERS — Part Master
+// ==========================================
+// Models: Part, PartCategory, ProductModel, UnitOfMeasure
+// Enums: PartType, PartStatus
+
+model Part {
+  id                String     @id @default(cuid())
+  companyId         String
+  locationId        String?
+  partNumber        String
+  name              String
+  engineeringPartNo String?
+  categoryId        String?
+  productModelId    String?
+  uomId             String?
+  partType          PartType   @default(FINISH_PART)
+  revision          String?
+  drawingReference  String?
+  hsnCode           String?
+  weight            Decimal?   @db.Decimal(10, 3)
+  dimensions        String?
+
+  // Capability flags
+  isBatchTracked  Boolean @default(false)
+  isSerialTracked Boolean @default(false)
+  isBomEnabled    Boolean @default(false)
+  isQcRequired    Boolean @default(false)
+  isInventoryItem Boolean @default(false)
+
+  preferredVendorId String?
+  status            PartStatus @default(ACTIVE)
+  isActive          Boolean    @default(true)
+
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location     Location?      @relation(fields: [locationId], references: [id])
+  category     PartCategory?  @relation(fields: [categoryId], references: [id])
+  productModel ProductModel?  @relation(fields: [productModelId], references: [id])
+  uom          UnitOfMeasure? @relation(fields: [uomId], references: [id])
+  slabConfigs  PipSlabConfig[]
+
+  @@unique([companyId, partNumber])
+  @@index([companyId, status])
+  @@index([companyId, categoryId])
+  @@index([companyId, locationId])
+  @@map("parts")
+}
+
+model PartCategory {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  code      String?
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parts   Part[]
+
+  @@unique([companyId, name])
+  @@map("part_categories")
+}
+
+model ProductModel {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  code      String?
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parts   Part[]
+
+  @@unique([companyId, name])
+  @@map("product_models")
+}
+
+model UnitOfMeasure {
+  id           String  @id @default(cuid())
+  companyId    String
+  name         String
+  abbreviation String
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parts   Part[]
+
+  @@unique([companyId, abbreviation])
+  @@map("units_of_measure")
+}
+
+enum PartType {
+  FINISH_PART
+  RAW_MATERIAL
+  SEMI_FINISHED
+  CONSUMABLE
+  SPARE
+}
+
+enum PartStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}

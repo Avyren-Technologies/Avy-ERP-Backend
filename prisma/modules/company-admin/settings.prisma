@@ -67,6 +67,7 @@ model SystemControls {
   ncEditMode Boolean @default(false)
   loadUnload Boolean @default(false)
   cycleTime  Boolean @default(false)
+  productionIncentivePlanEnabled Boolean @default(false)
 
   // ── Payroll Controls ──
   payrollLock           Boolean @default(true)

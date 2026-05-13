@@ -195,6 +195,10 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'hr-retention', label: 'Data Retention', icon: 'database', requiredPerm: 'hr.advanced:configure', path: '/app/company/hr/data-retention', module: 'hr', group: 'Advanced HR', roleScope: 'company', sortOrder: 606 },
   { id: 'hr-incentives', label: 'Production Incentives', icon: 'trending-up', requiredPerm: 'hr.advanced:read', path: '/app/company/hr/production-incentives', module: 'hr', group: 'Advanced HR', roleScope: 'company', sortOrder: 607 },
 
+  // ═══════ MASTERS ═══════
+  { id: 'masters-parts', label: 'Part Master', icon: 'package', requiredPerm: 'masters.parts:read', path: '/app/company/masters/parts', module: 'masters', group: 'Masters', moduleSeparator: 'Masters', roleScope: 'company', sortOrder: 690 },
+  { id: 'masters-machines', label: 'Machine Master', icon: 'cog', requiredPerm: 'masters.machines:read', path: '/app/company/masters/machines', module: 'masters', group: 'Masters', roleScope: 'company', sortOrder: 691 },
+
   // ═══════ OPERATIONS ═══════
   { id: 'ops-inventory', label: 'Inventory', icon: 'package', requiredPerm: 'inventory:read', path: '/app/inventory', module: 'inventory', group: 'Operations', moduleSeparator: 'Operations', roleScope: 'company', sortOrder: 700 },
   { id: 'ops-production', label: 'Production', icon: 'factory', requiredPerm: 'production:read', path: '/app/production', module: 'production', group: 'Operations', roleScope: 'company', sortOrder: 701 },
@@ -221,8 +225,17 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   // ═══════ DOCUMENT COMPARISON ═══════
   { id: 'docdiff', label: 'DocDiff Pro', icon: 'file-diff', requiredPerm: 'docdiff:read', path: '/app/docdiff', module: null, group: 'Document Comparison', moduleSeparator: 'Document Comparison', roleScope: 'company', sortOrder: 780 },
 
+  // ═══════ PRODUCTION INCENTIVE PLAN ═══════
+  { id: 'pip-dashboard', label: 'Dashboard', icon: 'layout-dashboard', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/dashboard', module: 'production', group: 'PIP Dashboard', moduleSeparator: 'Production Incentive', roleScope: 'company', sortOrder: 850 },
+  { id: 'pip-slab-config', label: 'Slab Configuration', icon: 'layers', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/slab-config', module: 'production', group: 'PIP Masters', roleScope: 'company', sortOrder: 853 },
+  { id: 'pip-daily-entry', label: 'Daily Production Entry', icon: 'clipboard-edit', requiredPerm: 'production.pip:create', path: '/app/company/production/pip/daily-entry', module: 'production', group: 'PIP Transactions', roleScope: 'company', sortOrder: 854 },
+  { id: 'pip-calculator', label: 'Incentive Calculator', icon: 'calculator', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/calculator', module: 'production', group: 'PIP Transactions', roleScope: 'company', sortOrder: 855 },
+  { id: 'pip-daily-report', label: 'Daily Production Report', icon: 'file-bar-chart', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/daily-report', module: 'production', group: 'PIP Reports', roleScope: 'company', sortOrder: 856 },
+  { id: 'pip-summary-report', label: 'Incentive Summary Report', icon: 'file-spreadsheet', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/summary-report', module: 'production', group: 'PIP Reports', roleScope: 'company', sortOrder: 857 },
+  { id: 'pip-config', label: 'Incentive Configuration', icon: 'settings', requiredPerm: 'production.pip:configure', path: '/app/company/production/pip/config', module: 'production', group: 'PIP Configuration', roleScope: 'company', sortOrder: 858 },
+
   // ═══════ REPORTS ═══════
-  { id: 'rpt-audit', label: 'Audit Logs', icon: 'shield-check', requiredPerm: 'audit:read', path: '/app/reports/audit', module: null, group: 'Reports', roleScope: 'company', sortOrder: 800 },
+  { id: 'rpt-audit', label: 'Audit Logs', icon: 'shield-check', requiredPerm: 'audit:read', path: '/app/reports/audit', module: null, group: 'Reports', roleScope: 'company', sortOrder: 900 },
 ];
 
 /**

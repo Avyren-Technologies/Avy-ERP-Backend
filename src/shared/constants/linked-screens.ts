@@ -164,6 +164,22 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
     defaultPrefix: 'OFB-',
   },
 
+  // ── Masters ────────────────────────────────────────────────────────
+  {
+    value: 'Part Master',
+    label: 'Part Master',
+    module: 'Masters',
+    description: 'Auto-generated part numbers',
+    defaultPrefix: 'P-',
+  },
+  {
+    value: 'Machine Master',
+    label: 'Machine Master',
+    module: 'Masters',
+    description: 'Auto-generated machine asset codes',
+    defaultPrefix: 'MC-',
+  },
+
   // ── Production ────────────────────────────────────────────────────
   {
     value: 'Production Order',
@@ -179,6 +195,20 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
     module: 'Production',
     description: 'Reference numbers for QC inspection reports',
     defaultPrefix: 'QC-',
+  },
+  {
+    value: 'Slab Configuration',
+    label: 'Slab Configuration',
+    module: 'Production',
+    description: 'Slab config reference numbers',
+    defaultPrefix: 'SLB-',
+  },
+  {
+    value: 'Daily Production Entry',
+    label: 'Daily Production Entry',
+    module: 'Production',
+    description: 'Daily entry session reference',
+    defaultPrefix: 'DPE-',
   },
 
   // ── Inventory ─────────────────────────────────────────────────────

@@ -278,6 +278,22 @@ model Company {
   visitorManagementConfig   VisitorManagementConfig?
   deniedEntries             DeniedEntry[]
 
+  // Masters Relations
+  parts           Part[]
+  partCategories  PartCategory[]
+  productModels   ProductModel[]
+  unitsOfMeasure  UnitOfMeasure[]
+  machines        Machine[]
+  machineCategories MachineCategory[]
+  machineTypes    MachineType[]
+  machineZones    MachineZone[]
+
+  // Production Incentive Plan (PIP) Relations
+  pipSlabConfigs     PipSlabConfig[]
+  pipDailyEntries    PipDailyEntry[]
+  pipIncentiveConfig PipIncentiveConfig?
+  pipMonthlyReports  PipMonthlyReport[]
+
   @@map("companies")
 }
 

@@ -80,7 +80,7 @@ export function suppressByModules(permissions: string[], activeModuleIds: string
   // (callers should resolve modules from locations as fallback before reaching here)
   if (activeModuleIds.length === 0) return permissions;
 
-  const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform', 'billing', 'docdiff']);
+  const SYSTEM_PERMISSION_MODULES = new Set(['user', 'role', 'company', 'reports', 'audit', 'platform', 'billing', 'docdiff', 'production', 'masters']);
 
   // Build set of allowed permission modules from active subscriptions
   const allowedPermModules = new Set(SYSTEM_PERMISSION_MODULES);
@@ -129,6 +129,9 @@ export const PERMISSION_MODULES = {
   production: {
     label: 'Production',
     actions: ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'],
+    subModules: {
+      'production.pip': { label: 'Production Incentive Plan', group: 'Incentives', actions: ['read', 'create', 'update', 'delete', 'approve', 'export', 'configure'] },
+    },
   },
   inventory: {
     label: 'Inventory',
@@ -179,6 +182,10 @@ export const PERMISSION_MODULES = {
   masters: {
     label: 'Masters',
     actions: ['read', 'create', 'update', 'delete', 'export', 'configure'],
+    subModules: {
+      'masters.parts':    { label: 'Part Master',    group: 'Masters', actions: ['read', 'create', 'update', 'delete', 'export'] },
+      'masters.machines': { label: 'Machine Master', group: 'Masters', actions: ['read', 'create', 'update', 'delete', 'export'] },
+    },
   },
   user: {
     label: 'User Management',
@@ -361,15 +368,15 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   'General Manager': {
     description: 'Multi-module read access with dashboards',
     permissions: [
-      'hr:read', 'production:read', 'inventory:read', 'sales:read',
-      'finance:read', 'maintenance:read', 'reports:read', 'reports:export',
+      'hr:read', 'production:read', 'production.pip:approve', 'inventory:read', 'sales:read',
+      'finance:read', 'maintenance:read', 'masters:read', 'reports:read', 'reports:export',
     ],
   },
   'Plant Manager': {
     description: 'Plant-scoped operational modules',
     permissions: [
-      'production:*', 'maintenance:*', 'inventory:read', 'inventory:update',
-      'hr:read', 'reports:read', 'reports:export',
+      'production:*', 'production.pip:approve', 'maintenance:*', 'inventory:read', 'inventory:update',
+      'hr:read', 'masters:read', 'reports:read', 'reports:export',
     ],
   },
   'HR Personnel': {
@@ -382,7 +389,7 @@ export const REFERENCE_ROLE_PERMISSIONS: Record<string, { description: string; p
   },
   'Production Manager': {
     description: 'Production and Machine Maintenance',
-    permissions: ['production:*', 'maintenance:*', 'masters:read', 'reports:read', 'reports:export'],
+    permissions: ['production:*', 'production.pip:configure', 'maintenance:*', 'masters:read', 'masters.parts:configure', 'masters.machines:configure', 'reports:read', 'reports:export'],
   },
   'Maintenance Technician': {
     description: 'Machine Maintenance module',

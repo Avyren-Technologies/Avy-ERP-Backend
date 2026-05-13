@@ -191,6 +191,57 @@ export const REPORT_DEFINITIONS: Record<string, ReportDefinition> = {
     requiredPermission: 'hr:export',
   },
 
+  // ── Production Reports (R26–R32) ──
+  'pip-daily-production': {
+    key: 'pip-daily-production',
+    title: 'PIP Daily Production Report',
+    category: 'Production',
+    sheetNames: ['Summary', 'Operator Detail', 'Machine Utilization'],
+    requiredPermission: 'production.pip:export',
+  },
+  'pip-incentive-summary': {
+    key: 'pip-incentive-summary',
+    title: 'PIP Incentive Summary Report',
+    category: 'Production',
+    sheetNames: ['Monthly Summary', 'Operator-wise', 'Part-wise', 'Daily Trend'],
+    requiredPermission: 'production.pip:export',
+  },
+  'pip-operator-performance': {
+    key: 'pip-operator-performance',
+    title: 'PIP Operator Performance Report',
+    category: 'Production',
+    sheetNames: ['Summary', 'Detail', 'Achievement Trend'],
+    requiredPermission: 'production.pip:export',
+  },
+  'pip-machine-utilization': {
+    key: 'pip-machine-utilization',
+    title: 'PIP Machine Utilization Report',
+    category: 'Production',
+    sheetNames: ['Summary', 'Machine-wise', 'Shift Analysis'],
+    requiredPermission: 'production.pip:export',
+  },
+  'pip-shift-productivity': {
+    key: 'pip-shift-productivity',
+    title: 'PIP Shift Productivity Report',
+    category: 'Production',
+    sheetNames: ['Summary', 'Shift Comparison', 'Trend'],
+    requiredPermission: 'production.pip:export',
+  },
+  'pip-payroll-merge': {
+    key: 'pip-payroll-merge',
+    title: 'PIP Payroll Merge Report',
+    category: 'Production',
+    sheetNames: ['Merge Summary', 'Employee Detail'],
+    requiredPermission: 'production.pip:export',
+  },
+  'pip-exception': {
+    key: 'pip-exception',
+    title: 'PIP Exception Report',
+    category: 'Production',
+    sheetNames: ['Below Target', 'Missing Entries', 'Duplicates'],
+    requiredPermission: 'production.pip:export',
+  },
+
   // ── Compliance Report (R25) ──
   'compliance-summary': {
     key: 'compliance-summary',
@@ -229,4 +280,11 @@ export const REPORT_DESCRIPTIONS: Record<string, string> = {
   attrition: 'Attrition analysis — rates, reasons, department trends, and early exits',
   'fnf-settlement': 'Full & final settlement status — pending and completed with breakdowns',
   'compliance-summary': 'Overall compliance health — filing status, grievances, and document gaps',
+  'pip-daily-production': 'Daily production output and incentive summary by operator and machine for a selected date and shift',
+  'pip-incentive-summary': 'Monthly incentive consolidation with operator-wise, part-wise breakdowns and daily trend for payroll processing',
+  'pip-operator-performance': 'Operator performance analysis including achievement rates, eligibility trends, and incentive earnings over time',
+  'pip-machine-utilization': 'Machine-level production analysis showing utilization rates, output volumes, and shift-wise productivity',
+  'pip-shift-productivity': 'Shift comparison report analyzing production output, incentive distribution, and target achievement across shifts',
+  'pip-payroll-merge': 'Audit report of incentive amounts merged into payroll runs with employee-wise breakdown',
+  'pip-exception': 'Exception report highlighting below-target operators, missing production entries, and duplicate submissions',
 };

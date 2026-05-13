@@ -74,6 +74,16 @@ model Location {
   // Biometric Devices
   biometricDevices BiometricDevice[] @relation("LocationBiometricDevices")
 
+  // Masters Relations
+  parts        Part[]
+  machines     Machine[]
+  machineZones MachineZone[]
+
+  // Production Incentive Plan (PIP) Relations
+  pipSlabConfigs    PipSlabConfig[]
+  pipDailyEntries   PipDailyEntry[]
+  pipMonthlyReports PipMonthlyReport[]
+
   @@unique([companyId, code])
   @@map("locations")
 }

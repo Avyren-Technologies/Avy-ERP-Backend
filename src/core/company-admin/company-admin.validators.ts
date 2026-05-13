@@ -145,6 +145,7 @@ export const updateSystemControlsSchema = z.object({
   ncEditMode: z.boolean().optional(),
   loadUnload: z.boolean().optional(),
   cycleTime: z.boolean().optional(),
+  productionIncentivePlanEnabled: z.boolean().optional(),
 
   // Payroll Controls
   payrollLock: z.boolean().optional(),

@@ -388,6 +388,23 @@ export class AttendanceController {
     res.json(createSuccessResponse(schedules, 'Shift rotation schedules retrieved'));
   });
 
+  getRotationSchedule = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const schedule = await attendanceService.getRotationSchedule(companyId, req.params.id!);
+    res.json(createSuccessResponse(schedule, 'Shift rotation schedule retrieved'));
+  });
+
+  getRotationEmployeeOverview = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const search = req.query.search as string | undefined;
+    const result = await attendanceService.getRotationEmployeeOverview(companyId, search);
+    res.json(createSuccessResponse(result, 'Employee rotation overview retrieved'));
+  });
+
   createRotationSchedule = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');

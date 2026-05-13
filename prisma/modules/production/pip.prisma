@@ -1,0 +1,173 @@
+// ==========================================
+// PRODUCTION — Production Incentive Plan (PIP)
+// ==========================================
+// Models: PipSlabConfig, PipDailyEntry, PipIncentiveConfig, PipMonthlyReport
+// Enums: PipSlabStatus, PipEntryStatus, PipReportStatus
+
+model PipSlabConfig {
+  id             String        @id @default(cuid())
+  companyId      String
+  locationId     String?
+  machineId      String
+  partId         String
+  shiftTargetQty Int
+  slabTiers      Json
+  isActive       Boolean       @default(true)
+  status         PipSlabStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location Location? @relation(fields: [locationId], references: [id])
+  machine  Machine   @relation(fields: [machineId], references: [id])
+  part     Part      @relation(fields: [partId], references: [id])
+  entries  PipDailyEntry[]
+
+  @@unique([companyId, machineId, partId])
+  @@index([companyId, locationId])
+  @@map("pip_slab_configs")
+}
+
+model PipDailyEntry {
+  id           String   @id @default(cuid())
+  companyId    String
+  locationId   String?
+  entryDate    DateTime @db.Date
+  shiftId      String
+  operatorId   String
+  sessionRef   String?
+  machineId    String
+  partId       String
+  slabConfigId String?
+
+  qtyProduced    Int
+  shiftTargetQty Int
+  achievementPct Decimal  @db.Decimal(7, 2)
+  ncCount        Int      @default(0)
+  ncReason       String?
+  methodUsed     String?
+  methodNumber   Int?
+  cumulativeRatio Decimal? @db.Decimal(7, 4)
+
+  isEligible      Boolean @default(false)
+  incentiveAmount Decimal @default(0) @db.Decimal(15, 2)
+  totalIncentive  Decimal @default(0) @db.Decimal(15, 2)
+  calcBreakdown   Json?
+
+  status          PipEntryStatus @default(DRAFT)
+
+  // Approval fields
+  submittedBy     String?
+  submittedAt     DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  // Payroll merge
+  payrollRunId String?
+  mergedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location   Location?      @relation(fields: [locationId], references: [id])
+  operator   Employee       @relation(fields: [operatorId], references: [id])
+  slabConfig PipSlabConfig? @relation(fields: [slabConfigId], references: [id])
+
+  @@index([companyId, entryDate, shiftId])
+  @@index([companyId, operatorId, entryDate])
+  @@index([companyId, locationId, entryDate])
+  @@index([companyId, status])
+  @@map("pip_daily_entries")
+}
+
+model PipIncentiveConfig {
+  id             String  @id @default(cuid())
+  companyId      String  @unique
+  method1Enabled Boolean @default(false)
+  method1Name    String  @default("Excess Ratio Incentive")
+  method2Enabled Boolean @default(false)
+  method2Name    String  @default("Milestone Rounding Incentive")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("pip_incentive_configs")
+}
+
+model PipMonthlyReport {
+  id         String  @id @default(cuid())
+  companyId  String
+  locationId String?
+  month      Int
+  year       Int
+
+  status PipReportStatus @default(DRAFT)
+
+  // Aggregates
+  totalIncentive  Decimal   @db.Decimal(15, 2)
+  operatorCount   Int
+  workingDays     Int
+  avgPerDay       Decimal   @db.Decimal(15, 2)
+  maxSingleDay    Decimal   @db.Decimal(15, 2)
+  maxSingleDayDate DateTime? @db.Date
+
+  // JSON summaries
+  operatorSummary Json?
+  partSummary     Json?
+  dailyTrend      Json?
+
+  // Approval fields
+  submittedBy     String?
+  submittedAt     DateTime?
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  // Payroll merge
+  payrollRunId String?
+  mergedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location Location? @relation(fields: [locationId], references: [id])
+
+  @@unique([companyId, locationId, month, year])
+  @@index([companyId, status])
+  @@map("pip_monthly_reports")
+}
+
+enum PipSlabStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PipEntryStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  MERGED
+}
+
+enum PipReportStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  MERGED
+}

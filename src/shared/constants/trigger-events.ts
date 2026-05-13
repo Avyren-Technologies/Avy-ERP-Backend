@@ -188,6 +188,32 @@ export const TRIGGER_EVENTS: readonly TriggerEventOption[] = [
     description: 'Triggered when a training nomination is submitted',
   },
 
+  // ── Production ───────────────────────────────────────────────────────
+  {
+    value: 'PIP_DAILY_SUBMISSION',
+    label: 'PIP Daily Production Submission',
+    module: 'Production',
+    description: 'When a supervisor submits daily production entries for approval',
+  },
+  {
+    value: 'PIP_MONTHLY_INCENTIVE_APPROVAL',
+    label: 'PIP Monthly Incentive Approval',
+    module: 'Production',
+    description: 'When monthly incentive summary is submitted for payroll approval',
+  },
+  {
+    value: 'PIP_PAYROLL_MERGE',
+    label: 'PIP Payroll Merge Request',
+    module: 'Production',
+    description: 'When approved incentives are requested to merge into payroll run',
+  },
+  {
+    value: 'PIP_CONFIG_CHANGE',
+    label: 'PIP Configuration Change',
+    module: 'Production',
+    description: 'When incentive calculation method or slab configuration is changed',
+  },
+
   // ── Visitor Management ──────────────────────────────────────────────
   {
     value: 'VISITOR_WALK_IN_APPROVAL',

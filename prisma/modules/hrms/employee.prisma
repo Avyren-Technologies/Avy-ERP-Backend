@@ -177,6 +177,9 @@ model Employee {
   // Biometric Mappings
   biometricMappings         EmployeeBiometricMapping[]
 
+  // Production Incentive Plan (PIP) Relations
+  pipDailyEntries PipDailyEntry[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

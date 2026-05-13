@@ -57,6 +57,13 @@ const NAV_TO_SYSTEM_MODULE: Record<string, string> = {
   'hr-nominations': 'trainingEnabled',
   'ess-training': 'trainingEnabled',
   'hr-analytics-training': 'trainingEnabled',
+  'pip-dashboard': 'productionIncentivePlanEnabled',
+  'pip-slab-config': 'productionIncentivePlanEnabled',
+  'pip-daily-entry': 'productionIncentivePlanEnabled',
+  'pip-calculator': 'productionIncentivePlanEnabled',
+  'pip-daily-report': 'productionIncentivePlanEnabled',
+  'pip-summary-report': 'productionIncentivePlanEnabled',
+  'pip-config': 'productionIncentivePlanEnabled',
 };
 
 export class RbacService {

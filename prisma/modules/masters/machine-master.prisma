@@ -1,0 +1,135 @@
+// ==========================================
+// MASTERS — Machine Master
+// ==========================================
+// Models: Machine, MachineCategory, MachineType, MachineZone
+// Enums: MachinePriority, MachineStatus
+
+model Machine {
+  id           String  @id @default(cuid())
+  companyId    String
+  locationId   String?
+  assetCode    String
+  assetName    String
+  machineCode  String?
+  serialNumber String?
+  categoryId   String?
+  typeId       String?
+  zoneId       String?
+  departmentId String?
+  lineWorkCenter String?
+
+  priority    MachinePriority @default(MEDIUM)
+  capacity    String?
+  powerRating String?
+  make        String?
+  model       String?
+  yearOfManufacture Int?
+
+  // Maintenance hooks
+  lastMaintenanceDate  DateTime?
+  nextMaintenanceDate  DateTime?
+  maintenanceFrequency String?
+
+  // Calibration hooks
+  lastCalibrationDate  DateTime?
+  nextCalibrationDate  DateTime?
+  calibrationFrequency String?
+
+  // Vendor & AMC
+  vendorId      String?
+  warrantyExpiry DateTime?
+  amcStartDate  DateTime?
+  amcEndDate    DateTime?
+  amcVendorId   String?
+
+  status     MachineStatus @default(RUNNING)
+  idleReason String?
+  isActive   Boolean       @default(true)
+
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location    Location?        @relation(fields: [locationId], references: [id])
+  category    MachineCategory? @relation(fields: [categoryId], references: [id])
+  type        MachineType?     @relation(fields: [typeId], references: [id])
+  zone        MachineZone?     @relation(fields: [zoneId], references: [id])
+  slabConfigs PipSlabConfig[]
+
+  @@unique([companyId, assetCode])
+  @@index([companyId, status])
+  @@index([companyId, categoryId])
+  @@index([companyId, locationId])
+  @@index([companyId, zoneId])
+  @@map("machines")
+}
+
+model MachineCategory {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  machines Machine[]
+
+  @@unique([companyId, name])
+  @@map("machine_categories")
+}
+
+model MachineType {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  machines Machine[]
+
+  @@unique([companyId, name])
+  @@map("machine_types")
+}
+
+model MachineZone {
+  id         String  @id @default(cuid())
+  companyId  String
+  name       String
+  code       String?
+  locationId String?
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location Location? @relation(fields: [locationId], references: [id])
+  machines Machine[]
+
+  @@unique([companyId, name])
+  @@map("machine_zones")
+}
+
+enum MachinePriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum MachineStatus {
+  RUNNING
+  IDLE
+  MAINTENANCE
+  DECOMMISSIONED
+}
