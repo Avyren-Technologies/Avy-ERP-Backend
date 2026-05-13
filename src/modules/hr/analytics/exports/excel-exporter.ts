@@ -58,6 +58,37 @@ export const AMBER_FILL: ExcelJS.Fill = {
   fgColor: { argb: 'FFFEF3C7' },
 };
 
+export const PURPLE_FILL: ExcelJS.Fill = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFEDE9FE' },
+};
+
+export const BLUE_FILL: ExcelJS.Fill = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFDBEAFE' },
+};
+
+export const ORANGE_FILL: ExcelJS.Fill = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFFFEDD5' },
+};
+
+export const LIGHT_GREEN_FILL: ExcelJS.Fill = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFECFDF5' },
+};
+
+export const SEVERITY_FONTS: Record<string, Partial<ExcelJS.Font>> = {
+  CRITICAL: { color: { argb: 'FF991B1B' }, bold: true, name: 'Calibri', size: 10 },
+  HIGH: { color: { argb: 'FFDC2626' }, bold: true, name: 'Calibri', size: 10 },
+  MEDIUM: { color: { argb: 'FFD97706' }, bold: false, name: 'Calibri', size: 10 },
+  LOW: { color: { argb: 'FF6B7280' }, bold: false, name: 'Calibri', size: 10 },
+};
+
 export const CURRENCY_FORMAT = '₹#,##0.00';
 export const PERCENT_FORMAT = '0.0%';
 export const DATE_FORMAT = 'DD-MMM-YYYY';
@@ -68,7 +99,7 @@ export interface SheetColumn {
   key: string;
   width?: number;
   format?: 'currency' | 'percentage' | 'date' | 'number' | 'text';
-  conditionalFormat?: 'red-if-negative' | 'green-if-positive' | 'status';
+  conditionalFormat?: 'red-if-negative' | 'green-if-positive' | 'status' | 'attendance-status' | 'severity';
 }
 
 export interface ReportSheet {
@@ -77,6 +108,7 @@ export interface ReportSheet {
   rows: Record<string, unknown>[];
   totalsRow?: Record<string, unknown>;
   freezeRow?: number;
+  legendText?: string;
 }
 
 export interface ReportConfig {
@@ -145,6 +177,43 @@ function applyConditionalFormat(
       }
       break;
     }
+    case 'attendance-status': {
+      const code = String(value ?? '').toUpperCase().trim();
+      const STATUS_FILL_MAP: Record<string, ExcelJS.Fill> = {
+        P: GREEN_FILL, PRESENT: GREEN_FILL,
+        A: RED_FILL, ABSENT: RED_FILL,
+        LOP: RED_FILL,
+        HD: AMBER_FILL, HALF_DAY: AMBER_FILL,
+        L: ORANGE_FILL, LATE: ORANGE_FILL,
+        LV: AMBER_FILL, ON_LEAVE: AMBER_FILL,
+        CL: AMBER_FILL, SL: AMBER_FILL, PL: AMBER_FILL, CO: AMBER_FILL,
+        H: PURPLE_FILL, HOLIDAY: PURPLE_FILL,
+        W: BLUE_FILL, WEEK_OFF: BLUE_FILL, WO: BLUE_FILL,
+        EE: ORANGE_FILL, EARLY_EXIT: ORANGE_FILL,
+        MP: ORANGE_FILL, INCOMPLETE: ORANGE_FILL,
+        R: LIGHT_GREEN_FILL, REGULARIZED: LIGHT_GREEN_FILL,
+      };
+      const fill = STATUS_FILL_MAP[code];
+      if (fill) {
+        cell.fill = fill;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      }
+      break;
+    }
+    case 'severity': {
+      const sev = String(value ?? '').toUpperCase();
+      const font = SEVERITY_FONTS[sev];
+      if (font) cell.font = font;
+      const SEV_FILL: Record<string, ExcelJS.Fill> = {
+        CRITICAL: RED_FILL,
+        HIGH: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } },
+        MEDIUM: AMBER_FILL,
+        LOW: ALT_ROW_FILL,
+      };
+      const sevFill = SEV_FILL[sev];
+      if (sevFill) cell.fill = sevFill;
+      break;
+    }
   }
 }
 
@@ -194,8 +263,17 @@ export async function generateExcelReport(config: ReportConfig): Promise<Buffer>
     periodCell.font = { name: 'Calibri', size: 9, color: { argb: 'FF9CA3AF' } };
     periodCell.alignment = { horizontal: 'left', vertical: 'middle' };
 
-    // Row 4: Empty spacer
-    ws.getRow(4).height = 8;
+    // Row 4: Legend (if provided) or empty spacer
+    if (sheet.legendText) {
+      ws.mergeCells(`A4:${lastColLetter}4`);
+      const legendCell = ws.getCell('A4');
+      legendCell.value = sheet.legendText;
+      legendCell.font = { name: 'Calibri', size: 8, color: { argb: 'FF6B7280' }, italic: true };
+      legendCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+      ws.getRow(4).height = 14;
+    } else {
+      ws.getRow(4).height = 8;
+    }
 
     // Row 5: Column headers
     const headerRow = ws.getRow(5);
