@@ -69,8 +69,8 @@ export function buildExecutiveSummary(dataset: ReportDataset): ReportSheet {
   const lopCount     = sc['LOP']      ?? 0;
   const missingCount = sc['INCOMPLETE'] ?? 0;
 
-  const lateCount      = dataset.records.filter(r => r.isLate).length;
-  const earlyExitCount = dataset.records.filter(r => r.isEarlyExit).length;
+  const lateCount      = dataset.records.filter(r => r.isLate && r.shiftSequence <= 1).length;
+  const earlyExitCount = dataset.records.filter(r => r.isEarlyExit && r.shiftSequence <= 1).length;
 
   rows.push(kv('Present Days',     presentCount));
   rows.push(kv('Absent Days',      absentCount));
@@ -87,8 +87,8 @@ export function buildExecutiveSummary(dataset: ReportDataset): ReportSheet {
   rows.push(blankRow());
   rows.push(sectionHeader('HOURS KPIs'));
 
-  const totalWorked = dataset.records.reduce((sum, r) => sum + r.workedHours, 0);
-  const totalOT     = dataset.records.reduce((sum, r) => sum + r.overtimeHours, 0);
+  const totalWorked = dataset.records.filter(r => r.shiftSequence <= 1).reduce((sum, r) => sum + r.workedHours, 0);
+  const totalOT     = dataset.records.filter(r => r.shiftSequence <= 1).reduce((sum, r) => sum + r.overtimeHours, 0);
   const avgWorked   = presentCount > 0 ? Math.round((totalWorked / presentCount) * 10) / 10 : 0;
 
   rows.push(kv('Total Worked Hours',     totalWorked.toFixed(2)));
@@ -99,12 +99,13 @@ export function buildExecutiveSummary(dataset: ReportDataset): ReportSheet {
   rows.push(blankRow());
   rows.push(sectionHeader('RATES'));
 
-  // Total working days = all non-holiday, non-weekoff records
+  // Total working days = primary records (exclude sub-sessions, holidays, weekoffs)
   const totalWorkingDayRecords = dataset.records.filter(
-    r => r.status !== 'HOLIDAY' && r.status !== 'WEEK_OFF',
+    r => r.shiftSequence <= 1 && r.status !== 'HOLIDAY' && r.status !== 'WEEK_OFF',
   ).length;
 
-  const attendancePct  = pct(presentCount, totalWorkingDayRecords);
+  const effectivePresent = presentCount + halfCount * 0.5;
+  const attendancePct  = pct(effectivePresent, totalWorkingDayRecords);
   const absenteeismPct = pct(absentCount, totalWorkingDayRecords);
   const punctualPct    = presentCount > 0 ? pct(presentCount - lateCount, presentCount) : '0.0%';
 

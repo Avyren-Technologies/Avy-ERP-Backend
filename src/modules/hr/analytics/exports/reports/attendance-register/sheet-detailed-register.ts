@@ -1,5 +1,7 @@
-import { ReportSheet, SheetColumn } from '../../excel-exporter';
-import { ReportDataset, FlatRecord, STATUS_CODES, SOURCE_LABELS, GEO_LABELS, STATUS_LEGEND } from './types';
+import { DateTime } from 'luxon';
+import type { ReportSheet, SheetColumn } from '../../excel-exporter';
+import type { ReportDataset, FlatRecord } from './types';
+import { STATUS_CODES, SOURCE_LABELS, GEO_LABELS, STATUS_LEGEND } from './types';
 
 const columns: SheetColumn[] = [
   // Employee Info
@@ -41,14 +43,14 @@ const columns: SheetColumn[] = [
   { header: 'Remarks', key: 'remarks', width: 20 },
 ];
 
-function buildRow(rec: FlatRecord): Record<string, unknown> {
+function buildRow(rec: FlatRecord, tz: string): Record<string, unknown> {
   const formatTime = (d: Date | null) => {
     if (!d) return '';
-    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return DateTime.fromJSDate(d).setZone(tz).toFormat('HH:mm');
   };
 
   const formatDate = (d: Date) => {
-    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    return DateTime.fromJSDate(d).setZone(tz).toFormat('dd-MMM');
   };
 
   // Get leave type from halves
@@ -78,7 +80,7 @@ function buildRow(rec: FlatRecord): Record<string, unknown> {
     location: rec.shiftSequence > 1 ? '' : rec.location,
     reportingManager: rec.shiftSequence > 1 ? '' : rec.reportingManager,
     employeeType: rec.shiftSequence > 1 ? '' : rec.employeeType,
-    doj: rec.shiftSequence > 1 ? '' : (rec.joiningDate ? rec.joiningDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''),
+    doj: rec.shiftSequence > 1 ? '' : (rec.joiningDate ? DateTime.fromJSDate(rec.joiningDate).setZone(tz).toFormat('dd-MMM-yyyy') : ''),
     date: formatDate(rec.date),
     day: rec.dayOfWeek,
     shiftName: rec.shiftName,
@@ -105,10 +107,11 @@ function buildRow(rec: FlatRecord): Record<string, unknown> {
 }
 
 export function buildDetailedRegister(dataset: ReportDataset): ReportSheet {
+  const tz = dataset.companyTimezone;
   return {
     name: 'Detailed Register',
     columns,
-    rows: dataset.records.map(buildRow),
+    rows: dataset.records.map(r => buildRow(r, tz)),
     freezeRow: 6,
     legendText: STATUS_LEGEND,
   };

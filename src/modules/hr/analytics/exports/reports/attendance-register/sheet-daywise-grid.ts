@@ -230,9 +230,14 @@ export function buildDayWiseGrid(dataset: ReportDataset): ReportSheet[] {
           lateCount++;
           presentCount++; // Late is still present
           break;
+        case 'EARLY_EXIT':
+          presentCount++;
+          break;
         case 'REGULARIZED':
           presentCount++;
           break;
+        case 'INCOMPLETE':
+          break; // Counted via status code display only
         case 'LOP':
           lopCount++;
           break;

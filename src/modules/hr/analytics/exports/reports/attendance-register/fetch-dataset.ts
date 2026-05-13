@@ -180,7 +180,6 @@ function buildEmployeeSummaries(
           summary.presentDays++;
           break;
         case 'EARLY_EXIT':
-          summary.earlyExitDays++;
           summary.presentDays++;
           break;
         case 'HOLIDAY':
@@ -196,7 +195,6 @@ function buildEmployeeSummaries(
           summary.incompleteDays++;
           break;
         case 'REGULARIZED':
-          summary.regularizedDays++;
           summary.presentDays++;
           break;
       }
@@ -268,6 +266,8 @@ function buildDeptBreakdown(records: FlatRecord[]): DeptBreakdown[] {
       leave: number;
       late: number;
       halfDay: number;
+      holiday: number;
+      weekOff: number;
       otHours: number;
       workedHours: number;
       total: number;
@@ -284,6 +284,8 @@ function buildDeptBreakdown(records: FlatRecord[]): DeptBreakdown[] {
       leave: 0,
       late: 0,
       halfDay: 0,
+      holiday: 0,
+      weekOff: 0,
       otHours: 0,
       workedHours: 0,
       total: 0,
@@ -313,14 +315,22 @@ function buildDeptBreakdown(records: FlatRecord[]): DeptBreakdown[] {
       case 'HALF_DAY':
         entry.halfDay++;
         break;
+      case 'HOLIDAY':
+        entry.holiday++;
+        break;
+      case 'WEEK_OFF':
+        entry.weekOff++;
+        break;
     }
     deptMap.set(dept, entry);
   }
 
   const result: DeptBreakdown[] = [];
   for (const [department, entry] of deptMap) {
+    // Exclude holidays and weekoffs from denominator for attendance %
+    const workingDays = entry.total - (entry.holiday ?? 0) - (entry.weekOff ?? 0);
     const attendancePct =
-      entry.total > 0 ? Math.round((entry.present / entry.total) * 100 * 10) / 10 : 0;
+      workingDays > 0 ? Math.round((entry.present / workingDays) * 100 * 10) / 10 : 0;
     result.push({
       department,
       employees: entry.employeeSet.size,

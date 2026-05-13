@@ -93,6 +93,7 @@ function buildMusterSheet(
       switch (rec.status) {
         case 'PRESENT':
         case 'LATE':
+        case 'EARLY_EXIT':
         case 'REGULARIZED':
           presentCount++;
           break;
@@ -131,9 +132,12 @@ function buildMusterSheet(
     row.otHours = Math.round(otHours * 10) / 10;
     row.weekOffCount = weekOffCount;
     row.holidayCount = holidayCount;
+    // Use paid leave from employee summary (not all leave is paid)
+    const empSummary = dataset.employeeSummaries.get(empId);
+    const paidLeave = empSummary?.paidLeaveDays ?? leaveCount; // fallback to all leave if no summary
     row.paidDays =
       Math.round(
-        (presentCount + halfDayCount * 0.5 + leaveCount + holidayCount + weekOffCount) * 10,
+        (presentCount + halfDayCount * 0.5 + paidLeave + holidayCount + weekOffCount) * 10,
       ) / 10;
     row.holidayWorked = holidayWorked;
     row.weekOffWorked = weekOffWorked;
