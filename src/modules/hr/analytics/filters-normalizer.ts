@@ -55,6 +55,9 @@ export function normalizeFilters(
   if (raw.locationId) result.locationId = raw.locationId;
   if (raw.gradeId) result.gradeId = raw.gradeId;
   if (raw.employeeTypeId) result.employeeTypeId = raw.employeeTypeId;
+  if (raw.shiftId) result.shiftId = raw.shiftId;
+  if (raw.designationId) result.designationId = raw.designationId;
+  if (raw.includeInactive) result.includeInactive = raw.includeInactive;
   if (raw.month != null) result.month = raw.month;
   if (raw.year != null) result.year = raw.year;
 

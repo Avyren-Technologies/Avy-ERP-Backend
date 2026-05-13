@@ -30,6 +30,9 @@ export const exportFiltersSchema = z.object({
   employeeTypeId: z.string().optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
   year: z.coerce.number().int().min(2020).max(2100).optional(),
+  shiftId: z.string().optional(),
+  designationId: z.string().optional(),
+  includeInactive: z.coerce.boolean().optional().default(false),
 });
 
 export const alertActionSchema = z.object({

@@ -6,6 +6,9 @@ export interface RawDashboardFilters {
   locationId?: string | undefined;
   gradeId?: string | undefined;
   employeeTypeId?: string | undefined;
+  shiftId?: string | undefined;
+  designationId?: string | undefined;
+  includeInactive?: boolean | undefined;
   month?: number | undefined;
   year?: number | undefined;
   page?: number | undefined;
@@ -22,6 +25,9 @@ export interface DashboardFilters {
   locationId?: string;
   gradeId?: string;
   employeeTypeId?: string;
+  shiftId?: string;
+  designationId?: string;
+  includeInactive?: boolean;
   month?: number;
   year?: number;
   page: number;
