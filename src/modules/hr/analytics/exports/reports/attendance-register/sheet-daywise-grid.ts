@@ -207,8 +207,8 @@ export function buildDayWiseGrid(dataset: ReportDataset): ReportSheet[] {
         continue;
       }
 
-      // Use the first (primary) record for the day
-      const record = dayRecords[0];
+      // Use the first (primary) record for the day (length already checked above)
+      const record = dayRecords[0]!;
       const code = getDisplayCode(record);
       row[dateStr] = code;
 
