@@ -568,7 +568,12 @@ export class PipService {
 
     const where: any = { companyId };
 
-    if (entryDate) where.entryDate = new Date(entryDate + 'T00:00:00.000Z');
+    if (entryDate) {
+      // Use date range to handle @db.Date timezone edge cases
+      const start = new Date(entryDate + 'T00:00:00.000Z');
+      const end = new Date(entryDate + 'T23:59:59.999Z');
+      where.entryDate = { gte: start, lte: end };
+    }
     if (shiftId) where.shiftId = shiftId;
     if (operatorId) where.operatorId = operatorId;
     if (machineId) where.machineId = machineId;
@@ -604,7 +609,11 @@ export class PipService {
   async getDailyEntrySummary(companyId: string, filters: DailyEntryListFilters) {
     const where: any = { companyId };
 
-    if (filters.entryDate) where.entryDate = new Date(filters.entryDate + 'T00:00:00.000Z');
+    if (filters.entryDate) {
+      const start = new Date(filters.entryDate + 'T00:00:00.000Z');
+      const end = new Date(filters.entryDate + 'T23:59:59.999Z');
+      where.entryDate = { gte: start, lte: end };
+    }
     if (filters.shiftId) where.shiftId = filters.shiftId;
     if (filters.operatorId) where.operatorId = filters.operatorId;
     if (filters.locationId) where.locationId = filters.locationId;
