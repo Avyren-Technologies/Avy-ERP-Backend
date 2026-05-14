@@ -3,6 +3,9 @@ import { pipService } from './pip.service';
 import { createSuccessResponse, createPaginatedResponse, getPaginationParams } from '../../../shared/utils';
 import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError } from '../../../shared/errors';
+import { platformPrisma } from '../../../config/database';
+import { generateExcelReport } from '../../hr/analytics/exports/excel-exporter';
+import { exportToPDF } from '../../hr/analytics/exports/pdf-exporter';
 import {
   createSlabConfigSchema,
   bulkCreateSlabConfigSchema,
@@ -329,21 +332,25 @@ export class PipController {
     res.json(createSuccessResponse(result, 'Payroll merge reversed'));
   });
 
-  // ── Export (returns summary data — frontend renders PDF/Excel) ────
+  // ── Export (generates actual PDF/Excel binary files) ────
 
   exportDailyReport = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const format = (req.query.format as string) || 'excel';
+    if (!['pdf', 'excel'].includes(format)) {
+      throw ApiError.badRequest('Format must be "pdf" or "excel"');
+    }
 
     const parsed = listDailyEntriesSchema.safeParse(req.query);
     if (!parsed.success) {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const { page, limit } = getPaginationParams(req.query);
     const summary = await pipService.getDailyEntrySummary(companyId, {
-      page,
-      limit,
+      page: 1,
+      limit: 10000,
       entryDate: parsed.data.entryDate,
       shiftId: parsed.data.shiftId,
       operatorId: parsed.data.operatorId,
@@ -351,18 +358,136 @@ export class PipController {
       status: parsed.data.status,
     });
 
-    res.json(createSuccessResponse(summary, 'Daily report export data'));
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      select: { name: true },
+    });
+    const companyName = company?.name ?? 'Company';
+    const entryDate = parsed.data.entryDate ?? new Date().toISOString().slice(0, 10);
+
+    // Flatten operator summaries into export rows
+    const rows = summary.operators.map((op) => ({
+      operatorName: op.operatorName,
+      employeeId: op.employeeId,
+      entryCount: op.entryCount,
+      totalQtyProduced: op.totalQtyProduced,
+      totalIncentive: op.totalIncentive,
+    }));
+
+    const columns = [
+      { header: 'Operator', key: 'operatorName', width: 25, format: 'text' as const },
+      { header: 'Employee ID', key: 'employeeId', width: 18, format: 'text' as const },
+      { header: 'Entries', key: 'entryCount', width: 12, format: 'number' as const },
+      { header: 'Total Qty Produced', key: 'totalQtyProduced', width: 20, format: 'number' as const },
+      { header: 'Incentive (₹)', key: 'totalIncentive', width: 18, format: 'currency' as const },
+    ];
+
+    const totalsRow: Record<string, unknown> = {
+      operatorName: 'TOTAL',
+      employeeId: '',
+      entryCount: summary.totalEntries,
+      totalQtyProduced: summary.grandTotalQty,
+      totalIncentive: summary.grandTotalIncentive,
+    };
+
+    if (format === 'excel') {
+      const buffer = await generateExcelReport({
+        companyName,
+        reportTitle: 'Daily Production Report (PIP)',
+        period: entryDate,
+        sheets: [{
+          name: 'Daily Report',
+          columns,
+          rows,
+          totalsRow,
+          freezeRow: 6,
+        }],
+      });
+
+      const filename = `daily-report-${entryDate}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } else {
+      const buffer = await exportToPDF(
+        `${companyName} — Daily Production Report (PIP) — ${entryDate}`,
+        columns,
+        rows,
+      );
+
+      const filename = `daily-report-${entryDate}.pdf`;
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename.replace('.pdf', '.csv')}"`);
+      res.send(buffer);
+    }
   });
 
   exportMonthlyReport = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) throw ApiError.badRequest('Company ID is required');
 
+    const format = (req.query.format as string) || 'excel';
+    if (!['pdf', 'excel'].includes(format)) {
+      throw ApiError.badRequest('Format must be "pdf" or "excel"');
+    }
+
     const year = parseInt(req.query.year as string, 10);
     if (!year) throw ApiError.badRequest('Year is required');
 
     const reports = await pipService.listMonthlyReports(companyId, { year, page: 1, limit: 12 });
-    res.json(createSuccessResponse(reports, 'Monthly report export data'));
+
+    const company = await platformPrisma.company.findUnique({
+      where: { id: companyId },
+      select: { name: true },
+    });
+    const companyName = company?.name ?? 'Company';
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const rows = (reports.reports ?? []).map((r: any) => ({
+      month: monthNames[r.month - 1] ?? `Month ${r.month}`,
+      operatorCount: r.operatorCount ?? 0,
+      totalQtyProduced: r.totalQtyProduced ?? 0,
+      totalIncentive: Number(r.totalIncentive ?? 0),
+      status: r.status ?? 'DRAFT',
+    }));
+
+    const columns = [
+      { header: 'Month', key: 'month', width: 15, format: 'text' as const },
+      { header: 'Operators', key: 'operatorCount', width: 14, format: 'number' as const },
+      { header: 'Total Qty', key: 'totalQtyProduced', width: 16, format: 'number' as const },
+      { header: 'Total Incentive (₹)', key: 'totalIncentive', width: 20, format: 'currency' as const },
+      { header: 'Status', key: 'status', width: 15, format: 'text' as const, conditionalFormat: 'status' as const },
+    ];
+
+    if (format === 'excel') {
+      const buffer = await generateExcelReport({
+        companyName,
+        reportTitle: 'Monthly Production Report (PIP)',
+        period: `Year ${year}`,
+        sheets: [{
+          name: 'Monthly Report',
+          columns,
+          rows,
+          freezeRow: 6,
+        }],
+      });
+
+      const filename = `monthly-report-${year}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } else {
+      const buffer = await exportToPDF(
+        `${companyName} — Monthly Production Report (PIP) — Year ${year}`,
+        columns,
+        rows,
+      );
+
+      const filename = `monthly-report-${year}.csv`;
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+    }
   });
 }
 
