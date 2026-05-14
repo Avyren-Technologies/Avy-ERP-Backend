@@ -710,23 +710,46 @@ export class PipService {
     const incentiveConfig = await this.getIncentiveConfig(companyId);
 
     // Use requested method or active method
-    let methodNumber: 1 | 2 = data.methodNumber ?? (
+    const methodNumber: 1 | 2 = data.methodNumber ?? (
       incentiveConfig.method1Enabled ? 1 : incentiveConfig.method2Enabled ? 2 : 1
     );
     const methodName = methodNumber === 1
       ? incentiveConfig.method1Name
       : incentiveConfig.method2Name;
 
-    const partEntries: PartEntry[] = data.entries.map((e) => ({
-      partId: e.partId,
-      partNumber: e.partNumber ?? '',
-      partName: e.partName ?? '',
-      machineId: e.machineId ?? '',
-      machineCode: e.machineCode ?? '',
-      qtyProduced: e.qtyProduced,
-      shiftTargetQty: e.shiftTargetQty,
-      slabTiers: e.slabTiers as PartEntry['slabTiers'],
-    }));
+    // Look up slab configs for each part (use first matching config per part)
+    const partIds = data.parts.map((p) => p.partId);
+    const slabConfigs = await platformPrisma.pipSlabConfig.findMany({
+      where: { companyId, partId: { in: partIds }, isActive: true },
+      include: {
+        machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
+        part: { select: { id: true, partNumber: true, name: true } },
+      },
+    });
+
+    // Build a map: partId → first matching slab config
+    const slabMap = new Map<string, typeof slabConfigs[0]>();
+    for (const sc of slabConfigs) {
+      if (!slabMap.has(sc.partId)) slabMap.set(sc.partId, sc);
+    }
+
+    const partEntries: PartEntry[] = [];
+    for (const p of data.parts) {
+      const sc = slabMap.get(p.partId);
+      if (!sc) {
+        throw ApiError.badRequest(`No active slab configuration found for part ${p.partId}`);
+      }
+      partEntries.push({
+        partId: p.partId,
+        partNumber: sc.part?.partNumber ?? '',
+        partName: sc.part?.name ?? '',
+        machineId: sc.machineId,
+        machineCode: sc.machine?.machineCode ?? '',
+        qtyProduced: p.qtyProduced,
+        shiftTargetQty: sc.shiftTargetQty,
+        slabTiers: sc.slabTiers as unknown as PartEntry['slabTiers'],
+      });
+    }
 
     return calculateIncentive(partEntries, methodNumber, methodName);
   }

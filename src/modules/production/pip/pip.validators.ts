@@ -66,18 +66,13 @@ export type SaveDailyEntriesInput = z.infer<typeof saveDailyEntriesSchema>;
 // ── Calculator Simulation ───────────────────────────────────────────
 
 export const simulateIncentiveSchema = z.object({
-  entries: z.array(
+  // Accept simple format (partId + qtyProduced) — service resolves slab config
+  parts: z.array(
     z.object({
       partId: z.string().min(1, 'Part ID is required'),
-      partNumber: z.string().optional(),
-      partName: z.string().optional(),
-      machineId: z.string().optional(),
-      machineCode: z.string().optional(),
       qtyProduced: z.number().nonnegative('Qty produced must be non-negative'),
-      shiftTargetQty: z.number().positive('Shift target qty must be positive'),
-      slabTiers: z.array(slabTierSchema).min(1, 'At least one slab tier is required'),
     }),
-  ).min(1, 'At least one entry is required'),
+  ).min(1, 'At least one part is required'),
   methodNumber: z.union([z.literal(1), z.literal(2)]).optional(),
 });
 
