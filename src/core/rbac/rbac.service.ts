@@ -41,6 +41,13 @@ const NAV_TO_ESS_CONFIG: Record<string, string> = {
   'mss-approvals': 'mssApproveLeave',
 };
 
+// ── Nav Item → SystemControls inverse gate ──────────────────────────
+// When the module is ENABLED in SystemControls, hide these legacy nav items
+// (replaced by the new module's dedicated screens).
+const NAV_HIDE_WHEN_ENABLED: Record<string, string> = {
+  'hr-incentives': 'productionIncentivePlanEnabled',
+};
+
 // ── Nav Item → SystemControls module field ──────────────────────────
 // When the module is disabled in SystemControls, hide ALL related nav items.
 const NAV_TO_SYSTEM_MODULE: Record<string, string> = {
@@ -516,6 +523,13 @@ export class RbacService {
       const sysField = NAV_TO_SYSTEM_MODULE[item.id];
       if (sysField && systemControls[sysField] === false) {
         logger.debug('nav_item_filtered_by_system_controls', { id: item.id, sysField });
+        return false;
+      }
+
+      // Inverse gate: hide legacy screens when their replacement module is enabled
+      const hideField = NAV_HIDE_WHEN_ENABLED[item.id];
+      if (hideField && systemControls[hideField] === true) {
+        logger.debug('nav_item_hidden_by_replacement_module', { id: item.id, hideField });
         return false;
       }
 
