@@ -5,6 +5,12 @@ import { partController } from './part.controller';
 const router = Router();
 const controller = partController;
 
+// ── Component Types (must be before /:id to avoid route conflicts) ──
+router.get('/component-types/list', requirePermissions(['masters.parts:read']), controller.listPartComponentTypes);
+router.post('/component-types', requirePermissions(['masters.parts:create']), controller.createPartComponentType);
+router.patch('/component-types/:id', requirePermissions(['masters.parts:update']), controller.updatePartComponentType);
+router.delete('/component-types/:id', requirePermissions(['masters.parts:delete']), controller.deletePartComponentType);
+
 // ── Part Categories (must be before /:id to avoid route conflicts) ──
 router.get('/categories/list', requirePermissions(['masters.parts:read']), controller.listCategories);
 router.post('/categories', requirePermissions(['masters.parts:create']), controller.createCategory);

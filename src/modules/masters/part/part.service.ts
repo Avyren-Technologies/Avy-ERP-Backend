@@ -13,6 +13,8 @@ import {
   UpdateProductModelInput,
   CreateUomInput,
   UpdateUomInput,
+  CreatePartComponentTypeInput,
+  UpdatePartComponentTypeInput,
 } from './part.validators';
 
 export class PartService {
@@ -44,6 +46,7 @@ export class PartService {
         include: {
           category: { select: { id: true, name: true, code: true } },
           productModel: { select: { id: true, name: true, code: true } },
+          componentType: { select: { id: true, name: true, code: true } },
           uom: { select: { id: true, name: true, abbreviation: true } },
           location: { select: { id: true, name: true } },
         },
@@ -108,6 +111,7 @@ export class PartService {
     if (data.categoryId !== undefined) createData.categoryId = data.categoryId;
     if (data.productModelId !== undefined) createData.productModelId = data.productModelId;
     if (data.uomId !== undefined) createData.uomId = data.uomId;
+    if (data.componentTypeId !== undefined) createData.componentTypeId = data.componentTypeId;
     if (data.partType !== undefined) createData.partType = data.partType;
     if (data.revision !== undefined) createData.revision = data.revision;
     if (data.drawingReference !== undefined) createData.drawingReference = data.drawingReference;
@@ -169,6 +173,7 @@ export class PartService {
     if ('categoryId' in data) updateData.categoryId = n(data.categoryId);
     if ('productModelId' in data) updateData.productModelId = n(data.productModelId);
     if ('uomId' in data) updateData.uomId = n(data.uomId);
+    if ('componentTypeId' in data) updateData.componentTypeId = n(data.componentTypeId);
     if (data.partType !== undefined) updateData.partType = data.partType;
     if ('revision' in data) updateData.revision = n(data.revision);
     if ('drawingReference' in data) updateData.drawingReference = n(data.drawingReference);
@@ -257,10 +262,18 @@ export class PartService {
       throw ApiError.conflict(`Category "${data.name}" already exists`);
     }
 
-    const createData: Record<string, any> = { companyId, name: data.name };
-    if (data.code !== undefined) createData.code = data.code;
+    // Auto-generate code: CAT-001, CAT-002, ...
+    const count = await platformPrisma.partCategory.count({ where: { companyId } });
+    let seq = count + 1;
+    let code = `CAT-${String(seq).padStart(3, '0')}`;
+    while (await platformPrisma.partCategory.findFirst({ where: { companyId, code } })) {
+      seq++;
+      code = `CAT-${String(seq).padStart(3, '0')}`;
+    }
 
-    return platformPrisma.partCategory.create({ data: createData as any });
+    return platformPrisma.partCategory.create({
+      data: { companyId, name: data.name, code },
+    });
   }
 
   async updateCategory(companyId: string, id: string, data: UpdatePartCategoryInput) {
@@ -325,10 +338,18 @@ export class PartService {
       throw ApiError.conflict(`Product model "${data.name}" already exists`);
     }
 
-    const createData: Record<string, any> = { companyId, name: data.name };
-    if (data.code !== undefined) createData.code = data.code;
+    // Auto-generate code: MDL-001, MDL-002, ...
+    const count = await platformPrisma.productModel.count({ where: { companyId } });
+    let seq = count + 1;
+    let code = `MDL-${String(seq).padStart(3, '0')}`;
+    while (await platformPrisma.productModel.findFirst({ where: { companyId, code } })) {
+      seq++;
+      code = `MDL-${String(seq).padStart(3, '0')}`;
+    }
 
-    return platformPrisma.productModel.create({ data: createData as any });
+    return platformPrisma.productModel.create({
+      data: { companyId, name: data.name, code },
+    });
   }
 
   async updateProductModel(companyId: string, id: string, data: UpdateProductModelInput) {
@@ -440,6 +461,79 @@ export class PartService {
     }
 
     await platformPrisma.unitOfMeasure.delete({ where: { id } });
+    return { id };
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // Part Component Type CRUD
+  // ════════════════════════════════════════════════════════════════════
+
+  async listPartComponentTypes(companyId: string) {
+    return platformPrisma.partComponentType.findMany({
+      where: { companyId, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createPartComponentType(companyId: string, data: CreatePartComponentTypeInput) {
+    const existing = await platformPrisma.partComponentType.findUnique({
+      where: { companyId_name: { companyId, name: data.name } },
+    });
+    if (existing) {
+      throw ApiError.conflict(`Component type "${data.name}" already exists`);
+    }
+
+    const count = await platformPrisma.partComponentType.count({ where: { companyId } });
+    let seq = count + 1;
+    let code = `CMP-${String(seq).padStart(3, '0')}`;
+    while (await platformPrisma.partComponentType.findFirst({ where: { companyId, code } })) {
+      seq++;
+      code = `CMP-${String(seq).padStart(3, '0')}`;
+    }
+
+    return platformPrisma.partComponentType.create({
+      data: { companyId, name: data.name, code },
+    });
+  }
+
+  async updatePartComponentType(companyId: string, id: string, data: UpdatePartComponentTypeInput) {
+    const existing = await platformPrisma.partComponentType.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) {
+      throw ApiError.notFound('Component type not found');
+    }
+
+    if (data.name && data.name !== existing.name) {
+      const duplicate = await platformPrisma.partComponentType.findUnique({
+        where: { companyId_name: { companyId, name: data.name } },
+      });
+      if (duplicate) {
+        throw ApiError.conflict(`Component type "${data.name}" already exists`);
+      }
+    }
+
+    const updateData: Record<string, any> = {};
+    if (data.name !== undefined) updateData.name = data.name;
+
+    return platformPrisma.partComponentType.update({
+      where: { id },
+      data: updateData,
+    });
+  }
+
+  async deletePartComponentType(companyId: string, id: string) {
+    const existing = await platformPrisma.partComponentType.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) {
+      throw ApiError.notFound('Component type not found');
+    }
+
+    const partCount = await platformPrisma.part.count({ where: { componentTypeId: id } });
+    if (partCount > 0) {
+      throw ApiError.badRequest(
+        `Cannot delete component type — it is referenced by ${partCount} part(s)`,
+      );
+    }
+
+    await platformPrisma.partComponentType.delete({ where: { id } });
     return { id };
   }
 }

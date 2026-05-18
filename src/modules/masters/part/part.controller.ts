@@ -13,6 +13,8 @@ import {
   updateProductModelSchema,
   createUomSchema,
   updateUomSchema,
+  createPartComponentTypeSchema,
+  updatePartComponentTypeSchema,
 } from './part.validators';
 
 export class PartController {
@@ -216,6 +218,49 @@ export class PartController {
 
     const result = await partService.deleteUom(companyId, req.params.id!);
     res.json(createSuccessResponse(result, 'Unit of measure deleted'));
+  });
+  // ── Part Component Types ───────────────────────────────────────────
+
+  listPartComponentTypes = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const types = await partService.listPartComponentTypes(companyId);
+    res.json(createSuccessResponse(types, 'Component types retrieved'));
+  });
+
+  createPartComponentType = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createPartComponentTypeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const type = await partService.createPartComponentType(companyId, parsed.data);
+    res.status(201).json(createSuccessResponse(type, 'Component type created'));
+  });
+
+  updatePartComponentType = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updatePartComponentTypeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const type = await partService.updatePartComponentType(companyId, req.params.id!, parsed.data);
+    res.json(createSuccessResponse(type, 'Component type updated'));
+  });
+
+  deletePartComponentType = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await partService.deletePartComponentType(companyId, req.params.id!);
+    res.json(createSuccessResponse(result, 'Component type deleted'));
   });
 }
 

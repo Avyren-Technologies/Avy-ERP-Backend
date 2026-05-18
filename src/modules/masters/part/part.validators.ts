@@ -14,6 +14,7 @@ export const createPartSchema = z.object({
   categoryId: z.string().optional(),
   productModelId: z.string().optional(),
   uomId: z.string().optional(),
+  componentTypeId: z.string().optional(),
   partType: PartTypeEnum.optional(),
   revision: z.string().optional(),
   drawingReference: z.string().optional(),
@@ -37,6 +38,7 @@ export const updatePartSchema = z.object({
   categoryId: z.string().nullable().optional(),
   productModelId: z.string().nullable().optional(),
   uomId: z.string().nullable().optional(),
+  componentTypeId: z.string().nullable().optional(),
   partType: PartTypeEnum.optional(),
   revision: z.string().nullable().optional(),
   drawingReference: z.string().nullable().optional(),
@@ -67,7 +69,6 @@ export const listPartsSchema = z.object({
 
 export const createPartCategorySchema = z.object({
   name: z.string().min(1, 'Category name is required'),
-  code: z.string().optional(),
 });
 
 export const updatePartCategorySchema = z.object({
@@ -79,7 +80,6 @@ export const updatePartCategorySchema = z.object({
 
 export const createProductModelSchema = z.object({
   name: z.string().min(1, 'Product model name is required'),
-  code: z.string().optional(),
 });
 
 export const updateProductModelSchema = z.object({
@@ -99,6 +99,16 @@ export const updateUomSchema = z.object({
   abbreviation: z.string().min(1, 'Abbreviation is required').optional(),
 });
 
+// ── Part Component Type ──────────────────────────────────────────────
+
+export const createPartComponentTypeSchema = z.object({
+  name: z.string().min(1, 'Component type name is required'),
+});
+
+export const updatePartComponentTypeSchema = z.object({
+  name: z.string().min(1, 'Component type name is required').optional(),
+});
+
 // ── Inferred types ────────────────────────────────────────────────────
 
 export type CreatePartInput = z.infer<typeof createPartSchema>;
@@ -110,3 +120,5 @@ export type CreateProductModelInput = z.infer<typeof createProductModelSchema>;
 export type UpdateProductModelInput = z.infer<typeof updateProductModelSchema>;
 export type CreateUomInput = z.infer<typeof createUomSchema>;
 export type UpdateUomInput = z.infer<typeof updateUomSchema>;
+export type CreatePartComponentTypeInput = z.infer<typeof createPartComponentTypeSchema>;
+export type UpdatePartComponentTypeInput = z.infer<typeof updatePartComponentTypeSchema>;
