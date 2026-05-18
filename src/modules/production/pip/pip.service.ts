@@ -204,30 +204,39 @@ export class PipService {
 
   async bulkCreateSlabConfigs(companyId: string, data: BulkCreateSlabConfigInput, userId: string) {
     let createdCount = 0;
-    const skippedCount: string[] = [];
+    const skippedItems: { machineCode: string; partNumber: string; reason: string }[] = [];
 
     for (const machineId of data.machineIds) {
       // Validate machine exists
       const machine = await platformPrisma.machine.findUnique({ where: { id: machineId } });
       if (!machine || machine.companyId !== companyId) {
-        skippedCount.push(`Machine ${machineId} not found`);
+        skippedItems.push({ machineCode: machineId, partNumber: '', reason: 'Machine not found' });
         continue;
       }
 
       for (const config of data.configs) {
+        // Fetch part to get its partNumber for skip messages
+        const part = await platformPrisma.part.findUnique({
+          where: { id: config.partId },
+          select: { partNumber: true, companyId: true },
+        });
+
         // Check uniqueness — skip duplicates
         const existing = await platformPrisma.pipSlabConfig.findUnique({
           where: { companyId_machineId_partId: { companyId, machineId, partId: config.partId } },
         });
         if (existing) {
-          skippedCount.push(`${machineId}+${config.partId} already exists`);
+          skippedItems.push({
+            machineCode: machine.assetCode ?? machineId,
+            partNumber: part?.partNumber ?? config.partId,
+            reason: 'Already exists',
+          });
           continue;
         }
 
         // Validate part exists
-        const part = await platformPrisma.part.findUnique({ where: { id: config.partId } });
         if (!part || part.companyId !== companyId) {
-          skippedCount.push(`Part ${config.partId} not found`);
+          skippedItems.push({ machineCode: machine.assetCode ?? machineId, partNumber: config.partId, reason: 'Part not found' });
           continue;
         }
 
@@ -249,12 +258,12 @@ export class PipService {
       entityType: 'PipSlabConfig',
       entityId: 'bulk',
       action: 'CREATE',
-      after: { createdCount, skipped: skippedCount } as any,
+      after: { createdCount, skipped: skippedItems } as any,
       changedBy: userId,
       companyId,
     });
 
-    return { createdCount, skippedCount: skippedCount.length, skipped: skippedCount };
+    return { createdCount, skippedCount: skippedItems.length, skipped: skippedItems };
   }
 
   async updateSlabConfig(companyId: string, id: string, data: UpdateSlabConfigInput, userId: string) {
