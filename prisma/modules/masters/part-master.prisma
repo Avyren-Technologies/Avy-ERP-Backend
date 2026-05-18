@@ -14,6 +14,7 @@ model Part {
   categoryId        String?
   productModelId    String?
   uomId             String?
+  componentTypeId   String?
   partType          PartType   @default(FINISH_PART)
   revision          String?
   drawingReference  String?
@@ -42,8 +43,9 @@ model Part {
   location     Location?      @relation(fields: [locationId], references: [id])
   category     PartCategory?  @relation(fields: [categoryId], references: [id])
   productModel ProductModel?  @relation(fields: [productModelId], references: [id])
-  uom          UnitOfMeasure? @relation(fields: [uomId], references: [id])
-  slabConfigs  PipSlabConfig[]
+  uom           UnitOfMeasure? @relation(fields: [uomId], references: [id])
+  componentType PartComponentType? @relation(fields: [componentTypeId], references: [id])
+  slabConfigs   PipSlabConfig[]
 
   @@unique([companyId, partNumber])
   @@index([companyId, status])
@@ -104,6 +106,23 @@ model UnitOfMeasure {
 
   @@unique([companyId, abbreviation])
   @@map("units_of_measure")
+}
+
+model PartComponentType {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  code      String?
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parts   Part[]
+
+  @@unique([companyId, name])
+  @@map("component_types")
 }
 
 enum PartType {
