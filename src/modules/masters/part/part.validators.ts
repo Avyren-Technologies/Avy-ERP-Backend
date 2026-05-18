@@ -107,6 +107,7 @@ export const createPartComponentTypeSchema = z.object({
 
 export const updatePartComponentTypeSchema = z.object({
   name: z.string().min(1, 'Component type name is required').optional(),
+  code: z.string().nullable().optional(),
 });
 
 // ── Inferred types ────────────────────────────────────────────────────

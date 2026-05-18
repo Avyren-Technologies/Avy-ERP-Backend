@@ -215,11 +215,16 @@ export class PipService {
       }
 
       for (const config of data.configs) {
-        // Fetch part to get its partNumber for skip messages
+        // Fetch and validate part first — skip if not found or wrong company
         const part = await platformPrisma.part.findUnique({
           where: { id: config.partId },
           select: { partNumber: true, companyId: true },
         });
+
+        if (!part || part.companyId !== companyId) {
+          skippedItems.push({ machineCode: machine.assetCode ?? machineId, partNumber: config.partId, reason: 'Part not found' });
+          continue;
+        }
 
         // Check uniqueness — skip duplicates
         const existing = await platformPrisma.pipSlabConfig.findUnique({
@@ -228,15 +233,9 @@ export class PipService {
         if (existing) {
           skippedItems.push({
             machineCode: machine.assetCode ?? machineId,
-            partNumber: part?.partNumber ?? config.partId,
+            partNumber: part.partNumber ?? config.partId,
             reason: 'Already exists',
           });
-          continue;
-        }
-
-        // Validate part exists
-        if (!part || part.companyId !== companyId) {
-          skippedItems.push({ machineCode: machine.assetCode ?? machineId, partNumber: config.partId, reason: 'Part not found' });
           continue;
         }
 

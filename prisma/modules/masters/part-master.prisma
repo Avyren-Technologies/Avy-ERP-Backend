@@ -51,6 +51,7 @@ model Part {
   @@index([companyId, status])
   @@index([companyId, categoryId])
   @@index([companyId, locationId])
+  @@index([companyId, componentTypeId])
   @@map("parts")
 }
 

@@ -262,13 +262,18 @@ export class PartService {
       throw ApiError.conflict(`Category "${data.name}" already exists`);
     }
 
-    // Auto-generate code: CAT-001, CAT-002, ...
-    const count = await platformPrisma.partCategory.count({ where: { companyId } });
-    let seq = count + 1;
-    let code = `CAT-${String(seq).padStart(3, '0')}`;
-    while (await platformPrisma.partCategory.findFirst({ where: { companyId, code } })) {
-      seq++;
+    // Auto-generate code with retry for race conditions
+    let code: string;
+    let retries = 0;
+    while (true) {
+      const count = await platformPrisma.partCategory.count({ where: { companyId } });
+      const seq = count + 1 + retries;
       code = `CAT-${String(seq).padStart(3, '0')}`;
+      // Check uniqueness
+      const codeExists = await platformPrisma.partCategory.findFirst({ where: { companyId, code } });
+      if (!codeExists) break;
+      retries++;
+      if (retries > 100) throw ApiError.badRequest('Unable to generate unique code — too many retries');
     }
 
     return platformPrisma.partCategory.create({
@@ -338,13 +343,18 @@ export class PartService {
       throw ApiError.conflict(`Product model "${data.name}" already exists`);
     }
 
-    // Auto-generate code: MDL-001, MDL-002, ...
-    const count = await platformPrisma.productModel.count({ where: { companyId } });
-    let seq = count + 1;
-    let code = `MDL-${String(seq).padStart(3, '0')}`;
-    while (await platformPrisma.productModel.findFirst({ where: { companyId, code } })) {
-      seq++;
+    // Auto-generate code with retry for race conditions
+    let code: string;
+    let retries = 0;
+    while (true) {
+      const count = await platformPrisma.productModel.count({ where: { companyId } });
+      const seq = count + 1 + retries;
       code = `MDL-${String(seq).padStart(3, '0')}`;
+      // Check uniqueness
+      const codeExists = await platformPrisma.productModel.findFirst({ where: { companyId, code } });
+      if (!codeExists) break;
+      retries++;
+      if (retries > 100) throw ApiError.badRequest('Unable to generate unique code — too many retries');
     }
 
     return platformPrisma.productModel.create({
@@ -483,12 +493,18 @@ export class PartService {
       throw ApiError.conflict(`Component type "${data.name}" already exists`);
     }
 
-    const count = await platformPrisma.partComponentType.count({ where: { companyId } });
-    let seq = count + 1;
-    let code = `CMP-${String(seq).padStart(3, '0')}`;
-    while (await platformPrisma.partComponentType.findFirst({ where: { companyId, code } })) {
-      seq++;
+    // Auto-generate code with retry for race conditions
+    let code: string;
+    let retries = 0;
+    while (true) {
+      const count = await platformPrisma.partComponentType.count({ where: { companyId } });
+      const seq = count + 1 + retries;
       code = `CMP-${String(seq).padStart(3, '0')}`;
+      // Check uniqueness
+      const codeExists = await platformPrisma.partComponentType.findFirst({ where: { companyId, code } });
+      if (!codeExists) break;
+      retries++;
+      if (retries > 100) throw ApiError.badRequest('Unable to generate unique code — too many retries');
     }
 
     return platformPrisma.partComponentType.create({
@@ -513,6 +529,7 @@ export class PartService {
 
     const updateData: Record<string, any> = {};
     if (data.name !== undefined) updateData.name = data.name;
+    if ('code' in data) updateData.code = n(data.code);
 
     return platformPrisma.partComponentType.update({
       where: { id },
