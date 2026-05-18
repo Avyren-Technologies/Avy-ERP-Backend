@@ -44,6 +44,9 @@ export interface PartResult {
   earningQty: number;
   incentiveAmount: number;
   breakdown: string; // Human-readable detail
+  consideredPct: number;    // Method 2: milestone%. Method 1: 100% if eligible, 0% if not
+  appliedRate: number;      // Rate per piece from the primary slab tier
+  appliedSlabLabel: string; // "Slab 1", "Slab 2", etc.
 }
 
 export interface CalculationResult {
@@ -189,12 +192,19 @@ export function calculateMethod1(
     let incentiveAmount = 0;
     let breakdown = '';
 
+    let consideredPct: number;
+    let appliedRate: number;
+    let appliedSlabLabel: string;
+
     if (ratioAfter < 1.0) {
       // Case A — Below 100%: this part doesn't push cumulative to >= 1.0
       caseType = 'A';
       earningQty = 0;
       incentiveAmount = 0;
       breakdown = `Cumulative ${round2(ratioAfter * 100)}% — below 100%, no incentive`;
+      consideredPct = 0;
+      appliedRate = 0;
+      appliedSlabLabel = 'N/A';
     } else if (ratioBefore >= 1.0) {
       // Case B — Already past 100%: all of this part's production earns
       caseType = 'B';
@@ -207,6 +217,9 @@ export function calculateMethod1(
       );
       incentiveAmount = slabResult.amount;
       breakdown = `All ${earningQty} pcs earn (already past 100%); ${slabResult.breakdown}`;
+      consideredPct = 100;
+      appliedRate = entry.slabTiers.length > 0 ? entry.slabTiers[0]!.ratePerPiece : 0;
+      appliedSlabLabel = entry.slabTiers.length > 0 ? 'Slab 1' : 'N/A';
     } else {
       // Case C — Crosses 100%: part of production consumed reaching threshold
       caseType = 'C';
@@ -226,6 +239,9 @@ export function calculateMethod1(
       } else {
         breakdown = `${piecesNeeded} pcs to reach 100%, 0 pcs earn`;
       }
+      consideredPct = 100;
+      appliedRate = entry.slabTiers.length > 0 ? entry.slabTiers[0]!.ratePerPiece : 0;
+      appliedSlabLabel = earningQty > 0 && entry.slabTiers.length > 0 ? 'Slab 1' : 'N/A';
     }
 
     cumulativeRatio = ratioAfter;
@@ -245,6 +261,9 @@ export function calculateMethod1(
       earningQty,
       incentiveAmount: round2(incentiveAmount),
       breakdown,
+      consideredPct,
+      appliedRate,
+      appliedSlabLabel,
     });
   }
 
@@ -336,6 +355,9 @@ export function calculateMethod2(
       earningQty,
       incentiveAmount,
       breakdown,
+      consideredPct: milestone,
+      appliedRate: slab1Rate,
+      appliedSlabLabel: slab1Rate > 0 ? 'Slab 1' : 'N/A',
     });
   }
 
