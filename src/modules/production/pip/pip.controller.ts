@@ -18,6 +18,9 @@ import {
   listSlabConfigsSchema,
   listDailyEntriesSchema,
   listMonthlyReportsSchema,
+  createOperationSchema,
+  updateOperationSchema,
+  listOperationsSchema,
 } from './pip.validators';
 
 export class PipController {
@@ -45,6 +48,74 @@ export class PipController {
     res.json(createSuccessResponse(config, 'Incentive config updated'));
   });
 
+  // ── Operations ────────────────────────────────────────────────────
+
+  listOperations = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = listOperationsSchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const { page, limit } = getPaginationParams(req.query);
+    const result = await pipService.listOperations(companyId, {
+      page,
+      limit,
+      search: parsed.data.search,
+      processType: parsed.data.processType,
+      status: parsed.data.status,
+    });
+
+    res.json(createPaginatedResponse(result.operations, result.page, result.limit, result.total, 'Operations retrieved'));
+  });
+
+  getOperation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const operation = await pipService.getOperation(companyId, req.params.id!);
+    res.json(createSuccessResponse(operation, 'Operation retrieved'));
+  });
+
+  createOperation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createOperationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const operation = await pipService.createOperation(companyId, parsed.data, userId);
+    res.status(201).json(createSuccessResponse(operation, 'Operation created'));
+  });
+
+  updateOperation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateOperationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const operation = await pipService.updateOperation(companyId, req.params.id!, parsed.data, userId);
+    res.json(createSuccessResponse(operation, 'Operation updated'));
+  });
+
+  deleteOperation = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await pipService.deleteOperation(companyId, req.params.id!, userId);
+    res.json(createSuccessResponse(result, 'Operation deleted'));
+  });
+
   // ── Slab Configs ──────────────────────────────────────────────────
 
   listSlabConfigs = asyncHandler(async (req: Request, res: Response) => {
@@ -62,6 +133,7 @@ export class PipController {
       limit,
       search: parsed.data.search,
       machineId: parsed.data.machineId,
+      operationId: parsed.data.operationId,
       partId: parsed.data.partId,
       locationId: parsed.data.locationId,
       isActive: parsed.data.isActive,

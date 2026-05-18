@@ -12,6 +12,7 @@ const slabTierSchema = z.object({
 
 export const createSlabConfigSchema = z.object({
   machineId: z.string().min(1, 'Machine ID is required'),
+  operationId: z.string().min(1, 'Operation ID is required'),
   partId: z.string().min(1, 'Part ID is required'),
   shiftTargetQty: z.number().int().positive('Shift target qty must be a positive integer'),
   slabTiers: z.array(slabTierSchema).min(1, 'At least one slab tier is required'),
@@ -22,6 +23,7 @@ export type CreateSlabConfigInput = z.infer<typeof createSlabConfigSchema>;
 
 export const bulkCreateSlabConfigSchema = z.object({
   machineIds: z.array(z.string().min(1)).min(1, 'At least one machine ID is required'),
+  operationIds: z.array(z.string().min(1)).min(1, 'At least one operation ID is required'),
   configs: z.array(
     z.object({
       partId: z.string().min(1, 'Part ID is required'),
@@ -53,6 +55,7 @@ export const saveDailyEntriesSchema = z.object({
     z.object({
       machineId: z.string().min(1, 'Machine ID is required'),
       partId: z.string().min(1, 'Part ID is required'),
+      operationId: z.string().optional(),
       slabConfigId: z.string().optional(),
       qtyProduced: z.number().int().nonnegative('Qty produced must be non-negative'),
       ncCount: z.number().int().nonnegative('NC count must be non-negative').optional(),
@@ -105,6 +108,36 @@ export const mergeToPayrollSchema = z.object({
 
 export type MergeToPayrollInput = z.infer<typeof mergeToPayrollSchema>;
 
+// ── Operations ─────────────────────────────────────────────────────
+
+const ProcessTypeEnum = z.enum(['MACHINING', 'MOULDING', 'ASSEMBLY', 'INSPECTION', 'FINISHING', 'PACKAGING']);
+const OperationStatusEnum = z.enum(['ACTIVE', 'INACTIVE']);
+
+export const createOperationSchema = z.object({
+  operationNumber: z.string().min(1, 'Operation number is required'),
+  name: z.string().min(1, 'Operation name is required'),
+  processType: ProcessTypeEnum.optional(),
+  status: OperationStatusEnum.optional(),
+});
+export type CreateOperationInput = z.infer<typeof createOperationSchema>;
+
+export const updateOperationSchema = z.object({
+  operationNumber: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  processType: ProcessTypeEnum.optional(),
+  status: OperationStatusEnum.optional(),
+});
+export type UpdateOperationInput = z.infer<typeof updateOperationSchema>;
+
+export const listOperationsSchema = z.object({
+  page: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().optional(),
+  search: z.string().optional(),
+  processType: ProcessTypeEnum.optional(),
+  status: OperationStatusEnum.optional(),
+});
+export type ListOperationsInput = z.infer<typeof listOperationsSchema>;
+
 // ── List Filters ────────────────────────────────────────────────────
 
 export const listSlabConfigsSchema = z.object({
@@ -112,6 +145,7 @@ export const listSlabConfigsSchema = z.object({
   limit: z.coerce.number().int().positive().optional(),
   search: z.string().optional(),
   machineId: z.string().optional(),
+  operationId: z.string().optional(),
   partId: z.string().optional(),
   locationId: z.string().optional(),
   isActive: z.coerce.boolean().optional(),

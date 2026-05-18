@@ -3,6 +3,7 @@ export interface SlabConfigListFilters {
   limit: number;
   search?: string | undefined;
   machineId?: string | undefined;
+  operationId?: string | undefined;
   partId?: string | undefined;
   locationId?: string | undefined;
   isActive?: boolean | undefined;

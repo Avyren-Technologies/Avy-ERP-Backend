@@ -23,6 +23,13 @@ router.use(asyncHandler(async (req: Request, res: Response, next: NextFunction) 
 router.get('/config', requirePermissions(['production.pip:read']), controller.getIncentiveConfig);
 router.patch('/config', requirePermissions(['production.pip:configure']), controller.updateIncentiveConfig);
 
+// ── Operations ─────────────────────────────────────────────────────
+router.get('/operations', requirePermissions(['production.pip:read']), controller.listOperations);
+router.post('/operations', requirePermissions(['production.pip:create']), controller.createOperation);
+router.get('/operations/:id', requirePermissions(['production.pip:read']), controller.getOperation);
+router.patch('/operations/:id', requirePermissions(['production.pip:update']), controller.updateOperation);
+router.delete('/operations/:id', requirePermissions(['production.pip:delete']), controller.deleteOperation);
+
 // ── Slab Configs (bulk before :id) ──────────────────────────────────
 router.post('/slab-configs/bulk', requirePermissions(['production.pip:create']), controller.bulkCreateSlabConfigs);
 router.get('/slab-configs', requirePermissions(['production.pip:read']), controller.listSlabConfigs);

@@ -97,12 +97,13 @@ export class PipService {
   // ════════════════════════════════════════════════════════════════════
 
   async listSlabConfigs(companyId: string, filters: SlabConfigListFilters): Promise<SlabConfigListResult> {
-    const { page = 1, limit = 25, search, machineId, partId, locationId, isActive } = filters;
+    const { page = 1, limit = 25, search, machineId, operationId, partId, locationId, isActive } = filters;
     const offset = (page - 1) * limit;
 
     const where: any = { companyId };
 
     if (machineId) where.machineId = machineId;
+    if (operationId) where.operationId = operationId;
     if (partId) where.partId = partId;
     if (locationId) where.locationId = locationId;
     if (isActive !== undefined) where.isActive = isActive;
@@ -111,6 +112,8 @@ export class PipService {
       where.OR = [
         { machine: { machineCode: { contains: search, mode: 'insensitive' } } },
         { machine: { assetName: { contains: search, mode: 'insensitive' } } },
+        { operation: { code: { contains: search, mode: 'insensitive' } } },
+        { operation: { name: { contains: search, mode: 'insensitive' } } },
         { part: { partNumber: { contains: search, mode: 'insensitive' } } },
         { part: { name: { contains: search, mode: 'insensitive' } } },
       ];
@@ -121,6 +124,7 @@ export class PipService {
         where,
         include: {
           machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
+          operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
           part: { select: { id: true, partNumber: true, name: true } },
           location: { select: { id: true, name: true } },
         },
@@ -139,6 +143,7 @@ export class PipService {
       where: { id },
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
+        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -152,18 +157,16 @@ export class PipService {
   }
 
   async createSlabConfig(companyId: string, data: CreateSlabConfigInput, userId: string) {
-    // Validate uniqueness of machine + operation + part combo
-    const existing = await platformPrisma.pipSlabConfig.findFirst({
-      where: { companyId, machineId: data.machineId, operationId: (data as any).operationId ?? undefined, partId: data.partId },
-    });
-    if (existing) {
-      throw ApiError.conflict('A slab config already exists for this machine + operation + part combination');
-    }
-
     // Validate machine exists
     const machine = await platformPrisma.machine.findUnique({ where: { id: data.machineId } });
     if (!machine || machine.companyId !== companyId) {
       throw ApiError.notFound('Machine not found');
+    }
+
+    // Validate operation exists
+    const operation = await platformPrisma.operation.findUnique({ where: { id: data.operationId } });
+    if (!operation || operation.companyId !== companyId) {
+      throw ApiError.notFound('Operation not found');
     }
 
     // Validate part exists
@@ -172,9 +175,18 @@ export class PipService {
       throw ApiError.notFound('Part not found');
     }
 
+    // Validate uniqueness of machine + operation + part combo
+    const existing = await platformPrisma.pipSlabConfig.findFirst({
+      where: { companyId, machineId: data.machineId, operationId: data.operationId, partId: data.partId },
+    });
+    if (existing) {
+      throw ApiError.conflict('A slab config already exists for this machine + operation + part combination');
+    }
+
     const createData: Record<string, any> = {
       companyId,
       machineId: data.machineId,
+      operationId: data.operationId,
       partId: data.partId,
       shiftTargetQty: data.shiftTargetQty,
       slabTiers: data.slabTiers as any,
@@ -185,6 +197,7 @@ export class PipService {
       data: createData as any,
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
+        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -204,52 +217,63 @@ export class PipService {
 
   async bulkCreateSlabConfigs(companyId: string, data: BulkCreateSlabConfigInput, userId: string) {
     let createdCount = 0;
-    const skippedItems: { machineCode: string; partNumber: string; reason: string }[] = [];
+    const skippedItems: { machineCode: string; operationName: string; partNumber: string; reason: string }[] = [];
 
     for (const machineId of data.machineIds) {
       // Validate machine exists
       const machine = await platformPrisma.machine.findUnique({ where: { id: machineId } });
       if (!machine || machine.companyId !== companyId) {
-        skippedItems.push({ machineCode: machineId, partNumber: '', reason: 'Machine not found' });
+        skippedItems.push({ machineCode: machineId, operationName: '', partNumber: '', reason: 'Machine not found' });
         continue;
       }
 
-      for (const config of data.configs) {
-        // Fetch and validate part first — skip if not found or wrong company
-        const part = await platformPrisma.part.findUnique({
-          where: { id: config.partId },
-          select: { partNumber: true, companyId: true },
-        });
-
-        if (!part || part.companyId !== companyId) {
-          skippedItems.push({ machineCode: machine.assetCode ?? machineId, partNumber: config.partId, reason: 'Part not found' });
+      for (const operationId of data.operationIds) {
+        // Validate operation exists
+        const operation = await platformPrisma.operation.findUnique({ where: { id: operationId } });
+        if (!operation || operation.companyId !== companyId) {
+          skippedItems.push({ machineCode: machine.assetCode ?? machineId, operationName: operationId, partNumber: '', reason: 'Operation not found' });
           continue;
         }
 
-        // Check uniqueness — skip duplicates
-        const existing = await platformPrisma.pipSlabConfig.findFirst({
-          where: { companyId, machineId, partId: config.partId },
-        });
-        if (existing) {
-          skippedItems.push({
-            machineCode: machine.assetCode ?? machineId,
-            partNumber: part.partNumber ?? config.partId,
-            reason: 'Already exists',
+        for (const config of data.configs) {
+          // Fetch and validate part first — skip if not found or wrong company
+          const part = await platformPrisma.part.findUnique({
+            where: { id: config.partId },
+            select: { partNumber: true, companyId: true },
           });
-          continue;
+
+          if (!part || part.companyId !== companyId) {
+            skippedItems.push({ machineCode: machine.assetCode ?? machineId, operationName: operation.name, partNumber: config.partId, reason: 'Part not found' });
+            continue;
+          }
+
+          // Check uniqueness — skip duplicates
+          const existing = await platformPrisma.pipSlabConfig.findFirst({
+            where: { companyId, machineId, operationId, partId: config.partId },
+          });
+          if (existing) {
+            skippedItems.push({
+              machineCode: machine.assetCode ?? machineId,
+              operationName: operation.name,
+              partNumber: part.partNumber ?? config.partId,
+              reason: 'Already exists',
+            });
+            continue;
+          }
+
+          const createData: Record<string, any> = {
+            companyId,
+            machineId,
+            operationId,
+            partId: config.partId,
+            shiftTargetQty: config.shiftTargetQty,
+            slabTiers: config.slabTiers as any,
+          };
+          if (data.locationId !== undefined) createData.locationId = data.locationId;
+
+          await platformPrisma.pipSlabConfig.create({ data: createData as any });
+          createdCount++;
         }
-
-        const createData: Record<string, any> = {
-          companyId,
-          machineId,
-          partId: config.partId,
-          shiftTargetQty: config.shiftTargetQty,
-          slabTiers: config.slabTiers as any,
-        };
-        if (data.locationId !== undefined) createData.locationId = data.locationId;
-
-        await platformPrisma.pipSlabConfig.create({ data: createData as any });
-        createdCount++;
       }
     }
 
@@ -284,6 +308,7 @@ export class PipService {
       data: updateData,
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
+        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -391,6 +416,7 @@ export class PipService {
       machineId: string;
       partId: string;
       slabConfigId: string | null;
+      operationId: string | null;
       qtyProduced: number;
       shiftTargetQty: number;
       ncCount: number;
@@ -402,7 +428,7 @@ export class PipService {
     }> = [];
 
     for (const entry of data.entries) {
-      // Look up slab config for machine + part combo
+      // Look up slab config for machine + operation + part combo
       let slabConfig: any = null;
       if (entry.slabConfigId) {
         slabConfig = await platformPrisma.pipSlabConfig.findUnique({
@@ -414,8 +440,10 @@ export class PipService {
         });
       }
       if (!slabConfig) {
+        const slabWhere: any = { companyId, machineId: entry.machineId, partId: entry.partId };
+        if (entry.operationId) slabWhere.operationId = entry.operationId;
         slabConfig = await platformPrisma.pipSlabConfig.findFirst({
-          where: { companyId, machineId: entry.machineId, partId: entry.partId },
+          where: slabWhere,
           include: {
             machine: { select: { assetCode: true, machineCode: true, assetName: true } },
             part: { select: { partNumber: true, name: true } },
@@ -440,6 +468,7 @@ export class PipService {
           machineId: entry.machineId,
           partId: entry.partId,
           slabConfigId: null,
+          operationId: entry.operationId ?? null,
           qtyProduced: entry.qtyProduced,
           shiftTargetQty: 0,
           ncCount: entry.ncCount ?? 0,
@@ -470,6 +499,7 @@ export class PipService {
         machineId: entry.machineId,
         partId: entry.partId,
         slabConfigId: slabConfig.id,
+        operationId: entry.operationId ?? slabConfig.operationId ?? null,
         qtyProduced: entry.qtyProduced,
         shiftTargetQty: slabConfig.shiftTargetQty,
         ncCount: entry.ncCount ?? 0,
@@ -522,6 +552,7 @@ export class PipService {
           machineId: ed.machineId,
           partId: ed.partId,
           slabConfigId: ed.slabConfigId,
+          operationId: ed.operationId ?? undefined,
           qtyProduced: ed.qtyProduced,
           shiftTargetQty: ed.shiftTargetQty,
           achievementPct: new Prisma.Decimal(achievementPct),
@@ -594,6 +625,7 @@ export class PipService {
         where,
         include: {
           operator: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
+          operation: { select: { id: true, code: true, name: true } },
           slabConfig: {
             select: {
               id: true,
@@ -1314,6 +1346,103 @@ export class PipService {
 
       return updated;
     });
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // Operation CRUD
+  // ════════════════════════════════════════════════════════════════════
+
+  async listOperations(companyId: string, filters: any) {
+    const { page = 1, limit = 25, search, processType, status } = filters;
+    const offset = (page - 1) * limit;
+    const where: any = { companyId };
+    if (processType) where.processType = processType;
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { code: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { operationNumber: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    const [operations, total] = await Promise.all([
+      platformPrisma.operation.findMany({ where, skip: offset, take: limit, orderBy: { name: 'asc' } }),
+      platformPrisma.operation.count({ where }),
+    ]);
+    return { operations, total, page, limit };
+  }
+
+  async getOperation(companyId: string, id: string) {
+    const op = await platformPrisma.operation.findUnique({ where: { id } });
+    if (!op || op.companyId !== companyId) throw ApiError.notFound('Operation not found');
+    return op;
+  }
+
+  async createOperation(companyId: string, data: any, userId: string) {
+    const byName = await platformPrisma.operation.findUnique({ where: { companyId_name: { companyId, name: data.name } } });
+    if (byName) throw ApiError.conflict(`Operation "${data.name}" already exists`);
+    const byNum = await platformPrisma.operation.findUnique({ where: { companyId_operationNumber: { companyId, operationNumber: data.operationNumber } } });
+    if (byNum) throw ApiError.conflict(`Operation number "${data.operationNumber}" already exists`);
+
+    // Auto-generate code OPR-0001
+    const count = await platformPrisma.operation.count({ where: { companyId } });
+    let seq = count + 1;
+    let code = `OPR-${String(seq).padStart(4, '0')}`;
+    let retries = 0;
+    while (await platformPrisma.operation.findFirst({ where: { companyId, code } })) {
+      seq++; retries++;
+      code = `OPR-${String(seq).padStart(4, '0')}`;
+      if (retries > 100) throw ApiError.badRequest('Unable to generate unique operation code');
+    }
+
+    const operation = await platformPrisma.operation.create({
+      data: {
+        companyId, code,
+        operationNumber: data.operationNumber,
+        name: data.name,
+        processType: data.processType ?? 'MACHINING',
+        status: data.status ?? 'ACTIVE',
+      },
+    });
+
+    auditLog({ entityType: 'Operation', entityId: operation.id, action: 'CREATE', after: operation as any, changedBy: userId, companyId });
+    return operation;
+  }
+
+  async updateOperation(companyId: string, id: string, data: any, userId: string) {
+    const existing = await platformPrisma.operation.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) throw ApiError.notFound('Operation not found');
+
+    if (data.name && data.name !== existing.name) {
+      const dup = await platformPrisma.operation.findUnique({ where: { companyId_name: { companyId, name: data.name } } });
+      if (dup) throw ApiError.conflict(`Operation "${data.name}" already exists`);
+    }
+    if (data.operationNumber && data.operationNumber !== existing.operationNumber) {
+      const dup = await platformPrisma.operation.findUnique({ where: { companyId_operationNumber: { companyId, operationNumber: data.operationNumber } } });
+      if (dup) throw ApiError.conflict(`Operation number "${data.operationNumber}" already exists`);
+    }
+
+    const updateData: Record<string, any> = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.operationNumber !== undefined) updateData.operationNumber = data.operationNumber;
+    if (data.processType !== undefined) updateData.processType = data.processType;
+    if (data.status !== undefined) { updateData.status = data.status; updateData.isActive = data.status === 'ACTIVE'; }
+
+    const operation = await platformPrisma.operation.update({ where: { id }, data: updateData });
+    auditLog({ entityType: 'Operation', entityId: id, action: 'UPDATE', before: existing as any, after: operation as any, changedBy: userId, companyId });
+    return operation;
+  }
+
+  async deleteOperation(companyId: string, id: string, userId: string) {
+    const existing = await platformPrisma.operation.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) throw ApiError.notFound('Operation not found');
+    const slabCount = await platformPrisma.pipSlabConfig.count({ where: { operationId: id } });
+    if (slabCount > 0) throw ApiError.badRequest(`Cannot delete operation — referenced by ${slabCount} slab config(s)`);
+    const entryCount = await platformPrisma.pipDailyEntry.count({ where: { operationId: id } });
+    if (entryCount > 0) throw ApiError.badRequest(`Cannot delete operation — referenced by ${entryCount} daily entry/entries`);
+    await platformPrisma.operation.delete({ where: { id } });
+    auditLog({ entityType: 'Operation', entityId: id, action: 'DELETE', before: existing as any, changedBy: userId, companyId });
+    return { id };
   }
 }
 
