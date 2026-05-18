@@ -2296,7 +2296,7 @@ export class AttendanceService {
   }
 
   async getRotationEmployeeOverview(companyId: string, search?: string) {
-    const whereClause: any = { companyId, status: 'ACTIVE' };
+    const whereClause: any = { companyId, status: { notIn: ['EXITED', 'SUSPENDED'] } };
     if (search) {
       const q = search.trim();
       whereClause.OR = [
@@ -2384,7 +2384,7 @@ export class AttendanceService {
       }
     }
 
-    return platformPrisma.shiftRotationSchedule.create({
+    const schedule = await platformPrisma.shiftRotationSchedule.create({
       data: {
         companyId,
         name: data.name,
@@ -2395,6 +2395,30 @@ export class AttendanceService {
         isActive: true,
       },
     });
+
+    // Auto-assign employees whose current shift is one of the schedule's shifts
+    const scheduleShiftIds = shiftIds as string[];
+    const matchingEmployees = await platformPrisma.employee.findMany({
+      where: {
+        companyId,
+        status: { notIn: ['EXITED', 'SUSPENDED'] },
+        shiftId: { in: scheduleShiftIds },
+      },
+      select: { id: true },
+    });
+
+    if (matchingEmployees.length > 0) {
+      await platformPrisma.shiftRotationAssignment.createMany({
+        data: matchingEmployees.map((emp) => ({
+          companyId,
+          scheduleId: schedule.id,
+          employeeId: emp.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    return schedule;
   }
 
   async updateRotationSchedule(companyId: string, id: string, data: any) {
