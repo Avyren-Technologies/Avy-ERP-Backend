@@ -294,6 +294,7 @@ model Company {
   pipDailyEntries    PipDailyEntry[]
   pipIncentiveConfig PipIncentiveConfig?
   pipMonthlyReports  PipMonthlyReport[]
+  operations         Operation[]
 
   @@map("companies")
 }

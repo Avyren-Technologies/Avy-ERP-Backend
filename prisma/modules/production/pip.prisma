@@ -4,11 +4,35 @@
 // Models: PipSlabConfig, PipDailyEntry, PipIncentiveConfig, PipMonthlyReport
 // Enums: PipSlabStatus, PipEntryStatus, PipReportStatus
 
+model Operation {
+  id              String          @id @default(cuid())
+  companyId       String
+  code            String?
+  operationNumber String
+  name            String
+  processType     ProcessType     @default(MACHINING)
+  status          OperationStatus @default(ACTIVE)
+  isActive        Boolean         @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  slabConfigs  PipSlabConfig[]
+  dailyEntries PipDailyEntry[]
+
+  @@unique([companyId, name])
+  @@unique([companyId, operationNumber])
+  @@index([companyId, status])
+  @@map("operations")
+}
+
 model PipSlabConfig {
   id             String        @id @default(cuid())
   companyId      String
   locationId     String?
   machineId      String
+  operationId    String
   partId         String
   shiftTargetQty Int
   slabTiers      Json
@@ -21,12 +45,14 @@ model PipSlabConfig {
   // Relations
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   location Location? @relation(fields: [locationId], references: [id])
-  machine  Machine   @relation(fields: [machineId], references: [id])
-  part     Part      @relation(fields: [partId], references: [id])
+  machine   Machine   @relation(fields: [machineId], references: [id])
+  operation Operation @relation(fields: [operationId], references: [id])
+  part      Part      @relation(fields: [partId], references: [id])
   entries  PipDailyEntry[]
 
-  @@unique([companyId, machineId, partId])
+  @@unique([companyId, machineId, operationId, partId])
   @@index([companyId, locationId])
+  @@index([companyId, operationId])
   @@map("pip_slab_configs")
 }
 
@@ -41,6 +67,7 @@ model PipDailyEntry {
   machineId    String
   partId       String
   slabConfigId String?
+  operationId  String?
 
   qtyProduced    Int
   shiftTargetQty Int
@@ -79,11 +106,13 @@ model PipDailyEntry {
   location   Location?      @relation(fields: [locationId], references: [id])
   operator   Employee       @relation(fields: [operatorId], references: [id])
   slabConfig PipSlabConfig? @relation(fields: [slabConfigId], references: [id])
+  operation  Operation?     @relation(fields: [operationId], references: [id])
 
   @@index([companyId, entryDate, shiftId])
   @@index([companyId, operatorId, entryDate])
   @@index([companyId, locationId, entryDate])
   @@index([companyId, status])
+  @@index([companyId, operationId])
   @@map("pip_daily_entries")
 }
 
@@ -170,4 +199,18 @@ enum PipReportStatus {
   APPROVED
   REJECTED
   MERGED
+}
+
+enum ProcessType {
+  MACHINING
+  MOULDING
+  ASSEMBLY
+  INSPECTION
+  FINISHING
+  PACKAGING
+}
+
+enum OperationStatus {
+  ACTIVE
+  INACTIVE
 }

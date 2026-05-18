@@ -152,12 +152,12 @@ export class PipService {
   }
 
   async createSlabConfig(companyId: string, data: CreateSlabConfigInput, userId: string) {
-    // Validate uniqueness of machine + part combo
-    const existing = await platformPrisma.pipSlabConfig.findUnique({
-      where: { companyId_machineId_partId: { companyId, machineId: data.machineId, partId: data.partId } },
+    // Validate uniqueness of machine + operation + part combo
+    const existing = await platformPrisma.pipSlabConfig.findFirst({
+      where: { companyId, machineId: data.machineId, operationId: (data as any).operationId ?? undefined, partId: data.partId },
     });
     if (existing) {
-      throw ApiError.conflict('A slab config already exists for this machine + part combination');
+      throw ApiError.conflict('A slab config already exists for this machine + operation + part combination');
     }
 
     // Validate machine exists
@@ -227,8 +227,8 @@ export class PipService {
         }
 
         // Check uniqueness — skip duplicates
-        const existing = await platformPrisma.pipSlabConfig.findUnique({
-          where: { companyId_machineId_partId: { companyId, machineId, partId: config.partId } },
+        const existing = await platformPrisma.pipSlabConfig.findFirst({
+          where: { companyId, machineId, partId: config.partId },
         });
         if (existing) {
           skippedItems.push({
@@ -414,8 +414,8 @@ export class PipService {
         });
       }
       if (!slabConfig) {
-        slabConfig = await platformPrisma.pipSlabConfig.findUnique({
-          where: { companyId_machineId_partId: { companyId, machineId: entry.machineId, partId: entry.partId } },
+        slabConfig = await platformPrisma.pipSlabConfig.findFirst({
+          where: { companyId, machineId: entry.machineId, partId: entry.partId },
           include: {
             machine: { select: { assetCode: true, machineCode: true, assetName: true } },
             part: { select: { partNumber: true, name: true } },
