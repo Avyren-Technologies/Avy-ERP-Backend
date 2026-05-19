@@ -1,5 +1,5 @@
 // ─── Production Reports: PIP Daily Production, Incentive Summary, Operator Performance,
-//     Machine Utilization, Shift Productivity, Payroll Merge, Exception ───
+//     Machine Utilization, Shift Productivity, Payroll Merge, Exception, Slab Config ───
 import { generateExcelReport, type ReportConfig, type ReportSheet, type SheetColumn } from '../excel-exporter';
 import type { DashboardFilters, DataScope } from '../../analytics.types';
 import { platformPrisma } from '../../../../../config/database';
@@ -25,13 +25,15 @@ function buildPipWhere(filters: DashboardFilters, scope: DataScope) {
   return where;
 }
 
-/** Build lookup maps for machine, part, and shift names from their IDs */
-async function buildLookups(_companyId: string, entries: Array<{ machineId: string; partId: string; shiftId: string }>) {
+/** Build lookup maps for machine, part, shift, operation, and downtime reason names from their IDs */
+async function buildLookups(companyId: string, entries: Array<{ machineId: string; partId: string; shiftId: string; operationId?: string | null; downtimeReasonId?: string | null }>) {
   const machineIds = [...new Set(entries.map(e => e.machineId))];
   const partIds = [...new Set(entries.map(e => e.partId))];
   const shiftIds = [...new Set(entries.map(e => e.shiftId))];
+  const operationIds = [...new Set(entries.map(e => e.operationId).filter(Boolean))] as string[];
+  const downtimeReasonIds = [...new Set(entries.map(e => e.downtimeReasonId).filter(Boolean))] as string[];
 
-  const [machines, parts, shifts] = await Promise.all([
+  const [machines, parts, shifts, operations, downtimeReasons] = await Promise.all([
     machineIds.length > 0
       ? platformPrisma.machine.findMany({ where: { id: { in: machineIds } }, select: { id: true, assetName: true, assetCode: true } })
       : [] as Array<{ id: string; assetName: string; assetCode: string }>,
@@ -41,13 +43,41 @@ async function buildLookups(_companyId: string, entries: Array<{ machineId: stri
     shiftIds.length > 0
       ? platformPrisma.companyShift.findMany({ where: { id: { in: shiftIds } }, select: { id: true, name: true } })
       : [] as Array<{ id: string; name: string }>,
+    operationIds.length > 0
+      ? platformPrisma.operation.findMany({ where: { id: { in: operationIds } }, select: { id: true, code: true, name: true, processCategory: { select: { name: true } } } })
+      : [] as Array<{ id: string; code: string; name: string; processCategory: { name: string } | null }>,
+    downtimeReasonIds.length > 0
+      ? platformPrisma.downtimeReason.findMany({ where: { id: { in: downtimeReasonIds } }, select: { id: true, code: true, name: true } })
+      : [] as Array<{ id: string; code: string; name: string }>,
   ]);
 
   const machineMap = new Map<string, string>(machines.map(m => [m.id, m.assetName ?? m.assetCode ?? m.id]));
   const partMap = new Map<string, string>(parts.map(p => [p.id, p.name ?? p.partNumber ?? p.id]));
   const shiftMap = new Map<string, string>(shifts.map(s => [s.id, s.name ?? s.id]));
+  const opMap = new Map<string, { code: string; name: string; processCategory: string }>(
+    operations.map(o => [o.id, { code: o.code, name: o.name, processCategory: o.processCategory?.name ?? '' }]),
+  );
+  const dtMap = new Map<string, { code: string; name: string }>(
+    downtimeReasons.map(d => [d.id, { code: d.code ?? '', name: d.name }]),
+  );
 
-  return { machineMap, partMap, shiftMap };
+  return { machineMap, partMap, shiftMap, opMap, dtMap };
+}
+
+/** Common include for PipDailyEntry queries with operation & downtime */
+const pipEntryInclude = {
+  operator: { select: { firstName: true, lastName: true, employeeId: true } },
+  operation: { select: { code: true, name: true, processCategory: { select: { name: true } } } },
+  downtimeReason: { select: { code: true, name: true } },
+};
+
+/** Finalize report — return PDF or Excel based on format */
+async function finalizeReport(config: ReportConfig, format?: string): Promise<Buffer> {
+  if (format === 'pdf') {
+    const { generatePdfReport } = await import('../pdf-exporter');
+    return generatePdfReport(config);
+  }
+  return generateExcelReport(config);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -58,25 +88,27 @@ export async function generatePipDailyProductionReport(
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
 ): Promise<Buffer> {
   const where = buildPipWhere(filters, scope);
 
   const entries = await platformPrisma.pipDailyEntry.findMany({
     where,
-    include: {
-      operator: { select: { firstName: true, lastName: true, employeeId: true } },
-    },
+    include: pipEntryInclude,
     orderBy: [{ entryDate: 'desc' }],
   });
 
-  const { machineMap, partMap, shiftMap } = await buildLookups(scope.companyId, entries);
+  const { machineMap, partMap, shiftMap, opMap, dtMap } = await buildLookups(scope.companyId, entries);
 
   // ── Summary Sheet ──
   const totalQty = entries.reduce((s, e) => s + e.qtyProduced, 0);
   const totalIncentive = entries.reduce((s, e) => s + dec(e.totalIncentive), 0);
+  const totalDowntimeMinutes = entries.reduce((s, e) => s + (e.downtimeMinutes ?? 0), 0);
   const eligibleCount = entries.filter(e => e.isEligible).length;
   const uniqueOperators = new Set(entries.map(e => e.operatorId)).size;
   const uniqueMachines = new Set(entries.map(e => e.machineId)).size;
+  const uniqueOperations = new Set(entries.map(e => e.operationId).filter(Boolean)).size;
 
   const summaryColumns: SheetColumn[] = [
     { header: 'Metric', key: 'metric', width: 30 },
@@ -89,6 +121,8 @@ export async function generatePipDailyProductionReport(
     { metric: 'Eligible Entries', value: eligibleCount },
     { metric: 'Unique Operators', value: uniqueOperators },
     { metric: 'Unique Machines', value: uniqueMachines },
+    { metric: 'Unique Operations', value: uniqueOperations },
+    { metric: 'Total Downtime (min)', value: totalDowntimeMinutes },
   ];
   const summarySheet: ReportSheet = { name: 'Summary', columns: summaryColumns, rows: summaryRows };
 
@@ -98,6 +132,8 @@ export async function generatePipDailyProductionReport(
     { header: 'Emp ID', key: 'employeeId', width: 14 },
     { header: 'Operator', key: 'operatorName', width: 22 },
     { header: 'Shift', key: 'shift', width: 14 },
+    { header: 'Operation', key: 'operation', width: 18 },
+    { header: 'Process Category', key: 'processCategory', width: 16 },
     { header: 'Machine', key: 'machine', width: 18 },
     { header: 'Part', key: 'part', width: 18 },
     { header: 'Target Qty', key: 'shiftTargetQty', width: 12, format: 'number' },
@@ -105,6 +141,8 @@ export async function generatePipDailyProductionReport(
     { header: 'Achievement %', key: 'achievementPct', width: 14, format: 'percentage' },
     { header: 'Eligible', key: 'isEligible', width: 10 },
     { header: 'Incentive', key: 'totalIncentive', width: 14, format: 'currency' },
+    { header: 'Downtime Reason', key: 'downtimeReason', width: 18 },
+    { header: 'Downtime (min)', key: 'downtimeMinutes', width: 14, format: 'number' },
     { header: 'NC Count', key: 'ncCount', width: 10, format: 'number' },
   ];
   const detailRows = entries.map((e: any) => ({
@@ -112,6 +150,8 @@ export async function generatePipDailyProductionReport(
     employeeId: e.operator?.employeeId ?? '',
     operatorName: `${e.operator?.firstName ?? ''} ${e.operator?.lastName ?? ''}`.trim(),
     shift: shiftMap.get(e.shiftId) ?? '',
+    operation: e.operation ? `${e.operation.code} - ${e.operation.name}` : (e.operationId ? opMap.get(e.operationId)?.name ?? '' : ''),
+    processCategory: e.operation?.processCategory?.name ?? (e.operationId ? opMap.get(e.operationId)?.processCategory ?? '' : ''),
     machine: machineMap.get(e.machineId) ?? '',
     part: partMap.get(e.partId) ?? '',
     shiftTargetQty: e.shiftTargetQty,
@@ -119,14 +159,17 @@ export async function generatePipDailyProductionReport(
     achievementPct: dec(e.achievementPct) / 100,
     isEligible: e.isEligible ? 'Yes' : 'No',
     totalIncentive: dec(e.totalIncentive),
+    downtimeReason: e.downtimeReason ? `${e.downtimeReason.code} - ${e.downtimeReason.name}` : (e.downtimeReasonId ? dtMap.get(e.downtimeReasonId)?.name ?? '' : ''),
+    downtimeMinutes: e.downtimeMinutes ?? 0,
     ncCount: e.ncCount,
   }));
   const detailSheet: ReportSheet = { name: 'Operator Detail', columns: detailColumns, rows: detailRows };
 
-  // ── Machine Utilization Sheet ──
-  const machineAggMap = new Map<string, { name: string; totalQty: number; entries: number; totalIncentive: number }>();
+  // ── Machine Utilization Sheet (grouped by machine + operation) ──
+  const machineAggMap = new Map<string, { machineName: string; operation: string; totalQty: number; entries: number; totalIncentive: number }>();
   for (const e of entries) {
-    const key = e.machineId;
+    const opName = (e as any).operation ? `${(e as any).operation.code} - ${(e as any).operation.name}` : (e.operationId ? opMap.get(e.operationId)?.name ?? 'N/A' : 'N/A');
+    const key = `${e.machineId}|${e.operationId ?? 'none'}`;
     const existing = machineAggMap.get(key);
     if (existing) {
       existing.totalQty += e.qtyProduced;
@@ -134,7 +177,8 @@ export async function generatePipDailyProductionReport(
       existing.totalIncentive += dec(e.totalIncentive);
     } else {
       machineAggMap.set(key, {
-        name: machineMap.get(key) ?? key,
+        machineName: machineMap.get(e.machineId) ?? e.machineId,
+        operation: opName,
         totalQty: e.qtyProduced,
         entries: 1,
         totalIncentive: dec(e.totalIncentive),
@@ -143,13 +187,15 @@ export async function generatePipDailyProductionReport(
   }
   const machColumns: SheetColumn[] = [
     { header: 'Machine', key: 'machine', width: 22 },
+    { header: 'Operation', key: 'operation', width: 18 },
     { header: 'Total Entries', key: 'entries', width: 14, format: 'number' },
     { header: 'Total Qty', key: 'totalQty', width: 14, format: 'number' },
     { header: 'Avg Qty/Entry', key: 'avgQty', width: 14, format: 'number' },
     { header: 'Total Incentive', key: 'totalIncentive', width: 16, format: 'currency' },
   ];
   const machRows = Array.from(machineAggMap.values()).map(m => ({
-    machine: m.name,
+    machine: m.machineName,
+    operation: m.operation,
     entries: m.entries,
     totalQty: m.totalQty,
     avgQty: m.entries > 0 ? Math.round(m.totalQty / m.entries) : 0,
@@ -165,7 +211,7 @@ export async function generatePipDailyProductionReport(
     sheets: [summarySheet, detailSheet, machSheet],
   };
 
-  return generateExcelReport(config);
+  return finalizeReport(config, format);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -176,18 +222,18 @@ export async function generatePipIncentiveSummaryReport(
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
 ): Promise<Buffer> {
   const where = buildPipWhere(filters, scope);
 
   const entries = await platformPrisma.pipDailyEntry.findMany({
     where,
-    include: {
-      operator: { select: { firstName: true, lastName: true, employeeId: true } },
-    },
+    include: pipEntryInclude,
     orderBy: { entryDate: 'asc' },
   });
 
-  const { partMap } = await buildLookups(scope.companyId, entries);
+  const { partMap, opMap, dtMap } = await buildLookups(scope.companyId, entries);
 
   // ── Monthly Summary Sheet ──
   const totalIncentive = entries.reduce((s, e) => s + dec(e.totalIncentive), 0);
@@ -210,7 +256,7 @@ export async function generatePipIncentiveSummaryReport(
   const monthlySummarySheet: ReportSheet = { name: 'Monthly Summary', columns: monthlySummaryColumns, rows: monthlySummaryRows };
 
   // ── Operator-wise Sheet ──
-  const opAggMap = new Map<string, { empId: string; name: string; daysEligible: number; totalIncentive: number; totalEntries: number }>();
+  const opAggMap = new Map<string, { empId: string; name: string; daysEligible: number; totalIncentive: number; totalEntries: number; totalDowntimeMinutes: number }>();
   for (const e of entries) {
     const key = e.operatorId;
     const existing = opAggMap.get(key);
@@ -218,6 +264,7 @@ export async function generatePipIncentiveSummaryReport(
       existing.totalEntries += 1;
       existing.daysEligible += e.isEligible ? 1 : 0;
       existing.totalIncentive += dec(e.totalIncentive);
+      existing.totalDowntimeMinutes += e.downtimeMinutes ?? 0;
     } else {
       opAggMap.set(key, {
         empId: (e as any).operator?.employeeId ?? '',
@@ -225,6 +272,7 @@ export async function generatePipIncentiveSummaryReport(
         totalEntries: 1,
         daysEligible: e.isEligible ? 1 : 0,
         totalIncentive: dec(e.totalIncentive),
+        totalDowntimeMinutes: e.downtimeMinutes ?? 0,
       });
     }
   }
@@ -236,6 +284,7 @@ export async function generatePipIncentiveSummaryReport(
     { header: 'Eligibility Rate', key: 'eligibilityRate', width: 16, format: 'percentage' },
     { header: 'Total Incentive', key: 'totalIncentive', width: 16, format: 'currency' },
     { header: 'Avg/Day', key: 'avgPerDay', width: 14, format: 'currency' },
+    { header: 'Downtime (min)', key: 'totalDowntimeMinutes', width: 14, format: 'number' },
   ];
   const opRows = Array.from(opAggMap.values()).map(o => ({
     empId: o.empId,
@@ -245,6 +294,7 @@ export async function generatePipIncentiveSummaryReport(
     eligibilityRate: o.totalEntries > 0 ? o.daysEligible / o.totalEntries : 0,
     totalIncentive: o.totalIncentive,
     avgPerDay: o.daysEligible > 0 ? Math.round(o.totalIncentive / o.daysEligible) : 0,
+    totalDowntimeMinutes: o.totalDowntimeMinutes,
   }));
   const opSheet: ReportSheet = { name: 'Operator-wise', columns: opColumns, rows: opRows };
 
@@ -308,15 +358,57 @@ export async function generatePipIncentiveSummaryReport(
   const dailyRows = Array.from(dailyMap.values());
   const dailySheet: ReportSheet = { name: 'Daily Trend', columns: dailyColumns, rows: dailyRows };
 
+  // ── Operation-wise Sheet ──
+  const operationAggMap = new Map<string, { code: string; name: string; processCategory: string; entries: number; totalQty: number; totalIncentive: number }>();
+  for (const e of entries) {
+    if (!e.operationId) continue;
+    const key = e.operationId;
+    const opInfo = (e as any).operation ? { code: (e as any).operation.code, name: (e as any).operation.name, processCategory: (e as any).operation.processCategory?.name ?? '' } : opMap.get(key);
+    const existing = operationAggMap.get(key);
+    if (existing) {
+      existing.entries += 1;
+      existing.totalQty += e.qtyProduced;
+      existing.totalIncentive += dec(e.totalIncentive);
+    } else {
+      operationAggMap.set(key, {
+        code: opInfo?.code ?? '',
+        name: opInfo?.name ?? '',
+        processCategory: opInfo?.processCategory ?? '',
+        entries: 1,
+        totalQty: e.qtyProduced,
+        totalIncentive: dec(e.totalIncentive),
+      });
+    }
+  }
+  const operationColumns: SheetColumn[] = [
+    { header: 'Operation Code', key: 'code', width: 16 },
+    { header: 'Operation Name', key: 'name', width: 22 },
+    { header: 'Process Category', key: 'processCategory', width: 18 },
+    { header: 'Entries', key: 'entries', width: 12, format: 'number' },
+    { header: 'Total Qty', key: 'totalQty', width: 14, format: 'number' },
+    { header: 'Total Incentive', key: 'totalIncentive', width: 16, format: 'currency' },
+    { header: 'Avg Incentive/Entry', key: 'avgIncentive', width: 18, format: 'currency' },
+  ];
+  const operationRows = Array.from(operationAggMap.values()).map(o => ({
+    code: o.code,
+    name: o.name,
+    processCategory: o.processCategory,
+    entries: o.entries,
+    totalQty: o.totalQty,
+    totalIncentive: o.totalIncentive,
+    avgIncentive: o.entries > 0 ? Math.round((o.totalIncentive / o.entries) * 100) / 100 : 0,
+  }));
+  const operationSheet: ReportSheet = { name: 'Operation-wise', columns: operationColumns, rows: operationRows };
+
   const period = `${filters.dateFrom ?? ''} to ${filters.dateTo ?? ''}`;
   const config: ReportConfig = {
     companyName,
     reportTitle: 'PIP Incentive Summary Report',
     period,
-    sheets: [monthlySummarySheet, opSheet, partSheet, dailySheet],
+    sheets: [monthlySummarySheet, opSheet, partSheet, dailySheet, operationSheet],
   };
 
-  return generateExcelReport(config);
+  return finalizeReport(config, format);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -327,16 +419,18 @@ export async function generatePipOperatorPerformanceReport(
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
 ): Promise<Buffer> {
   const where = buildPipWhere(filters, scope);
 
   const entries = await platformPrisma.pipDailyEntry.findMany({
     where,
-    include: {
-      operator: { select: { firstName: true, lastName: true, employeeId: true } },
-    },
+    include: pipEntryInclude,
     orderBy: [{ operatorId: 'asc' }, { entryDate: 'asc' }],
   });
+
+  const { opMap } = await buildLookups(scope.companyId, entries);
 
   // ── Summary Sheet (per operator aggregate) ──
   const opAggMap = new Map<string, {
@@ -386,6 +480,7 @@ export async function generatePipOperatorPerformanceReport(
     { header: 'Emp ID', key: 'empId', width: 14 },
     { header: 'Operator', key: 'name', width: 22 },
     { header: 'Date', key: 'entryDate', width: 14, format: 'date' },
+    { header: 'Operation', key: 'operation', width: 18 },
     { header: 'Achievement %', key: 'achievementPct', width: 16, format: 'percentage' },
     { header: 'Eligible', key: 'isEligible', width: 10 },
     { header: 'Incentive', key: 'totalIncentive', width: 14, format: 'currency' },
@@ -394,6 +489,7 @@ export async function generatePipOperatorPerformanceReport(
     empId: e.operator?.employeeId ?? '',
     name: `${e.operator?.firstName ?? ''} ${e.operator?.lastName ?? ''}`.trim(),
     entryDate: e.entryDate,
+    operation: e.operation ? `${e.operation.code} - ${e.operation.name}` : (e.operationId ? opMap.get(e.operationId)?.name ?? '' : ''),
     achievementPct: dec(e.achievementPct) / 100,
     isEligible: e.isEligible ? 'Yes' : 'No',
     totalIncentive: dec(e.totalIncentive),
@@ -432,7 +528,7 @@ export async function generatePipOperatorPerformanceReport(
     sheets: [summarySheet, detailSheet, trendSheet],
   };
 
-  return generateExcelReport(config);
+  return finalizeReport(config, format);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -443,15 +539,21 @@ export async function generatePipMachineUtilizationReport(
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
 ): Promise<Buffer> {
   const where = buildPipWhere(filters, scope);
 
   const entries = await platformPrisma.pipDailyEntry.findMany({
     where,
+    include: {
+      operation: { select: { code: true, name: true, processCategory: { select: { name: true } } } },
+      downtimeReason: { select: { code: true, name: true } },
+    },
     orderBy: [{ machineId: 'asc' }, { entryDate: 'asc' }],
   });
 
-  const { machineMap, shiftMap } = await buildLookups(scope.companyId, entries);
+  const { machineMap, shiftMap, opMap, dtMap } = await buildLookups(scope.companyId, entries);
 
   // ── Summary Sheet ──
   const machineAggMap = new Map<string, { name: string; totalQty: number; totalTarget: number; entries: number; totalIncentive: number }>();
@@ -497,15 +599,17 @@ export async function generatePipMachineUtilizationReport(
     { header: 'Machine', key: 'machine', width: 22 },
     { header: 'Date', key: 'entryDate', width: 14, format: 'date' },
     { header: 'Shift', key: 'shift', width: 14 },
+    { header: 'Operation', key: 'operation', width: 18 },
     { header: 'Target', key: 'shiftTargetQty', width: 12, format: 'number' },
     { header: 'Produced', key: 'qtyProduced', width: 12, format: 'number' },
     { header: 'Achievement %', key: 'achievementPct', width: 14, format: 'percentage' },
     { header: 'Incentive', key: 'totalIncentive', width: 14, format: 'currency' },
   ];
-  const mDetailRows = entries.map((e) => ({
+  const mDetailRows = entries.map((e: any) => ({
     machine: machineMap.get(e.machineId) ?? '',
     entryDate: e.entryDate,
     shift: shiftMap.get(e.shiftId) ?? '',
+    operation: e.operation ? `${e.operation.code} - ${e.operation.name}` : (e.operationId ? opMap.get(e.operationId)?.name ?? '' : ''),
     shiftTargetQty: e.shiftTargetQty,
     qtyProduced: e.qtyProduced,
     achievementPct: dec(e.achievementPct) / 100,
@@ -550,15 +654,50 @@ export async function generatePipMachineUtilizationReport(
   }));
   const shiftAnalysisSheet: ReportSheet = { name: 'Shift Analysis', columns: shiftAnalysisColumns, rows: shiftAnalysisRows };
 
+  // ── Downtime Analysis Sheet ──
+  const downtimeAggMap = new Map<string, { machine: string; downtimeReason: string; occurrences: number; totalMinutes: number }>();
+  for (const e of entries) {
+    if (!e.downtimeReasonId || !e.downtimeMinutes) continue;
+    const key = `${e.machineId}|${e.downtimeReasonId}`;
+    const dtInfo = (e as any).downtimeReason ? { code: (e as any).downtimeReason.code, name: (e as any).downtimeReason.name } : dtMap.get(e.downtimeReasonId);
+    const existing = downtimeAggMap.get(key);
+    if (existing) {
+      existing.occurrences += 1;
+      existing.totalMinutes += e.downtimeMinutes;
+    } else {
+      downtimeAggMap.set(key, {
+        machine: machineMap.get(e.machineId) ?? e.machineId,
+        downtimeReason: dtInfo ? `${dtInfo.code} - ${dtInfo.name}` : e.downtimeReasonId,
+        occurrences: 1,
+        totalMinutes: e.downtimeMinutes,
+      });
+    }
+  }
+  const downtimeColumns: SheetColumn[] = [
+    { header: 'Machine', key: 'machine', width: 22 },
+    { header: 'Downtime Reason', key: 'downtimeReason', width: 22 },
+    { header: 'Occurrences', key: 'occurrences', width: 14, format: 'number' },
+    { header: 'Total Minutes', key: 'totalMinutes', width: 14, format: 'number' },
+    { header: 'Avg Minutes', key: 'avgMinutes', width: 14, format: 'number' },
+  ];
+  const downtimeRows = Array.from(downtimeAggMap.values()).map(d => ({
+    machine: d.machine,
+    downtimeReason: d.downtimeReason,
+    occurrences: d.occurrences,
+    totalMinutes: d.totalMinutes,
+    avgMinutes: d.occurrences > 0 ? Math.round((d.totalMinutes / d.occurrences) * 100) / 100 : 0,
+  }));
+  const downtimeSheet: ReportSheet = { name: 'Downtime Analysis', columns: downtimeColumns, rows: downtimeRows };
+
   const period = `${filters.dateFrom ?? ''} to ${filters.dateTo ?? ''}`;
   const config: ReportConfig = {
     companyName,
     reportTitle: 'PIP Machine Utilization Report',
     period,
-    sheets: [summarySheet, mDetailSheet, shiftAnalysisSheet],
+    sheets: [summarySheet, mDetailSheet, shiftAnalysisSheet, downtimeSheet],
   };
 
-  return generateExcelReport(config);
+  return finalizeReport(config, format);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -569,15 +708,21 @@ export async function generatePipShiftProductivityReport(
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
 ): Promise<Buffer> {
   const where = buildPipWhere(filters, scope);
 
   const entries = await platformPrisma.pipDailyEntry.findMany({
     where,
+    include: {
+      operation: { select: { code: true, name: true, processCategory: { select: { name: true } } } },
+      downtimeReason: { select: { code: true, name: true } },
+    },
     orderBy: [{ shiftId: 'asc' }, { entryDate: 'asc' }],
   });
 
-  const { shiftMap } = await buildLookups(scope.companyId, entries);
+  const { shiftMap, opMap } = await buildLookups(scope.companyId, entries);
 
   // ── Summary Sheet ──
   const shiftAggMap = new Map<string, { name: string; totalQty: number; totalTarget: number; entries: number; totalIncentive: number; eligible: number }>();
@@ -623,14 +768,17 @@ export async function generatePipShiftProductivityReport(
   // ── Shift Comparison Sheet ──
   const comparisonColumns: SheetColumn[] = [
     { header: 'Shift', key: 'shift', width: 18 },
+    { header: 'Operation', key: 'operation', width: 18 },
     { header: 'Total Output', key: 'totalQty', width: 14, format: 'number' },
     { header: 'Total Target', key: 'totalTarget', width: 14, format: 'number' },
     { header: 'Eligible Entries', key: 'eligible', width: 14, format: 'number' },
     { header: 'Total Incentive', key: 'totalIncentive', width: 16, format: 'currency' },
     { header: 'Incentive/Entry', key: 'incentivePerEntry', width: 16, format: 'currency' },
   ];
+  // Aggregate by shift (keeping original rows but adding operation info)
   const comparisonRows = Array.from(shiftAggMap.values()).map(s => ({
     shift: s.name,
+    operation: '', // summary-level — no single operation
     totalQty: s.totalQty,
     totalTarget: s.totalTarget,
     eligible: s.eligible,
@@ -676,7 +824,7 @@ export async function generatePipShiftProductivityReport(
     sheets: [summarySheet, comparisonSheet, trendSheet],
   };
 
-  return generateExcelReport(config);
+  return finalizeReport(config, format);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -687,6 +835,8 @@ export async function generatePipPayrollMergeReport(
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
 ): Promise<Buffer> {
   // Query monthly reports with MERGED status
   const monthlyWhere: Record<string, unknown> = { companyId: scope.companyId, status: 'MERGED' };
@@ -731,6 +881,7 @@ export async function generatePipPayrollMergeReport(
     { header: 'Month', key: 'monthYear', width: 14 },
     { header: 'Operator ID', key: 'operatorId', width: 28 },
     { header: 'Operator Name', key: 'operatorName', width: 22 },
+    { header: 'Operation', key: 'operation', width: 18 },
     { header: 'Days Eligible', key: 'daysEligible', width: 14, format: 'number' },
     { header: 'Total Incentive', key: 'totalIncentive', width: 16, format: 'currency' },
   ];
@@ -743,6 +894,7 @@ export async function generatePipPayrollMergeReport(
           monthYear: `${String(r.month).padStart(2, '0')}/${r.year}`,
           operatorId: op.operatorId ?? '',
           operatorName: op.operatorName ?? op.name ?? '',
+          operation: op.operationName ?? op.operation ?? '',
           daysEligible: op.daysEligible ?? op.eligibleDays ?? 0,
           totalIncentive: dec(op.totalIncentive ?? op.incentive ?? 0),
         });
@@ -759,7 +911,7 @@ export async function generatePipPayrollMergeReport(
     sheets: [mergeSummarySheet, empDetailSheet],
   };
 
-  return generateExcelReport(config);
+  return finalizeReport(config, format);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -770,15 +922,15 @@ export async function generatePipExceptionReport(
   companyName: string,
   filters: DashboardFilters,
   scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
 ): Promise<Buffer> {
   const where = buildPipWhere(filters, scope);
 
   // ── Below Target: entries where isEligible = false ──
   const belowTargetEntries = await platformPrisma.pipDailyEntry.findMany({
     where: { ...where, isEligible: false },
-    include: {
-      operator: { select: { firstName: true, lastName: true, employeeId: true } },
-    },
+    include: pipEntryInclude,
     orderBy: [{ entryDate: 'desc' }],
   });
 
@@ -791,9 +943,13 @@ export async function generatePipExceptionReport(
     { header: 'Shift', key: 'shift', width: 14 },
     { header: 'Machine', key: 'machine', width: 18 },
     { header: 'Part', key: 'part', width: 18 },
+    { header: 'Operation', key: 'operation', width: 18 },
+    { header: 'Process Category', key: 'processCategory', width: 16 },
     { header: 'Target', key: 'shiftTargetQty', width: 12, format: 'number' },
     { header: 'Produced', key: 'qtyProduced', width: 12, format: 'number' },
     { header: 'Achievement %', key: 'achievementPct', width: 14, format: 'percentage' },
+    { header: 'Downtime Reason', key: 'downtimeReason', width: 18 },
+    { header: 'Downtime (min)', key: 'downtimeMinutes', width: 14, format: 'number' },
     { header: 'NC Count', key: 'ncCount', width: 10, format: 'number' },
     { header: 'NC Reason', key: 'ncReason', width: 24 },
   ];
@@ -804,9 +960,13 @@ export async function generatePipExceptionReport(
     shift: btLookups.shiftMap.get(e.shiftId) ?? '',
     machine: btLookups.machineMap.get(e.machineId) ?? '',
     part: btLookups.partMap.get(e.partId) ?? '',
+    operation: e.operation ? `${e.operation.code} - ${e.operation.name}` : (e.operationId ? btLookups.opMap.get(e.operationId)?.name ?? '' : ''),
+    processCategory: e.operation?.processCategory?.name ?? (e.operationId ? btLookups.opMap.get(e.operationId)?.processCategory ?? '' : ''),
     shiftTargetQty: e.shiftTargetQty,
     qtyProduced: e.qtyProduced,
     achievementPct: dec(e.achievementPct) / 100,
+    downtimeReason: e.downtimeReason ? `${e.downtimeReason.code} - ${e.downtimeReason.name}` : (e.downtimeReasonId ? btLookups.dtMap.get(e.downtimeReasonId)?.name ?? '' : ''),
+    downtimeMinutes: e.downtimeMinutes ?? 0,
     ncCount: e.ncCount,
     ncReason: e.ncReason ?? '',
   }));
@@ -895,13 +1055,131 @@ export async function generatePipExceptionReport(
   }
   const dupSheet: ReportSheet = { name: 'Duplicates', columns: dupColumns, rows: dupRows };
 
+  // ── High Downtime Sheet: entries where downtimeMinutes > 30 ──
+  const highDowntimeEntries = await platformPrisma.pipDailyEntry.findMany({
+    where: { ...where, downtimeMinutes: { gt: 30 } },
+    include: pipEntryInclude,
+    orderBy: [{ downtimeMinutes: 'desc' }],
+  });
+
+  const hdLookups = await buildLookups(scope.companyId, highDowntimeEntries);
+
+  const highDowntimeColumns: SheetColumn[] = [
+    { header: 'Date', key: 'entryDate', width: 14, format: 'date' },
+    { header: 'Emp ID', key: 'employeeId', width: 14 },
+    { header: 'Operator', key: 'operatorName', width: 22 },
+    { header: 'Machine', key: 'machine', width: 18 },
+    { header: 'Operation', key: 'operation', width: 18 },
+    { header: 'Downtime Reason', key: 'downtimeReason', width: 18 },
+    { header: 'Downtime (min)', key: 'downtimeMinutes', width: 14, format: 'number' },
+    { header: 'Qty Produced', key: 'qtyProduced', width: 14, format: 'number' },
+  ];
+  const highDowntimeRows = highDowntimeEntries.map((e: any) => ({
+    entryDate: e.entryDate,
+    employeeId: e.operator?.employeeId ?? '',
+    operatorName: `${e.operator?.firstName ?? ''} ${e.operator?.lastName ?? ''}`.trim(),
+    machine: hdLookups.machineMap.get(e.machineId) ?? '',
+    operation: e.operation ? `${e.operation.code} - ${e.operation.name}` : (e.operationId ? hdLookups.opMap.get(e.operationId)?.name ?? '' : ''),
+    downtimeReason: e.downtimeReason ? `${e.downtimeReason.code} - ${e.downtimeReason.name}` : (e.downtimeReasonId ? hdLookups.dtMap.get(e.downtimeReasonId)?.name ?? '' : ''),
+    downtimeMinutes: e.downtimeMinutes ?? 0,
+    qtyProduced: e.qtyProduced,
+  }));
+  const highDowntimeSheet: ReportSheet = { name: 'High Downtime', columns: highDowntimeColumns, rows: highDowntimeRows };
+
   const period = `${filters.dateFrom ?? ''} to ${filters.dateTo ?? ''}`;
   const config: ReportConfig = {
     companyName,
     reportTitle: 'PIP Exception Report',
     period,
-    sheets: [belowTargetSheet, missingSheet, dupSheet],
+    sheets: [belowTargetSheet, missingSheet, dupSheet, highDowntimeSheet],
   };
 
-  return generateExcelReport(config);
+  return finalizeReport(config, format);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// R33: PIP Slab Config Report
+// ═══════════════════════════════════════════════════════════════
+export async function generatePipSlabConfigReport(
+  _tenantDb: any,
+  companyName: string,
+  _filters: DashboardFilters,
+  scope: DataScope,
+  _generatedBy?: string,
+  format?: string,
+): Promise<Buffer> {
+  const configs = await platformPrisma.pipSlabConfig.findMany({
+    where: { companyId: scope.companyId },
+    include: {
+      machine: { select: { assetCode: true, assetName: true } },
+      operation: { select: { code: true, name: true, processCategory: { select: { name: true } } } },
+      part: { select: { partNumber: true, name: true } },
+    },
+  });
+
+  // ── Config Summary Sheet ──
+  const summaryColumns: SheetColumn[] = [
+    { header: 'Machine Code', key: 'machineCode', width: 16 },
+    { header: 'Machine Name', key: 'machineName', width: 20 },
+    { header: 'Operation Code', key: 'operationCode', width: 16 },
+    { header: 'Operation Name', key: 'operationName', width: 20 },
+    { header: 'Part No', key: 'partNo', width: 14 },
+    { header: 'Part Name', key: 'partName', width: 20 },
+    { header: 'Process Category', key: 'processCategory', width: 18 },
+    { header: 'Shift Target Qty', key: 'shiftTargetQty', width: 16, format: 'number' },
+    { header: 'Tiers Count', key: 'tiersCount', width: 12, format: 'number' },
+    { header: 'Status', key: 'status', width: 14, format: 'conditional' as any },
+  ];
+  const summaryRows = configs.map((c: any) => {
+    const tiers = Array.isArray(c.slabTiers) ? c.slabTiers : [];
+    return {
+      machineCode: c.machine?.assetCode ?? '',
+      machineName: c.machine?.assetName ?? '',
+      operationCode: c.operation?.code ?? '',
+      operationName: c.operation?.name ?? '',
+      partNo: c.part?.partNumber ?? '',
+      partName: c.part?.name ?? '',
+      processCategory: c.operation?.processCategory?.name ?? '',
+      shiftTargetQty: c.shiftTargetQty,
+      tiersCount: tiers.length,
+      status: c.status,
+    };
+  });
+  const summarySheet: ReportSheet = { name: 'Config Summary', columns: summaryColumns, rows: summaryRows };
+
+  // ── Tier Details Sheet ──
+  const tierColumns: SheetColumn[] = [
+    { header: 'Machine Code', key: 'machineCode', width: 16 },
+    { header: 'Operation Code', key: 'operationCode', width: 16 },
+    { header: 'Part No', key: 'partNo', width: 14 },
+    { header: 'Slab Label', key: 'slabLabel', width: 18 },
+    { header: 'Min %', key: 'minPct', width: 12, format: 'percentage' },
+    { header: 'Max %', key: 'maxPct', width: 12, format: 'percentage' },
+    { header: 'Rate /pc', key: 'rate', width: 14, format: 'currency' },
+  ];
+  const tierRows: Record<string, unknown>[] = [];
+  for (const c of configs) {
+    const tiers = Array.isArray(c.slabTiers) ? c.slabTiers as any[] : [];
+    for (const tier of tiers) {
+      tierRows.push({
+        machineCode: (c as any).machine?.assetCode ?? '',
+        operationCode: (c as any).operation?.code ?? '',
+        partNo: (c as any).part?.partNumber ?? '',
+        slabLabel: tier.label ?? tier.slabLabel ?? '',
+        minPct: (tier.minPct ?? tier.min ?? 0) / 100,
+        maxPct: (tier.maxPct ?? tier.max ?? 0) / 100,
+        rate: dec(tier.rate ?? tier.ratePerPc ?? 0),
+      });
+    }
+  }
+  const tierSheet: ReportSheet = { name: 'Tier Details', columns: tierColumns, rows: tierRows };
+
+  const config: ReportConfig = {
+    companyName,
+    reportTitle: 'PIP Slab Configuration Report',
+    period: 'Current Configuration',
+    sheets: [summarySheet, tierSheet],
+  };
+
+  return finalizeReport(config, format);
 }

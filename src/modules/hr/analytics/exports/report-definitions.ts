@@ -203,7 +203,7 @@ export const REPORT_DEFINITIONS: Record<string, ReportDefinition> = {
     key: 'pip-incentive-summary',
     title: 'PIP Incentive Summary Report',
     category: 'Production',
-    sheetNames: ['Monthly Summary', 'Operator-wise', 'Part-wise', 'Daily Trend'],
+    sheetNames: ['Monthly Summary', 'Operator-wise', 'Part-wise', 'Daily Trend', 'Operation-wise'],
     requiredPermission: 'production.pip:export',
   },
   'pip-operator-performance': {
@@ -217,7 +217,7 @@ export const REPORT_DEFINITIONS: Record<string, ReportDefinition> = {
     key: 'pip-machine-utilization',
     title: 'PIP Machine Utilization Report',
     category: 'Production',
-    sheetNames: ['Summary', 'Machine-wise', 'Shift Analysis'],
+    sheetNames: ['Summary', 'Machine-wise', 'Shift Analysis', 'Downtime Analysis'],
     requiredPermission: 'production.pip:export',
   },
   'pip-shift-productivity': {
@@ -238,7 +238,14 @@ export const REPORT_DEFINITIONS: Record<string, ReportDefinition> = {
     key: 'pip-exception',
     title: 'PIP Exception Report',
     category: 'Production',
-    sheetNames: ['Below Target', 'Missing Entries', 'Duplicates'],
+    sheetNames: ['Below Target', 'Missing Entries', 'Duplicates', 'High Downtime'],
+    requiredPermission: 'production.pip:export',
+  },
+  'pip-slab-config': {
+    key: 'pip-slab-config',
+    title: 'PIP Slab Configuration Report',
+    category: 'Production',
+    sheetNames: ['Config Summary', 'Tier Details'],
     requiredPermission: 'production.pip:export',
   },
 
@@ -287,4 +294,5 @@ export const REPORT_DESCRIPTIONS: Record<string, string> = {
   'pip-shift-productivity': 'Shift comparison report analyzing production output, incentive distribution, and target achievement across shifts',
   'pip-payroll-merge': 'Audit report of incentive amounts merged into payroll runs with employee-wise breakdown',
   'pip-exception': 'Exception report highlighting below-target operators, missing production entries, and duplicate submissions',
+  'pip-slab-config': 'Current slab configurations with machine-operation-part breakdown and tier details',
 };

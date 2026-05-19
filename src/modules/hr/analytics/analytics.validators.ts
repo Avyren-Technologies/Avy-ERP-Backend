@@ -21,7 +21,7 @@ export const drilldownFiltersSchema = dashboardFiltersSchema.extend({
 });
 
 export const exportFiltersSchema = z.object({
-  format: z.enum(['excel']).default('excel'),
+  format: z.enum(['excel', 'pdf']).default('excel'),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
   departmentId: z.string().optional(),
