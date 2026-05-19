@@ -21,6 +21,8 @@ import {
   createOperationSchema,
   updateOperationSchema,
   listOperationsSchema,
+  createProcessCategorySchema,
+  updateProcessCategorySchema,
 } from './pip.validators';
 
 export class PipController {
@@ -64,7 +66,7 @@ export class PipController {
       page,
       limit,
       search: parsed.data.search,
-      processType: parsed.data.processType,
+      processCategoryId: parsed.data.processCategoryId,
       status: parsed.data.status,
     });
 
@@ -402,6 +404,53 @@ export class PipController {
 
     const result = await pipService.reversePayrollMerge(companyId, req.params.id!, userId);
     res.json(createSuccessResponse(result, 'Payroll merge reversed'));
+  });
+
+  // ── Process Categories ────────────────────────────────────────────
+
+  listProcessCategories = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const categories = await pipService.listProcessCategories(companyId);
+    res.json(createSuccessResponse(categories, 'Process categories retrieved'));
+  });
+
+  createProcessCategory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createProcessCategorySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const category = await pipService.createProcessCategory(companyId, parsed.data, userId);
+    res.status(201).json(createSuccessResponse(category, 'Process category created'));
+  });
+
+  updateProcessCategory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateProcessCategorySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const category = await pipService.updateProcessCategory(companyId, req.params.id!, parsed.data, userId);
+    res.json(createSuccessResponse(category, 'Process category updated'));
+  });
+
+  deleteProcessCategory = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await pipService.deleteProcessCategory(companyId, req.params.id!, userId);
+    res.json(createSuccessResponse(result, 'Process category deleted'));
   });
 
   // ── Export (generates actual PDF/Excel binary files) ────

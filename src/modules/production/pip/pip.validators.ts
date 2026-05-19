@@ -110,13 +110,12 @@ export type MergeToPayrollInput = z.infer<typeof mergeToPayrollSchema>;
 
 // ── Operations ─────────────────────────────────────────────────────
 
-const ProcessTypeEnum = z.enum(['MACHINING', 'MOULDING', 'ASSEMBLY', 'INSPECTION', 'FINISHING', 'PACKAGING']);
 const OperationStatusEnum = z.enum(['ACTIVE', 'INACTIVE']);
 
 export const createOperationSchema = z.object({
-  operationNumber: z.string().min(1, 'Operation number is required'),
+  operationNumber: z.string().optional(),
   name: z.string().min(1, 'Operation name is required'),
-  processType: ProcessTypeEnum.optional(),
+  processCategoryId: z.string().optional(),
   status: OperationStatusEnum.optional(),
 });
 export type CreateOperationInput = z.infer<typeof createOperationSchema>;
@@ -124,7 +123,7 @@ export type CreateOperationInput = z.infer<typeof createOperationSchema>;
 export const updateOperationSchema = z.object({
   operationNumber: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
-  processType: ProcessTypeEnum.optional(),
+  processCategoryId: z.string().nullable().optional(),
   status: OperationStatusEnum.optional(),
 });
 export type UpdateOperationInput = z.infer<typeof updateOperationSchema>;
@@ -133,9 +132,25 @@ export const listOperationsSchema = z.object({
   page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().optional(),
   search: z.string().optional(),
-  processType: ProcessTypeEnum.optional(),
+  processCategoryId: z.string().optional(),
   status: OperationStatusEnum.optional(),
 });
+
+// ── Process Categories ─────────────────────────────────────────────
+
+export const createProcessCategorySchema = z.object({
+  name: z.string().min(1, 'Process category name is required'),
+  code: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+export type CreateProcessCategoryInput = z.infer<typeof createProcessCategorySchema>;
+
+export const updateProcessCategorySchema = z.object({
+  name: z.string().min(1).optional(),
+  code: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateProcessCategoryInput = z.infer<typeof updateProcessCategorySchema>;
 export type ListOperationsInput = z.infer<typeof listOperationsSchema>;
 
 // ── List Filters ────────────────────────────────────────────────────

@@ -190,6 +190,14 @@ export const LINKED_SCREENS: readonly LinkedScreenOption[] = [
   },
 
   {
+    value: 'Operation Master',
+    label: 'Operation Master',
+    module: 'Production',
+    description: 'Auto-generates operation numbers (e.g. OP-0001)',
+    defaultPrefix: 'OP-',
+  },
+
+  {
     value: 'Quality Check',
     label: 'Quality Check',
     module: 'Production',

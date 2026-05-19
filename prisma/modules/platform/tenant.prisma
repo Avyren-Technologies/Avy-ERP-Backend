@@ -295,6 +295,7 @@ model Company {
   pipIncentiveConfig PipIncentiveConfig?
   pipMonthlyReports  PipMonthlyReport[]
   operations         Operation[]
+  processCategories  ProcessCategory[]
 
   @@map("companies")
 }

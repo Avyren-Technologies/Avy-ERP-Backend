@@ -4,6 +4,7 @@ import { ApiError } from '../../../shared/errors';
 import { auditLog } from '../../../shared/utils/audit';
 import { logger } from '../../../config/logger';
 import { calculateIncentive, PartEntry } from './pip-calculation';
+import { generateNextNumber } from '../../../shared/utils/number-series';
 import {
   CreateSlabConfigInput,
   BulkCreateSlabConfigInput,
@@ -124,7 +125,7 @@ export class PipService {
         where,
         include: {
           machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-          operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
+          operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
           part: { select: { id: true, partNumber: true, name: true } },
           location: { select: { id: true, name: true } },
         },
@@ -143,7 +144,7 @@ export class PipService {
       where: { id },
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
+        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -197,7 +198,7 @@ export class PipService {
       data: createData as any,
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
+        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -308,7 +309,7 @@ export class PipService {
       data: updateData,
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true } },
+        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -1353,10 +1354,10 @@ export class PipService {
   // ════════════════════════════════════════════════════════════════════
 
   async listOperations(companyId: string, filters: any) {
-    const { page = 1, limit = 25, search, processType, status } = filters;
+    const { page = 1, limit = 25, search, processCategoryId, status } = filters;
     const offset = (page - 1) * limit;
     const where: any = { companyId };
-    if (processType) where.processType = processType;
+    if (processCategoryId) where.processCategoryId = processCategoryId;
     if (status) where.status = status;
     if (search) {
       where.OR = [
@@ -1366,14 +1367,23 @@ export class PipService {
       ];
     }
     const [operations, total] = await Promise.all([
-      platformPrisma.operation.findMany({ where, skip: offset, take: limit, orderBy: { name: 'asc' } }),
+      platformPrisma.operation.findMany({
+        where,
+        include: { processCategory: { select: { id: true, name: true, code: true } } },
+        skip: offset,
+        take: limit,
+        orderBy: { name: 'asc' },
+      }),
       platformPrisma.operation.count({ where }),
     ]);
     return { operations, total, page, limit };
   }
 
   async getOperation(companyId: string, id: string) {
-    const op = await platformPrisma.operation.findUnique({ where: { id } });
+    const op = await platformPrisma.operation.findUnique({
+      where: { id },
+      include: { processCategory: { select: { id: true, name: true, code: true } } },
+    });
     if (!op || op.companyId !== companyId) throw ApiError.notFound('Operation not found');
     return op;
   }
@@ -1381,10 +1391,23 @@ export class PipService {
   async createOperation(companyId: string, data: any, userId: string) {
     const byName = await platformPrisma.operation.findUnique({ where: { companyId_name: { companyId, name: data.name } } });
     if (byName) throw ApiError.conflict(`Operation "${data.name}" already exists`);
-    const byNum = await platformPrisma.operation.findUnique({ where: { companyId_operationNumber: { companyId, operationNumber: data.operationNumber } } });
-    if (byNum) throw ApiError.conflict(`Operation number "${data.operationNumber}" already exists`);
 
-    // Auto-generate code OPR-0001
+    // Auto-generate operationNumber via Number Series
+    let operationNumber = data.operationNumber;
+    if (!operationNumber) {
+      operationNumber = await generateNextNumber(
+        platformPrisma,
+        companyId,
+        ['Operation Master'],
+        'Operation',
+      );
+    } else {
+      // If manually provided, check uniqueness
+      const byNum = await platformPrisma.operation.findUnique({ where: { companyId_operationNumber: { companyId, operationNumber } } });
+      if (byNum) throw ApiError.conflict(`Operation number "${operationNumber}" already exists`);
+    }
+
+    // Auto-generate code OPR-XXXX
     const count = await platformPrisma.operation.count({ where: { companyId } });
     let seq = count + 1;
     let code = `OPR-${String(seq).padStart(4, '0')}`;
@@ -1395,14 +1418,18 @@ export class PipService {
       if (retries > 100) throw ApiError.badRequest('Unable to generate unique operation code');
     }
 
+    const createData: Record<string, any> = {
+      companyId,
+      code,
+      operationNumber,
+      name: data.name,
+      status: data.status ?? 'ACTIVE',
+    };
+    if (data.processCategoryId) createData.processCategoryId = data.processCategoryId;
+
     const operation = await platformPrisma.operation.create({
-      data: {
-        companyId, code,
-        operationNumber: data.operationNumber,
-        name: data.name,
-        processType: data.processType ?? 'MACHINING',
-        status: data.status ?? 'ACTIVE',
-      },
+      data: createData as any,
+      include: { processCategory: { select: { id: true, name: true, code: true } } },
     });
 
     auditLog({ entityType: 'Operation', entityId: operation.id, action: 'CREATE', after: operation as any, changedBy: userId, companyId });
@@ -1425,10 +1452,14 @@ export class PipService {
     const updateData: Record<string, any> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.operationNumber !== undefined) updateData.operationNumber = data.operationNumber;
-    if (data.processType !== undefined) updateData.processType = data.processType;
+    if (data.processCategoryId !== undefined) updateData.processCategoryId = data.processCategoryId;
     if (data.status !== undefined) { updateData.status = data.status; updateData.isActive = data.status === 'ACTIVE'; }
 
-    const operation = await platformPrisma.operation.update({ where: { id }, data: updateData });
+    const operation = await platformPrisma.operation.update({
+      where: { id },
+      data: updateData,
+      include: { processCategory: { select: { id: true, name: true, code: true } } },
+    });
     auditLog({ entityType: 'Operation', entityId: id, action: 'UPDATE', before: existing as any, after: operation as any, changedBy: userId, companyId });
     return operation;
   }
@@ -1442,6 +1473,84 @@ export class PipService {
     if (entryCount > 0) throw ApiError.badRequest(`Cannot delete operation — referenced by ${entryCount} daily entry/entries`);
     await platformPrisma.operation.delete({ where: { id } });
     auditLog({ entityType: 'Operation', entityId: id, action: 'DELETE', before: existing as any, changedBy: userId, companyId });
+    return { id };
+  }
+  // ════════════════════════════════════════════════════════════════════
+  // Process Category CRUD
+  // ════════════════════════════════════════════════════════════════════
+
+  async listProcessCategories(companyId: string) {
+    return platformPrisma.processCategory.findMany({
+      where: { companyId },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createProcessCategory(companyId: string, data: any, userId: string) {
+    const byName = await platformPrisma.processCategory.findUnique({
+      where: { companyId_name: { companyId, name: data.name } },
+    });
+    if (byName) throw ApiError.conflict(`Process category "${data.name}" already exists`);
+
+    // Auto-generate code PRC-001, PRC-002, ...
+    let code = data.code;
+    if (!code) {
+      const count = await platformPrisma.processCategory.count({ where: { companyId } });
+      let seq = count + 1;
+      code = `PRC-${String(seq).padStart(3, '0')}`;
+      let retries = 0;
+      while (await platformPrisma.processCategory.findFirst({ where: { companyId, code } })) {
+        seq++; retries++;
+        code = `PRC-${String(seq).padStart(3, '0')}`;
+        if (retries > 100) throw ApiError.badRequest('Unable to generate unique process category code');
+      }
+    }
+
+    const category = await platformPrisma.processCategory.create({
+      data: {
+        companyId,
+        name: data.name,
+        code,
+        isActive: data.isActive ?? true,
+      },
+    });
+
+    auditLog({ entityType: 'ProcessCategory', entityId: category.id, action: 'CREATE', after: category as any, changedBy: userId, companyId });
+    return category;
+  }
+
+  async updateProcessCategory(companyId: string, id: string, data: any, userId: string) {
+    const existing = await platformPrisma.processCategory.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) throw ApiError.notFound('Process category not found');
+
+    if (data.name && data.name !== existing.name) {
+      const dup = await platformPrisma.processCategory.findUnique({
+        where: { companyId_name: { companyId, name: data.name } },
+      });
+      if (dup) throw ApiError.conflict(`Process category "${data.name}" already exists`);
+    }
+
+    const updateData: Record<string, any> = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.code !== undefined) updateData.code = data.code;
+    if (data.isActive !== undefined) updateData.isActive = data.isActive;
+
+    const category = await platformPrisma.processCategory.update({ where: { id }, data: updateData });
+    auditLog({ entityType: 'ProcessCategory', entityId: id, action: 'UPDATE', before: existing as any, after: category as any, changedBy: userId, companyId });
+    return category;
+  }
+
+  async deleteProcessCategory(companyId: string, id: string, userId: string) {
+    const existing = await platformPrisma.processCategory.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) throw ApiError.notFound('Process category not found');
+
+    const operationCount = await platformPrisma.operation.count({ where: { processCategoryId: id } });
+    if (operationCount > 0) {
+      throw ApiError.badRequest(`Cannot delete process category — referenced by ${operationCount} operation(s)`);
+    }
+
+    await platformPrisma.processCategory.delete({ where: { id } });
+    auditLog({ entityType: 'ProcessCategory', entityId: id, action: 'DELETE', before: existing as any, changedBy: userId, companyId });
     return { id };
   }
 }

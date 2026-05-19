@@ -227,7 +227,8 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
 
   // ═══════ PRODUCTION INCENTIVE PLAN ═══════
   { id: 'pip-dashboard', label: 'Dashboard', icon: 'layout-dashboard', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/dashboard', module: 'production', group: 'PIP Dashboard', moduleSeparator: 'Production Incentive', roleScope: 'company', sortOrder: 850 },
-  { id: 'pip-operations', label: 'Operations', icon: 'settings-2', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/operations', module: 'production', group: 'PIP Masters', roleScope: 'company', sortOrder: 852 },
+  { id: 'pip-process-categories', label: 'Process Categories', icon: 'tags', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/process-categories', module: 'production', group: 'PIP Masters', roleScope: 'company', sortOrder: 851 },
+  { id: 'pip-operations', label: 'Operations Master', icon: 'settings-2', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/operations', module: 'production', group: 'PIP Masters', roleScope: 'company', sortOrder: 852 },
   { id: 'pip-slab-config', label: 'Slab Configuration', icon: 'layers', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/slab-config', module: 'production', group: 'PIP Masters', roleScope: 'company', sortOrder: 853 },
   { id: 'pip-daily-entry', label: 'Daily Production Entry', icon: 'clipboard-edit', requiredPerm: 'production.pip:create', path: '/app/company/production/pip/daily-entry', module: 'production', group: 'PIP Transactions', roleScope: 'company', sortOrder: 854 },
   { id: 'pip-calculator', label: 'Incentive Calculator', icon: 'calculator', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/calculator', module: 'production', group: 'PIP Transactions', roleScope: 'company', sortOrder: 855 },

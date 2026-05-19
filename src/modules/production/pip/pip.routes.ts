@@ -23,6 +23,12 @@ router.use(asyncHandler(async (req: Request, res: Response, next: NextFunction) 
 router.get('/config', requirePermissions(['production.pip:read']), controller.getIncentiveConfig);
 router.patch('/config', requirePermissions(['production.pip:configure']), controller.updateIncentiveConfig);
 
+// ── Process Categories ─────────────────────────────────────────────
+router.get('/process-categories', requirePermissions(['production.pip:read']), controller.listProcessCategories);
+router.post('/process-categories', requirePermissions(['production.pip:create']), controller.createProcessCategory);
+router.patch('/process-categories/:id', requirePermissions(['production.pip:update']), controller.updateProcessCategory);
+router.delete('/process-categories/:id', requirePermissions(['production.pip:delete']), controller.deleteProcessCategory);
+
 // ── Operations ─────────────────────────────────────────────────────
 router.get('/operations', requirePermissions(['production.pip:read']), controller.listOperations);
 router.post('/operations', requirePermissions(['production.pip:create']), controller.createOperation);
