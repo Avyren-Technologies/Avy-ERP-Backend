@@ -151,15 +151,15 @@ class AnalyticsController {
     const userId = req.user?.id;
     if (!userId) throw ApiError.badRequest('User ID is required');
 
-    // Rate limiting: max 20 exports per hour per user
+    // Rate limiting: max 50 exports per hour per user
     try {
       const rateLimitKey = `export_rate:${userId}`;
       const currentCount = await cacheRedis.incr(rateLimitKey);
       if (currentCount === 1) {
         await cacheRedis.expire(rateLimitKey, 3600);
       }
-      if (currentCount > 20) {
-        throw ApiError.badRequest('Export rate limit exceeded. Max 20 per hour.');
+      if (currentCount > 50) {
+        throw ApiError.badRequest('RATE_LIMIT_EXCEEDED');
       }
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -378,16 +378,16 @@ class AnalyticsController {
 
       res.json(createSuccessResponse({
         used,
-        limit: 20,
-        remaining: Math.max(0, 20 - used),
+        limit: 50,
+        remaining: Math.max(0, 50 - used),
         resetsInSeconds: ttl > 0 ? ttl : 0,
       }, 'Rate limit status'));
     } catch (err) {
       logger.warn('Rate limit status check failed, returning defaults', { error: (err as Error).message });
       res.json(createSuccessResponse({
         used: 0,
-        limit: 20,
-        remaining: 20,
+        limit: 50,
+        remaining: 50,
         resetsInSeconds: 0,
       }, 'Rate limit status'));
     }
