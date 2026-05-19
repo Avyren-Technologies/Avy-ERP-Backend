@@ -23,7 +23,7 @@ function formatCurrency(value: unknown): string {
 function formatPercentage(value: unknown): string {
   const num = typeof value === 'number' ? value : Number(value);
   if (isNaN(num)) return String(value ?? '');
-  return `${num.toFixed(1)}%`;
+  return `${(num * 100).toFixed(1)}%`;
 }
 
 function formatNumber(value: unknown): string {

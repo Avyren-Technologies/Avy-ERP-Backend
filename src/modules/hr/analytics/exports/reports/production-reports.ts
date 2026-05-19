@@ -1128,7 +1128,7 @@ export async function generatePipSlabConfigReport(
     { header: 'Process Category', key: 'processCategory', width: 18 },
     { header: 'Shift Target Qty', key: 'shiftTargetQty', width: 16, format: 'number' },
     { header: 'Tiers Count', key: 'tiersCount', width: 12, format: 'number' },
-    { header: 'Status', key: 'status', width: 14, format: 'conditional' as any },
+    { header: 'Status', key: 'status', width: 14, format: 'text', conditionalFormat: 'status' },
   ];
   const summaryRows = configs.map((c: any) => {
     const tiers = Array.isArray(c.slabTiers) ? c.slabTiers : [];
