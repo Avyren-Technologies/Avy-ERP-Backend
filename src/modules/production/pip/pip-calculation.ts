@@ -196,8 +196,8 @@ export function calculateMethod1(
     let appliedRate: number;
     let appliedSlabLabel: string;
 
-    if (ratioAfter < 1.0) {
-      // Case A — Below 100%: this part doesn't push cumulative to >= 1.0
+    if (ratioAfter <= 1.0) {
+      // Case A — At or below 100%: cumulative ratio hasn't strictly exceeded 1.0
       caseType = 'A';
       earningQty = 0;
       incentiveAmount = 0;
@@ -205,7 +205,7 @@ export function calculateMethod1(
       consideredPct = 0;
       appliedRate = 0;
       appliedSlabLabel = 'N/A';
-    } else if (ratioBefore >= 1.0) {
+    } else if (ratioBefore > 1.0) {
       // Case B — Already past 100%: all of this part's production earns
       caseType = 'B';
       earningQty = entry.qtyProduced;
@@ -224,7 +224,7 @@ export function calculateMethod1(
       // Case C — Crosses 100%: part of production consumed reaching threshold
       caseType = 'C';
       const ratioNeeded = 1.0 - ratioBefore;
-      const piecesNeeded = Math.ceil(ratioNeeded * entry.shiftTargetQty);
+      const piecesNeeded = Math.round(ratioNeeded * entry.shiftTargetQty);
       earningQty = Math.max(0, entry.qtyProduced - piecesNeeded);
 
       if (earningQty > 0) {
@@ -268,7 +268,7 @@ export function calculateMethod1(
   }
 
   const totalIncentive = round2(partResults.reduce((sum, p) => sum + p.incentiveAmount, 0));
-  const isEligible = cumulativeRatio >= 1.0;
+  const isEligible = cumulativeRatio > 1.0;
 
   return {
     totalIncentive,
@@ -325,8 +325,9 @@ export function calculateMethod2(
     const actualPct =
       entry.shiftTargetQty > 0 ? (entry.qtyProduced / entry.shiftTargetQty) * 100 : 0;
     const milestone = floorToMilestone(actualPct);
-    const milestoneQty = Math.round((milestone / 100) * entry.shiftTargetQty);
-    const earningQty = Math.max(0, entry.qtyProduced - milestoneQty);
+    const milestoneQty = Math.floor((milestone / 100) * entry.shiftTargetQty);
+    // Parts below 25% (milestone=0) earn nothing — they contribute no milestone credit
+    const earningQty = milestone > 0 ? Math.max(0, entry.qtyProduced - milestoneQty) : 0;
     const slab1Rate = entry.slabTiers.length > 0 ? entry.slabTiers[0]!.ratePerPiece : 0;
     const incentiveAmount = round2(earningQty * slab1Rate);
 
@@ -335,7 +336,7 @@ export function calculateMethod2(
     const achievementPct = round2(actualPct);
     const breakdown =
       milestone === 0
-        ? `Below 25% — milestone 0%, no contribution; ${earningQty} pcs x ₹${slab1Rate}`
+        ? `Below 25% — milestone 0%, no contribution, no earning`
         : `${milestone}% milestone, ${milestoneQty} counted, ${earningQty} pcs x ₹${slab1Rate} = ₹${incentiveAmount}`;
 
     partResults.push({
@@ -412,7 +413,16 @@ export function calculateIncentive(
     };
   }
 
-  return methodNumber === 1
-    ? calculateMethod1(entries, methodName)
-    : calculateMethod2(entries, methodName);
+  // Method 1: sort entries ascending by individual ratio (qty/target) so low-completion
+  // parts are consumed toward the 100% threshold first, maximising operator earnings.
+  // Method 2: order doesn't matter (each part is independent), pass as-is.
+  if (methodNumber === 1) {
+    const sorted = [...entries].sort((a, b) => {
+      const ratioA = a.shiftTargetQty > 0 ? a.qtyProduced / a.shiftTargetQty : 0;
+      const ratioB = b.shiftTargetQty > 0 ? b.qtyProduced / b.shiftTargetQty : 0;
+      return ratioA - ratioB;
+    });
+    return calculateMethod1(sorted, methodName);
+  }
+  return calculateMethod2(entries, methodName);
 }
