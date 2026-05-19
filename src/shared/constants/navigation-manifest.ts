@@ -233,7 +233,8 @@ export const NAVIGATION_MANIFEST: NavigationItem[] = [
   { id: 'pip-calculator', label: 'Incentive Calculator', icon: 'calculator', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/calculator', module: 'production', group: 'PIP Transactions', roleScope: 'company', sortOrder: 855 },
   { id: 'pip-daily-report', label: 'Daily Production Report', icon: 'file-bar-chart', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/daily-report', module: 'production', group: 'PIP Reports', roleScope: 'company', sortOrder: 856 },
   { id: 'pip-summary-report', label: 'Incentive Summary Report', icon: 'file-spreadsheet', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/summary-report', module: 'production', group: 'PIP Reports', roleScope: 'company', sortOrder: 857 },
-  { id: 'pip-config', label: 'Incentive Configuration', icon: 'settings', requiredPerm: 'production.pip:configure', path: '/app/company/production/pip/config', module: 'production', group: 'PIP Configuration', roleScope: 'company', sortOrder: 858 },
+  { id: 'pip-reports', label: 'PIP Reports', icon: 'reports', requiredPerm: 'production.pip:read', path: '/app/company/production/pip/reports', module: 'production', group: 'PIP Reports', roleScope: 'company', sortOrder: 858 },
+  { id: 'pip-config', label: 'Incentive Configuration', icon: 'settings', requiredPerm: 'production.pip:configure', path: '/app/company/production/pip/config', module: 'production', group: 'PIP Configuration', roleScope: 'company', sortOrder: 859 },
 
   // ═══════ REPORTS ═══════
   { id: 'rpt-audit', label: 'Audit Logs', icon: 'shield-check', requiredPerm: 'audit:read', path: '/app/reports/audit', module: null, group: 'Reports', roleScope: 'company', sortOrder: 900 },
