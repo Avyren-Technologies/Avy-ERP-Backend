@@ -27,6 +27,8 @@
 - `./deploy.sh logs app` — tail logs
 - `./deploy.sh migrate` — run Prisma migrations
 
+**Failed migration recovery (P3009):** see [docs/MEMORY-production-prisma-migration-recovery.md](./docs/MEMORY-production-prisma-migration-recovery.md)
+
 ### 5. `.dockerignore` — Keeps image clean
 
 ## Deployment Steps on Your Linux Server
