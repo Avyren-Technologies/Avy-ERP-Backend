@@ -414,8 +414,18 @@ export class MachineService {
       throw ApiError.conflict(`Machine zone "${data.name}" already exists`);
     }
 
-    const createData: Record<string, any> = { companyId, name: data.name };
-    if (data.code !== undefined) createData.code = data.code;
+    // Auto-generate code: ZN-001, ZN-002, ...
+    const count = await platformPrisma.machineZone.count({ where: { companyId } });
+    let seq = count + 1;
+    let code = `ZN-${String(seq).padStart(3, '0')}`;
+    let retries = 0;
+    while (await platformPrisma.machineZone.findFirst({ where: { companyId, code } })) {
+      seq++; retries++;
+      code = `ZN-${String(seq).padStart(3, '0')}`;
+      if (retries > 100) break;
+    }
+
+    const createData: Record<string, any> = { companyId, name: data.name, code };
     if (data.locationId !== undefined) createData.locationId = data.locationId;
 
     return platformPrisma.machineZone.create({
