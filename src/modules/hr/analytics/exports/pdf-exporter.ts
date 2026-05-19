@@ -1,13 +1,10 @@
-// ─── Enterprise PDF Export Engine ───
-import * as pdfMake from 'pdfmake';
-import type { TDocumentDefinitions, Content, TableCell, Style, ContentCanvas } from 'pdfmake/interfaces';
+// ─── Enterprise PDF Export Engine (Puppeteer) ───
+import puppeteer from 'puppeteer';
 import type { ReportConfig, SheetColumn } from './excel-exporter';
 
 // ─── Color Constants (match Excel exporter's indigo theme) ───
 const INDIGO = '#4F46E5';
-const INDIGO_LIGHT = '#EEF2FF';
 const GRAY_100 = '#F3F4F6';
-const GRAY_200 = '#E5E7EB';
 const GRAY_500 = '#6B7280';
 const GRAY_700 = '#374151';
 const WHITE = '#FFFFFF';
@@ -17,7 +14,7 @@ const WHITE = '#FFFFFF';
 function formatCurrency(value: unknown): string {
   const num = typeof value === 'number' ? value : Number(value);
   if (isNaN(num)) return String(value ?? '');
-  return `\u20B9${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatPercentage(value: unknown): string {
@@ -48,265 +45,262 @@ function formatCellValue(value: unknown, format?: SheetColumn['format']): string
   }
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function isNumericFormat(format?: SheetColumn['format']): boolean {
   return format === 'currency' || format === 'number' || format === 'percentage';
 }
 
-function getGeneratedTimestamp(): string {
-  return new Date().toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
+function getStatusColor(value: unknown): string {
+  const str = String(value ?? '').toUpperCase();
+  if (['ACTIVE', 'APPROVED', 'COMPLETED', 'PRESENT', 'MERGED'].includes(str)) return '#059669';
+  if (['PENDING', 'DRAFT', 'IN_PROGRESS', 'SUBMITTED'].includes(str)) return '#D97706';
+  if (['REJECTED', 'ABSENT', 'EXITED', 'SUSPENDED'].includes(str)) return '#DC2626';
+  return GRAY_700;
 }
 
-// ─── Table Layout ───
+// ─── Build HTML ───
 
-const avyTableLayout: Record<string, pdfMake.CustomTableLayout> = {
-  avyLayout: {
-    hLineWidth(i: number, node: any): number {
-      // Top border of header, bottom border of header, bottom border of last row
-      if (i === 0 || i === 1 || i === node.table.body.length) return 0.5;
-      return 0;
-    },
-    vLineWidth(): number {
-      return 0;
-    },
-    hLineColor(i: number): string {
-      if (i === 1) return INDIGO;
-      return GRAY_200;
-    },
-    fillColor(rowIndex: number, node: any): string | null {
-      if (rowIndex === 0) return INDIGO;
-      // Check if this is the totals row (last row when totals exist)
-      // We mark totals rows via a custom property on the node
-      const bodyLength = node.table.body.length;
-      if (node.table._hasTotals && rowIndex === bodyLength - 1) return GRAY_100;
-      // Alternating rows (data rows start at index 1)
-      return rowIndex % 2 === 0 ? '#F9FAFB' : null;
-    },
-    paddingLeft(): number { return 6; },
-    paddingRight(): number { return 6; },
-    paddingTop(): number { return 4; },
-    paddingBottom(): number { return 4; },
-  },
-};
+function buildHtml(config: ReportConfig): string {
+  const timestamp = new Date().toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  });
 
-// ─── Build PDF Content for a Single Sheet ───
+  let sheetsHtml = '';
 
-function buildSheetContent(
-  sheet: ReportConfig['sheets'][number],
-  isFirstSheet: boolean,
-): Content[] {
-  const content: Content[] = [];
+  config.sheets.forEach((sheet, sheetIdx) => {
+    // Page break between sheets
+    if (sheetIdx > 0) {
+      sheetsHtml += '<div class="page-break"></div>';
+    }
 
-  // Page break before each sheet section (except the first)
-  if (!isFirstSheet) {
-    content.push({ text: '', pageBreak: 'before' });
+    // Section heading
+    sheetsHtml += `<h2 class="section-heading">${escapeHtml(sheet.name)}</h2>`;
+
+    if (sheet.legendText) {
+      sheetsHtml += `<p class="legend">${escapeHtml(sheet.legendText)}</p>`;
+    }
+
+    if (sheet.rows.length === 0) {
+      sheetsHtml += '<p class="empty">No data available for this section.</p>';
+    } else {
+      // Table
+      sheetsHtml += '<table>';
+
+      // Header row
+      sheetsHtml += '<thead><tr>';
+      for (const col of sheet.columns) {
+        const align = isNumericFormat(col.format) ? 'right' : 'left';
+        sheetsHtml += `<th style="text-align:${align}">${escapeHtml(col.header)}</th>`;
+      }
+      sheetsHtml += '</tr></thead>';
+
+      // Data rows
+      sheetsHtml += '<tbody>';
+      for (let ri = 0; ri < sheet.rows.length; ri++) {
+        const row = sheet.rows[ri]!;
+        const altClass = ri % 2 === 1 ? ' class="alt"' : '';
+        sheetsHtml += `<tr${altClass}>`;
+        for (const col of sheet.columns) {
+          const align = isNumericFormat(col.format) ? 'right' : 'left';
+          const val = formatCellValue(row[col.key], col.format);
+          const statusStyle = col.conditionalFormat === 'status'
+            ? ` style="text-align:${align};color:${getStatusColor(row[col.key])};font-weight:600;"`
+            : ` style="text-align:${align}"`;
+          sheetsHtml += `<td${statusStyle}>${escapeHtml(val)}</td>`;
+        }
+        sheetsHtml += '</tr>';
+      }
+
+      // Totals row
+      if (sheet.totalsRow) {
+        sheetsHtml += '<tr class="totals">';
+        for (const col of sheet.columns) {
+          const align = isNumericFormat(col.format) ? 'right' : 'left';
+          const val = formatCellValue(sheet.totalsRow[col.key], col.format);
+          sheetsHtml += `<td style="text-align:${align}">${escapeHtml(val)}</td>`;
+        }
+        sheetsHtml += '</tr>';
+      }
+
+      sheetsHtml += '</tbody></table>';
+    }
+
+    // Record count
+    sheetsHtml += `<p class="record-count">${sheet.rows.length} record${sheet.rows.length !== 1 ? 's' : ''}</p>`;
+  });
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 16mm 8mm 12mm 8mm;
   }
-
-  // Section heading
-  content.push({
-    text: sheet.name,
-    style: 'sectionHeading',
-    margin: [0, isFirstSheet ? 0 : 4, 0, 8],
-  });
-
-  // Build table header row
-  const headerRow: TableCell[] = sheet.columns.map((col) => ({
-    text: col.header,
-    style: 'tableHeader',
-    alignment: isNumericFormat(col.format) ? 'right' as const : 'left' as const,
-  }));
-
-  // Build data rows
-  const dataRows: TableCell[][] = sheet.rows.map((row) =>
-    sheet.columns.map((col) => ({
-      text: formatCellValue(row[col.key], col.format),
-      alignment: isNumericFormat(col.format) ? 'right' as const : 'left' as const,
-      fontSize: 8,
-      color: GRAY_700,
-    })),
-  );
-
-  // Build totals row if present
-  let hasTotals = false;
-  if (sheet.totalsRow) {
-    hasTotals = true;
-    const totalsRowCells: TableCell[] = sheet.columns.map((col) => ({
-      text: formatCellValue(sheet.totalsRow![col.key], col.format),
-      alignment: isNumericFormat(col.format) ? 'right' as const : 'left' as const,
-      bold: true,
-      fontSize: 8,
-      color: GRAY_700,
-    }));
-    dataRows.push(totalsRowCells);
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 9px;
+    color: ${GRAY_700};
+    line-height: 1.4;
   }
+  .header {
+    margin-bottom: 16px;
+  }
+  .company-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: ${GRAY_700};
+  }
+  .report-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: ${INDIGO};
+    margin-top: 2px;
+  }
+  .period {
+    font-size: 9px;
+    color: ${GRAY_500};
+    margin-top: 2px;
+  }
+  .separator {
+    height: 1px;
+    background: ${INDIGO};
+    margin-top: 6px;
+  }
+  .section-heading {
+    font-size: 14px;
+    font-weight: 700;
+    color: ${INDIGO};
+    margin: 16px 0 8px 0;
+  }
+  .legend {
+    font-size: 7px;
+    color: ${GRAY_500};
+    font-style: italic;
+    margin-bottom: 6px;
+  }
+  .empty {
+    font-size: 9px;
+    color: ${GRAY_500};
+    font-style: italic;
+    padding: 16px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8px;
+  }
+  th {
+    background: ${INDIGO};
+    color: ${WHITE};
+    font-weight: 700;
+    font-size: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid ${INDIGO};
+  }
+  td {
+    padding: 5px 8px;
+    border-bottom: 1px solid #F3F4F6;
+    font-size: 8px;
+    color: ${GRAY_700};
+  }
+  tr.alt td {
+    background: #F9FAFB;
+  }
+  tr.totals td {
+    background: ${GRAY_100};
+    font-weight: 700;
+    border-top: 1px solid #D1D5DB;
+    border-bottom: 2px double ${GRAY_500};
+  }
+  .record-count {
+    font-size: 7px;
+    color: ${GRAY_500};
+    font-style: italic;
+    margin-top: 4px;
+  }
+  .footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 6px 8mm;
+    font-size: 7px;
+    color: ${GRAY_500};
+    display: flex;
+    justify-content: space-between;
+  }
+  .page-break {
+    page-break-before: always;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">${escapeHtml(config.companyName)}</div>
+    <div class="report-title">${escapeHtml(config.reportTitle)}</div>
+    <div class="period">Period: ${escapeHtml(config.period)}</div>
+    <div class="separator"></div>
+  </div>
+  ${sheetsHtml}
+  <div class="footer">
+    <span>Generated by Avy ERP · ${escapeHtml(timestamp)}</span>
+  </div>
+</body>
+</html>`;
+}
 
-  // Compute column widths — distribute proportionally across available landscape width
-  // A4 landscape usable width ~ 842 - 2*24 = 794pt
-  const totalDefinedWidth = sheet.columns.reduce((sum, col) => sum + (col.width ?? 15), 0);
-  const widths = sheet.columns.map((col) => {
-    const proportion = (col.width ?? 15) / totalDefinedWidth;
-    return `${(proportion * 100).toFixed(1)}%`;
-  });
+// ─── Singleton Browser Instance ───
+let browserInstance: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
 
-  const tableBody = [headerRow, ...dataRows];
-
-  // Build the table
-  const tableContent: Content = {
-    table: {
-      headerRows: 1,
-      widths,
-      body: tableBody,
-      _hasTotals: hasTotals,
-    } as any,
-    layout: 'avyLayout',
-  };
-
-  content.push(tableContent);
-
-  // Record count below table
-  content.push({
-    text: `${sheet.rows.length} record${sheet.rows.length !== 1 ? 's' : ''}`,
-    fontSize: 7,
-    color: GRAY_500,
-    italics: true,
-    margin: [0, 4, 0, 0],
-  });
-
-  // Legend text if present
-  if (sheet.legendText) {
-    content.push({
-      text: sheet.legendText,
-      fontSize: 7,
-      color: GRAY_500,
-      italics: true,
-      margin: [0, 2, 0, 0],
+async function getBrowser() {
+  if (!browserInstance || !browserInstance.connected) {
+    browserInstance = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
     });
   }
-
-  return content;
+  return browserInstance;
 }
 
 // ─── Main Export Function ───
 
 export async function generatePdfReport(config: ReportConfig): Promise<Buffer> {
-  // Set up table layouts
-  pdfMake.setTableLayouts(avyTableLayout);
+  const html = buildHtml(config);
+  const browser = await getBrowser();
+  const page = await browser.newPage();
 
-  // Build all sheet content sections
-  const sheetContent: Content[] = [];
-  config.sheets.forEach((sheet, index) => {
-    sheetContent.push(...buildSheetContent(sheet, index === 0));
-  });
+  try {
+    await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
-  const docDefinition: TDocumentDefinitions = {
-    pageSize: 'A4',
-    pageOrientation: 'landscape',
-    pageMargins: [24, 72, 24, 40],
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      landscape: true,
+      printBackground: true,
+      margin: { top: '16mm', right: '8mm', bottom: '12mm', left: '8mm' },
+      displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate: `
+        <div style="width:100%;font-size:7px;color:#6B7280;padding:0 8mm;display:flex;justify-content:space-between;">
+          <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+          <span>Generated by Avy ERP</span>
+        </div>`,
+    });
 
-    // ─── Header (every page) ───
-    header: (currentPage: number, pageCount: number): Content => {
-      return {
-        margin: [24, 16, 24, 0],
-        stack: [
-          {
-            text: config.companyName,
-            fontSize: 14,
-            bold: true,
-            color: GRAY_700,
-          },
-          {
-            text: config.reportTitle,
-            fontSize: 10,
-            bold: true,
-            color: INDIGO,
-            margin: [0, 2, 0, 0],
-          },
-          {
-            text: `Period: ${config.period}`,
-            fontSize: 8,
-            color: GRAY_500,
-            margin: [0, 2, 0, 4],
-          },
-          // Thin indigo separator line
-          {
-            canvas: [
-              {
-                type: 'line',
-                x1: 0,
-                y1: 0,
-                x2: 794, // A4 landscape width minus margins
-                y2: 0,
-                lineWidth: 1,
-                lineColor: INDIGO,
-              },
-            ],
-          } as ContentCanvas,
-        ],
-      };
-    },
-
-    // ─── Footer (every page) ───
-    footer: (currentPage: number, pageCount: number): Content => {
-      return {
-        margin: [24, 8, 24, 0],
-        columns: [
-          {
-            text: `Page ${currentPage} of ${pageCount}`,
-            fontSize: 7,
-            color: GRAY_500,
-            alignment: 'left',
-          },
-          {
-            text: `Generated by Avy ERP \u00B7 ${getGeneratedTimestamp()}`,
-            fontSize: 7,
-            color: GRAY_500,
-            alignment: 'right',
-          },
-        ],
-      };
-    },
-
-    // ─── Content ───
-    content: sheetContent,
-
-    // ─── Styles ───
-    styles: {
-      sectionHeading: {
-        fontSize: 13,
-        bold: true,
-        color: INDIGO,
-      } as Style,
-      tableHeader: {
-        fontSize: 8,
-        bold: true,
-        color: WHITE,
-      } as Style,
-    },
-
-    // ─── Default Style (Helvetica built-in) ───
-    defaultStyle: {
-      font: 'Helvetica',
-      fontSize: 9,
-    },
-
-    // ─── Metadata ───
-    info: {
-      title: `${config.reportTitle} — ${config.period}`,
-      author: 'Avy ERP',
-      subject: config.reportTitle,
-      creator: 'Avy ERP',
-    },
-  };
-
-  const pdf = pdfMake.createPdf(docDefinition);
-  const buffer = await pdf.getBuffer();
-  return Buffer.from(buffer);
+    return Buffer.from(pdfBuffer);
+  } finally {
+    await page.close();
+  }
 }
 
 // ─── Legacy API (backward compatible with old exportToPDF calls) ───
@@ -316,8 +310,6 @@ export async function exportToPDF(
   columns: { header: string; key: string; width?: number; format?: SheetColumn['format'] }[],
   rows: Record<string, unknown>[],
 ): Promise<Buffer> {
-  // Parse title to extract company name, report title, and period
-  // Expected format: "CompanyName — Report Title — Period"
   const parts = title.split(' \u2014 ');
   const companyName = parts[0] ?? 'Company';
   const reportTitle = parts.length > 1 ? parts[1]! : title;
