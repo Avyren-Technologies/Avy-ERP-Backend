@@ -169,8 +169,11 @@ export function calculateSlabAmount(
  * Core rule: Cumulative Ratio = Sum of (qtyProduced / shiftTargetQty) per part.
  * Must be >= 1.0 for ANY incentive. Only production that pushes past 100% earns.
  *
- * Process entries IN ORDER, tracking running cumulative ratio.
- * Three cases per part: A (below 100%), B (already past), C (crosses 100%).
+ * Process entries IN ENTRY ORDER (no sorting), tracking running cumulative ratio.
+ * Three cases per part:
+ *   A (cumRatio <= 1.0)     — below 100%, no incentive
+ *   B (ratioBefore >= 1.0)  — already past 100%, full qty earns (below-target @ Slab 1, above-target @ slab tiers)
+ *   C (crosses 100%)        — only the portion past 100% earns
  */
 export function calculateMethod1(
   entries: PartEntry[],
@@ -197,7 +200,7 @@ export function calculateMethod1(
     let appliedSlabLabel: string;
 
     if (ratioAfter <= 1.0) {
-      // Case A — At or below 100%: cumulative ratio hasn't strictly exceeded 1.0
+      // Case A — At or below 100%: cumulative ratio hasn't exceeded 1.0
       caseType = 'A';
       earningQty = 0;
       incentiveAmount = 0;
@@ -205,10 +208,12 @@ export function calculateMethod1(
       consideredPct = 0;
       appliedRate = 0;
       appliedSlabLabel = 'N/A';
-    } else if (ratioBefore > 1.0) {
-      // Case B — Already past 100%: only excess above target earns
+    } else if (ratioBefore >= 1.0) {
+      // Case B — Already past 100%: full qty earns
+      //   below-target portion → Slab 1 rate
+      //   above-target portion → walk slab tiers
       caseType = 'B';
-      earningQty = Math.max(0, entry.qtyProduced - entry.shiftTargetQty);
+      earningQty = entry.qtyProduced;
       const slabResult = calculateSlabAmount(
         earningQty,
         entry.shiftTargetQty,
@@ -216,7 +221,7 @@ export function calculateMethod1(
         entry.slabTiers,
       );
       incentiveAmount = slabResult.amount;
-      breakdown = `${earningQty} excess pcs earn (already past 100%); ${slabResult.breakdown}`;
+      breakdown = `All ${earningQty} pcs earn (past 100%); ${slabResult.breakdown}`;
       consideredPct = 100;
       appliedRate = entry.slabTiers.length > 0 ? entry.slabTiers[0]!.ratePerPiece : 0;
       appliedSlabLabel = entry.slabTiers.length > 0 ? 'Slab 1' : 'N/A';
@@ -224,7 +229,7 @@ export function calculateMethod1(
       // Case C — Crosses 100%: part of production consumed reaching threshold
       caseType = 'C';
       const ratioNeeded = 1.0 - ratioBefore;
-      const piecesNeeded = Math.round(ratioNeeded * entry.shiftTargetQty);
+      const piecesNeeded = Math.ceil(ratioNeeded * entry.shiftTargetQty);
       earningQty = Math.max(0, entry.qtyProduced - piecesNeeded);
 
       if (earningQty > 0) {
@@ -268,7 +273,7 @@ export function calculateMethod1(
   }
 
   const totalIncentive = round2(partResults.reduce((sum, p) => sum + p.incentiveAmount, 0));
-  const isEligible = cumulativeRatio > 1.0;
+  const isEligible = cumulativeRatio >= 1.0;
 
   return {
     totalIncentive,
@@ -325,7 +330,7 @@ export function calculateMethod2(
     const actualPct =
       entry.shiftTargetQty > 0 ? (entry.qtyProduced / entry.shiftTargetQty) * 100 : 0;
     const milestone = floorToMilestone(actualPct);
-    const milestoneQty = Math.floor((milestone / 100) * entry.shiftTargetQty);
+    const milestoneQty = Math.round((milestone / 100) * entry.shiftTargetQty);
     // Parts below 25% (milestone=0) earn nothing — they contribute no milestone credit
     const earningQty = milestone > 0 ? Math.max(0, entry.qtyProduced - milestoneQty) : 0;
     const slab1Rate = entry.slabTiers.length > 0 ? entry.slabTiers[0]!.ratePerPiece : 0;
@@ -413,16 +418,11 @@ export function calculateIncentive(
     };
   }
 
-  // Method 1: sort entries ascending by individual ratio (qty/target) so low-completion
-  // parts are consumed toward the 100% threshold first, maximising operator earnings.
-  // Method 2: order doesn't matter (each part is independent), pass as-is.
+  // Both methods process entries in submission order — no sorting.
+  // Method 1: cumulative ratio drives Case A/B/C classification per part.
+  // Method 2: each part is independent (milestones summed for eligibility).
   if (methodNumber === 1) {
-    const sorted = [...entries].sort((a, b) => {
-      const ratioA = a.shiftTargetQty > 0 ? a.qtyProduced / a.shiftTargetQty : 0;
-      const ratioB = b.shiftTargetQty > 0 ? b.qtyProduced / b.shiftTargetQty : 0;
-      return ratioA - ratioB;
-    });
-    return calculateMethod1(sorted, methodName);
+    return calculateMethod1(entries, methodName);
   }
   return calculateMethod2(entries, methodName);
 }
