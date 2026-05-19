@@ -4,8 +4,8 @@ import { createSuccessResponse, createPaginatedResponse, getPaginationParams } f
 import { asyncHandler } from '../../../middleware/error.middleware';
 import { ApiError } from '../../../shared/errors';
 import { platformPrisma } from '../../../config/database';
-import { generateExcelReport } from '../../hr/analytics/exports/excel-exporter';
-import { exportToPDF } from '../../hr/analytics/exports/pdf-exporter';
+import { generatePipDailyProductionReport, generatePipIncentiveSummaryReport } from '../../hr/analytics/exports/reports/production-reports';
+import type { DashboardFilters, DataScope } from '../../hr/analytics/analytics.types';
 import {
   createSlabConfigSchema,
   bulkCreateSlabConfigSchema,
@@ -518,16 +518,6 @@ export class PipController {
       throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
     }
 
-    const summary = await pipService.getDailyEntrySummary(companyId, {
-      page: 1,
-      limit: 10000,
-      entryDate: parsed.data.entryDate,
-      shiftId: parsed.data.shiftId,
-      operatorId: parsed.data.operatorId,
-      locationId: parsed.data.locationId,
-      status: parsed.data.status,
-    });
-
     const company = await platformPrisma.company.findUnique({
       where: { id: companyId },
       select: { name: true },
@@ -535,61 +525,33 @@ export class PipController {
     const companyName = company?.name ?? 'Company';
     const entryDate = parsed.data.entryDate ?? new Date().toISOString().slice(0, 10);
 
-    // Flatten operator summaries into export rows
-    const rows = summary.operators.map((op) => ({
-      operatorName: op.operatorName,
-      employeeId: op.employeeId,
-      entryCount: op.entryCount,
-      totalQtyProduced: op.totalQtyProduced,
-      totalIncentive: op.totalIncentive,
-    }));
-
-    const columns = [
-      { header: 'Operator', key: 'operatorName', width: 25, format: 'text' as const },
-      { header: 'Employee ID', key: 'employeeId', width: 18, format: 'text' as const },
-      { header: 'Entries', key: 'entryCount', width: 12, format: 'number' as const },
-      { header: 'Total Qty Produced', key: 'totalQtyProduced', width: 20, format: 'number' as const },
-      { header: 'Incentive (₹)', key: 'totalIncentive', width: 18, format: 'currency' as const },
-    ];
-
-    const totalsRow: Record<string, unknown> = {
-      operatorName: 'TOTAL',
-      employeeId: '',
-      entryCount: summary.totalEntries,
-      totalQtyProduced: summary.grandTotalQty,
-      totalIncentive: summary.grandTotalIncentive,
+    const filters: DashboardFilters = {
+      dateFrom: entryDate,
+      dateTo: entryDate,
+      ...(parsed.data.locationId ? { locationId: parsed.data.locationId } : {}),
+      ...(parsed.data.shiftId ? { shiftId: parsed.data.shiftId } : {}),
+      page: 1,
+      limit: 10000,
+      sortBy: 'entryDate',
+      sortOrder: 'desc',
     };
 
-    if (format === 'excel') {
-      const buffer = await generateExcelReport({
-        companyName,
-        reportTitle: 'Daily Production Report (PIP)',
-        period: entryDate,
-        sheets: [{
-          name: 'Daily Report',
-          columns,
-          rows,
-          totalsRow,
-          freezeRow: 6,
-        }],
-      });
+    const scope: DataScope = {
+      companyId,
+      isFullOrg: true,
+    };
 
-      const filename = `daily-report-${entryDate}.xlsx`;
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(buffer);
-    } else {
-      const buffer = await exportToPDF(
-        `${companyName} — Daily Production Report (PIP) — ${entryDate}`,
-        columns,
-        rows,
-      );
+    const buffer = await generatePipDailyProductionReport(null, companyName, filters, scope, undefined, format);
 
-      const filename = `daily-report-${entryDate}.pdf`;
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename.replace('.pdf', '.csv')}"`);
-      res.send(buffer);
-    }
+    const ext = format === 'pdf' ? 'pdf' : 'xlsx';
+    const contentType = format === 'pdf'
+      ? 'application/pdf'
+      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const filename = `daily-report-${entryDate}.${ext}`;
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   });
 
   exportMonthlyReport = asyncHandler(async (req: Request, res: Response) => {
@@ -604,7 +566,7 @@ export class PipController {
     const year = parseInt(req.query.year as string, 10);
     if (!year) throw ApiError.badRequest('Year is required');
 
-    const reports = await pipService.listMonthlyReports(companyId, { year, page: 1, limit: 12 });
+    const month = req.query.month ? parseInt(req.query.month as string, 10) : undefined;
 
     const company = await platformPrisma.company.findUnique({
       where: { id: companyId },
@@ -612,52 +574,31 @@ export class PipController {
     });
     const companyName = company?.name ?? 'Company';
 
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const rows = (reports.reports ?? []).map((r: any) => ({
-      month: monthNames[r.month - 1] ?? `Month ${r.month}`,
-      operatorCount: r.operatorCount ?? 0,
-      totalQtyProduced: r.totalQtyProduced ?? 0,
-      totalIncentive: Number(r.totalIncentive ?? 0),
-      status: r.status ?? 'DRAFT',
-    }));
+    const filters: DashboardFilters = {
+      dateFrom: `${year}-${month ? String(month).padStart(2, '0') : '01'}-01`,
+      dateTo: `${year}-${month ? String(month).padStart(2, '0') : '12'}-31`,
+      page: 1,
+      limit: 10000,
+      sortBy: 'entryDate',
+      sortOrder: 'asc',
+    };
 
-    const columns = [
-      { header: 'Month', key: 'month', width: 15, format: 'text' as const },
-      { header: 'Operators', key: 'operatorCount', width: 14, format: 'number' as const },
-      { header: 'Total Qty', key: 'totalQtyProduced', width: 16, format: 'number' as const },
-      { header: 'Total Incentive (₹)', key: 'totalIncentive', width: 20, format: 'currency' as const },
-      { header: 'Status', key: 'status', width: 15, format: 'text' as const, conditionalFormat: 'status' as const },
-    ];
+    const scope: DataScope = {
+      companyId,
+      isFullOrg: true,
+    };
 
-    if (format === 'excel') {
-      const buffer = await generateExcelReport({
-        companyName,
-        reportTitle: 'Monthly Production Report (PIP)',
-        period: `Year ${year}`,
-        sheets: [{
-          name: 'Monthly Report',
-          columns,
-          rows,
-          freezeRow: 6,
-        }],
-      });
+    const buffer = await generatePipIncentiveSummaryReport(null, companyName, filters, scope, undefined, format);
 
-      const filename = `monthly-report-${year}.xlsx`;
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(buffer);
-    } else {
-      const buffer = await exportToPDF(
-        `${companyName} — Monthly Production Report (PIP) — Year ${year}`,
-        columns,
-        rows,
-      );
+    const ext = format === 'pdf' ? 'pdf' : 'xlsx';
+    const contentType = format === 'pdf'
+      ? 'application/pdf'
+      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const filename = `monthly-report-${year}.${ext}`;
 
-      const filename = `monthly-report-${year}.csv`;
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(buffer);
-    }
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   });
 }
 
