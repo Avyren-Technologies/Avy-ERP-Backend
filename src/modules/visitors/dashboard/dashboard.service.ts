@@ -77,7 +77,10 @@ class DashboardService {
     };
     if (plantId) where.plantId = plantId;
     if (gateId) where.gateId = gateId;
-    if (status) where.status = status;
+    if (status) {
+      const statuses = status.split(',').map((s: string) => s.trim()).filter(Boolean);
+      where.status = statuses.length > 1 ? { in: statuses } : statuses[0];
+    }
     if (search) {
       where.OR = [
         { visitorName: { contains: search, mode: 'insensitive' } },

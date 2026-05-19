@@ -1,7 +1,8 @@
 ### 1. `Dockerfile` — Multi-stage production build
 - **Stage 1 (builder)**: Installs all deps, generates Prisma client, compiles TypeScript
 - **Stage 2 (production)**: Only production deps + compiled JS = minimal image
-- Uses `node:20-alpine` for small footprint
+- Uses `node:22-alpine` (required by `puppeteer@25` for PDF report export)
+- System Chromium in the image for Puppeteer (`PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`)
 - `dumb-init` as PID 1 for proper signal handling (graceful shutdown with your SIGTERM handler)
 - Runs as non-root `appuser` (security best practice)
 - Built-in health check hitting `/health`

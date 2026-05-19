@@ -4,12 +4,15 @@
 # ============================================
 
 # ---------- Stage 1: Build ----------
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma
-RUN apk add --no-cache openssl
+# OpenSSL for Prisma; Chromium for Puppeteer PDF export (skip bundled download)
+RUN apk add --no-cache openssl chromium nss freetype harfbuzz ca-certificates ttf-freefont
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copy dependency files first (leverages Docker layer cache)
 COPY package.json package-lock.json ./
@@ -30,12 +33,15 @@ COPY src ./src/
 RUN npm run build
 
 # ---------- Stage 2: Production ----------
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 
-# Install OpenSSL (required by Prisma at runtime) and dumb-init for PID 1
-RUN apk add --no-cache openssl dumb-init
+# Prisma (openssl), Puppeteer PDF (chromium), dumb-init for PID 1
+RUN apk add --no-cache openssl dumb-init chromium nss freetype harfbuzz ca-certificates ttf-freefont
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Create non-root user
 RUN addgroup -g 1001 -S appgroup && \

@@ -3,7 +3,7 @@ name: Deploy Backend to Production
 on:
   push:
     branches:
-      - main  # Make sure this matches your production branch name
+      - master  # Make sure this matches your production branch name
 
 jobs:
   deploy:
