@@ -24,8 +24,7 @@ model ProcessCategory {
 model Operation {
   id                String          @id @default(cuid())
   companyId         String
-  code              String?
-  operationNumber   String
+  code              String
   name              String
   processCategoryId String?
   processType       String?
@@ -40,8 +39,8 @@ model Operation {
   slabConfigs     PipSlabConfig[]
   dailyEntries    PipDailyEntry[]
 
+  @@unique([companyId, code])
   @@unique([companyId, name])
-  @@unique([companyId, operationNumber])
   @@index([companyId, status])
   @@map("operations")
 }
@@ -93,6 +92,8 @@ model PipDailyEntry {
   achievementPct Decimal  @db.Decimal(7, 2)
   ncCount        Int      @default(0)
   ncReason       String?
+  downtimeReasonId String?
+  downtimeMinutes  Int?
   methodUsed     String?
   methodNumber   Int?
   cumulativeRatio Decimal? @db.Decimal(7, 4)
@@ -121,11 +122,12 @@ model PipDailyEntry {
   updatedAt DateTime @updatedAt
 
   // Relations
-  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  location   Location?      @relation(fields: [locationId], references: [id])
-  operator   Employee       @relation(fields: [operatorId], references: [id])
-  slabConfig PipSlabConfig? @relation(fields: [slabConfigId], references: [id])
-  operation  Operation?     @relation(fields: [operationId], references: [id])
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location       Location?       @relation(fields: [locationId], references: [id])
+  operator       Employee        @relation(fields: [operatorId], references: [id])
+  slabConfig     PipSlabConfig?  @relation(fields: [slabConfigId], references: [id])
+  operation      Operation?      @relation(fields: [operationId], references: [id])
+  downtimeReason DowntimeReason? @relation(fields: [downtimeReasonId], references: [id])
 
   @@index([companyId, entryDate, shiftId])
   @@index([companyId, operatorId, entryDate])
@@ -197,6 +199,23 @@ model PipMonthlyReport {
   @@unique([companyId, locationId, month, year])
   @@index([companyId, status])
   @@map("pip_monthly_reports")
+}
+
+model DowntimeReason {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  code      String?
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dailyEntries PipDailyEntry[]
+
+  @@unique([companyId, name])
+  @@map("downtime_reasons")
 }
 
 enum PipSlabStatus {

@@ -29,6 +29,12 @@ router.post('/process-categories', requirePermissions(['production.pip:create'])
 router.patch('/process-categories/:id', requirePermissions(['production.pip:update']), controller.updateProcessCategory);
 router.delete('/process-categories/:id', requirePermissions(['production.pip:delete']), controller.deleteProcessCategory);
 
+// ── Downtime Reasons ──────────────────────────────────────────────
+router.get('/downtime-reasons', requirePermissions(['production.pip:read']), controller.listDowntimeReasons);
+router.post('/downtime-reasons', requirePermissions(['production.pip:create']), controller.createDowntimeReason);
+router.patch('/downtime-reasons/:id', requirePermissions(['production.pip:update']), controller.updateDowntimeReason);
+router.delete('/downtime-reasons/:id', requirePermissions(['production.pip:delete']), controller.deleteDowntimeReason);
+
 // ── Operations ─────────────────────────────────────────────────────
 router.get('/operations', requirePermissions(['production.pip:read']), controller.listOperations);
 router.post('/operations', requirePermissions(['production.pip:create']), controller.createOperation);

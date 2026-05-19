@@ -60,6 +60,8 @@ export const saveDailyEntriesSchema = z.object({
       qtyProduced: z.number().int().nonnegative('Qty produced must be non-negative'),
       ncCount: z.number().int().nonnegative('NC count must be non-negative').optional(),
       ncReason: z.string().optional(),
+      downtimeReasonId: z.string().optional(),
+      downtimeMinutes: z.number().int().nonnegative().optional(),
     }),
   ).min(1, 'At least one entry is required'),
 });
@@ -113,7 +115,6 @@ export type MergeToPayrollInput = z.infer<typeof mergeToPayrollSchema>;
 const OperationStatusEnum = z.enum(['ACTIVE', 'INACTIVE']);
 
 export const createOperationSchema = z.object({
-  operationNumber: z.string().optional(),
   name: z.string().min(1, 'Operation name is required'),
   processCategoryId: z.string().optional(),
   status: OperationStatusEnum.optional(),
@@ -121,7 +122,6 @@ export const createOperationSchema = z.object({
 export type CreateOperationInput = z.infer<typeof createOperationSchema>;
 
 export const updateOperationSchema = z.object({
-  operationNumber: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   processCategoryId: z.string().nullable().optional(),
   status: OperationStatusEnum.optional(),
@@ -140,14 +140,12 @@ export const listOperationsSchema = z.object({
 
 export const createProcessCategorySchema = z.object({
   name: z.string().min(1, 'Process category name is required'),
-  code: z.string().optional(),
   isActive: z.boolean().optional(),
 });
 export type CreateProcessCategoryInput = z.infer<typeof createProcessCategorySchema>;
 
 export const updateProcessCategorySchema = z.object({
   name: z.string().min(1).optional(),
-  code: z.string().optional(),
   isActive: z.boolean().optional(),
 });
 export type UpdateProcessCategoryInput = z.infer<typeof updateProcessCategorySchema>;
@@ -185,3 +183,15 @@ export const listMonthlyReportsSchema = z.object({
   locationId: z.string().optional(),
   year: z.coerce.number().int().optional(),
 });
+
+// ── Downtime Reasons ──────────────────────────────────────────────
+
+export const createDowntimeReasonSchema = z.object({
+  name: z.string().min(1, 'Downtime reason name is required'),
+});
+export type CreateDowntimeReasonInput = z.infer<typeof createDowntimeReasonSchema>;
+
+export const updateDowntimeReasonSchema = z.object({
+  name: z.string().min(1).optional(),
+});
+export type UpdateDowntimeReasonInput = z.infer<typeof updateDowntimeReasonSchema>;

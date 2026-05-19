@@ -23,6 +23,8 @@ import {
   listOperationsSchema,
   createProcessCategorySchema,
   updateProcessCategorySchema,
+  createDowntimeReasonSchema,
+  updateDowntimeReasonSchema,
 } from './pip.validators';
 
 export class PipController {
@@ -451,6 +453,53 @@ export class PipController {
 
     const result = await pipService.deleteProcessCategory(companyId, req.params.id!, userId);
     res.json(createSuccessResponse(result, 'Process category deleted'));
+  });
+
+  // ── Downtime Reasons ─────────────────────────────────────────────
+
+  listDowntimeReasons = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    if (!companyId) throw ApiError.badRequest('Company ID is required');
+
+    const reasons = await pipService.listDowntimeReasons(companyId);
+    res.json(createSuccessResponse(reasons, 'Downtime reasons retrieved'));
+  });
+
+  createDowntimeReason = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = createDowntimeReasonSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const reason = await pipService.createDowntimeReason(companyId, parsed.data, userId);
+    res.status(201).json(createSuccessResponse(reason, 'Downtime reason created'));
+  });
+
+  updateDowntimeReason = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const parsed = updateDowntimeReasonSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw ApiError.badRequest(parsed.error.errors.map((e: any) => e.message).join(', '));
+    }
+
+    const reason = await pipService.updateDowntimeReason(companyId, req.params.id!, parsed.data, userId);
+    res.json(createSuccessResponse(reason, 'Downtime reason updated'));
+  });
+
+  deleteDowntimeReason = asyncHandler(async (req: Request, res: Response) => {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.id;
+    if (!companyId || !userId) throw ApiError.badRequest('Company ID is required');
+
+    const result = await pipService.deleteDowntimeReason(companyId, req.params.id!, userId);
+    res.json(createSuccessResponse(result, 'Downtime reason deleted'));
   });
 
   // ── Export (generates actual PDF/Excel binary files) ────

@@ -13,6 +13,8 @@ import {
   SimulateIncentiveInput,
   UpdateIncentiveConfigInput,
   GenerateMonthlyReportInput,
+  CreateDowntimeReasonInput,
+  UpdateDowntimeReasonInput,
 } from './pip.validators';
 import {
   SlabConfigListFilters,
@@ -125,7 +127,7 @@ export class PipService {
         where,
         include: {
           machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-          operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
+          operation: { select: { id: true, code: true, name: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
           part: { select: { id: true, partNumber: true, name: true } },
           location: { select: { id: true, name: true } },
         },
@@ -144,7 +146,7 @@ export class PipService {
       where: { id },
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
+        operation: { select: { id: true, code: true, name: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -198,7 +200,7 @@ export class PipService {
       data: createData as any,
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
+        operation: { select: { id: true, code: true, name: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -309,7 +311,7 @@ export class PipService {
       data: updateData,
       include: {
         machine: { select: { id: true, assetCode: true, machineCode: true, assetName: true } },
-        operation: { select: { id: true, code: true, name: true, operationNumber: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
+        operation: { select: { id: true, code: true, name: true, processType: true, processCategoryId: true, processCategory: { select: { id: true, name: true, code: true } } } },
         part: { select: { id: true, partNumber: true, name: true } },
         location: { select: { id: true, name: true } },
       },
@@ -559,6 +561,8 @@ export class PipService {
           achievementPct: new Prisma.Decimal(achievementPct),
           ncCount: ed.ncCount,
           ncReason: ed.ncReason,
+          downtimeReasonId: data.entries[i]?.downtimeReasonId ?? undefined,
+          downtimeMinutes: data.entries[i]?.downtimeMinutes ?? undefined,
           methodUsed: calcResult?.methodUsed ?? null,
           methodNumber: calcResult?.methodNumber ?? null,
           cumulativeRatio: partResult
@@ -627,6 +631,7 @@ export class PipService {
         include: {
           operator: { select: { id: true, firstName: true, lastName: true, employeeId: true } },
           operation: { select: { id: true, code: true, name: true } },
+          downtimeReason: { select: { id: true, name: true, code: true } },
           slabConfig: {
             select: {
               id: true,
@@ -1363,7 +1368,6 @@ export class PipService {
       where.OR = [
         { code: { contains: search, mode: 'insensitive' } },
         { name: { contains: search, mode: 'insensitive' } },
-        { operationNumber: { contains: search, mode: 'insensitive' } },
       ];
     }
     const [operations, total] = await Promise.all([
@@ -1392,36 +1396,17 @@ export class PipService {
     const byName = await platformPrisma.operation.findUnique({ where: { companyId_name: { companyId, name: data.name } } });
     if (byName) throw ApiError.conflict(`Operation "${data.name}" already exists`);
 
-    // Auto-generate operationNumber via Number Series
-    let operationNumber = data.operationNumber;
-    if (!operationNumber) {
-      operationNumber = await generateNextNumber(
-        platformPrisma,
-        companyId,
-        ['Operation Master'],
-        'Operation',
-      );
-    } else {
-      // If manually provided, check uniqueness
-      const byNum = await platformPrisma.operation.findUnique({ where: { companyId_operationNumber: { companyId, operationNumber } } });
-      if (byNum) throw ApiError.conflict(`Operation number "${operationNumber}" already exists`);
-    }
-
-    // Auto-generate code OPR-XXXX
-    const count = await platformPrisma.operation.count({ where: { companyId } });
-    let seq = count + 1;
-    let code = `OPR-${String(seq).padStart(4, '0')}`;
-    let retries = 0;
-    while (await platformPrisma.operation.findFirst({ where: { companyId, code } })) {
-      seq++; retries++;
-      code = `OPR-${String(seq).padStart(4, '0')}`;
-      if (retries > 100) throw ApiError.badRequest('Unable to generate unique operation code');
-    }
+    // Auto-generate code via Number Series
+    const code = await generateNextNumber(
+      platformPrisma,
+      companyId,
+      ['Operation Master'],
+      'Operation',
+    );
 
     const createData: Record<string, any> = {
       companyId,
       code,
-      operationNumber,
       name: data.name,
       status: data.status ?? 'ACTIVE',
     };
@@ -1444,14 +1429,9 @@ export class PipService {
       const dup = await platformPrisma.operation.findUnique({ where: { companyId_name: { companyId, name: data.name } } });
       if (dup) throw ApiError.conflict(`Operation "${data.name}" already exists`);
     }
-    if (data.operationNumber && data.operationNumber !== existing.operationNumber) {
-      const dup = await platformPrisma.operation.findUnique({ where: { companyId_operationNumber: { companyId, operationNumber: data.operationNumber } } });
-      if (dup) throw ApiError.conflict(`Operation number "${data.operationNumber}" already exists`);
-    }
 
     const updateData: Record<string, any> = {};
     if (data.name !== undefined) updateData.name = data.name;
-    if (data.operationNumber !== undefined) updateData.operationNumber = data.operationNumber;
     if (data.processCategoryId !== undefined) updateData.processCategoryId = data.processCategoryId;
     if (data.status !== undefined) { updateData.status = data.status; updateData.isActive = data.status === 'ACTIVE'; }
 
@@ -1493,17 +1473,14 @@ export class PipService {
     if (byName) throw ApiError.conflict(`Process category "${data.name}" already exists`);
 
     // Auto-generate code PRC-001, PRC-002, ...
-    let code = data.code;
-    if (!code) {
-      const count = await platformPrisma.processCategory.count({ where: { companyId } });
-      let seq = count + 1;
+    const count = await platformPrisma.processCategory.count({ where: { companyId } });
+    let seq = count + 1;
+    let code = `PRC-${String(seq).padStart(3, '0')}`;
+    let retries = 0;
+    while (await platformPrisma.processCategory.findFirst({ where: { companyId, code } })) {
+      seq++; retries++;
       code = `PRC-${String(seq).padStart(3, '0')}`;
-      let retries = 0;
-      while (await platformPrisma.processCategory.findFirst({ where: { companyId, code } })) {
-        seq++; retries++;
-        code = `PRC-${String(seq).padStart(3, '0')}`;
-        if (retries > 100) throw ApiError.badRequest('Unable to generate unique process category code');
-      }
+      if (retries > 100) throw ApiError.badRequest('Unable to generate unique process category code');
     }
 
     const category = await platformPrisma.processCategory.create({
@@ -1532,7 +1509,6 @@ export class PipService {
 
     const updateData: Record<string, any> = {};
     if (data.name !== undefined) updateData.name = data.name;
-    if (data.code !== undefined) updateData.code = data.code;
     if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
     const category = await platformPrisma.processCategory.update({ where: { id }, data: updateData });
@@ -1551,6 +1527,79 @@ export class PipService {
 
     await platformPrisma.processCategory.delete({ where: { id } });
     auditLog({ entityType: 'ProcessCategory', entityId: id, action: 'DELETE', before: existing as any, changedBy: userId, companyId });
+    return { id };
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // Downtime Reason CRUD
+  // ════════════════════════════════════════════════════════════════════
+
+  async listDowntimeReasons(companyId: string) {
+    return platformPrisma.downtimeReason.findMany({
+      where: { companyId },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createDowntimeReason(companyId: string, data: CreateDowntimeReasonInput, userId: string) {
+    const byName = await platformPrisma.downtimeReason.findUnique({
+      where: { companyId_name: { companyId, name: data.name } },
+    });
+    if (byName) throw ApiError.conflict(`Downtime reason "${data.name}" already exists`);
+
+    // Auto-generate code DT-001, DT-002, ...
+    const count = await platformPrisma.downtimeReason.count({ where: { companyId } });
+    let seq = count + 1;
+    let code = `DT-${String(seq).padStart(3, '0')}`;
+    let retries = 0;
+    while (await platformPrisma.downtimeReason.findFirst({ where: { companyId, code } })) {
+      seq++; retries++;
+      code = `DT-${String(seq).padStart(3, '0')}`;
+      if (retries > 100) throw ApiError.badRequest('Unable to generate unique downtime reason code');
+    }
+
+    const reason = await platformPrisma.downtimeReason.create({
+      data: {
+        companyId,
+        name: data.name,
+        code,
+      },
+    });
+
+    auditLog({ entityType: 'DowntimeReason', entityId: reason.id, action: 'CREATE', after: reason as any, changedBy: userId, companyId });
+    return reason;
+  }
+
+  async updateDowntimeReason(companyId: string, id: string, data: UpdateDowntimeReasonInput, userId: string) {
+    const existing = await platformPrisma.downtimeReason.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) throw ApiError.notFound('Downtime reason not found');
+
+    if (data.name && data.name !== existing.name) {
+      const dup = await platformPrisma.downtimeReason.findUnique({
+        where: { companyId_name: { companyId, name: data.name } },
+      });
+      if (dup) throw ApiError.conflict(`Downtime reason "${data.name}" already exists`);
+    }
+
+    const updateData: Record<string, any> = {};
+    if (data.name !== undefined) updateData.name = data.name;
+
+    const reason = await platformPrisma.downtimeReason.update({ where: { id }, data: updateData });
+    auditLog({ entityType: 'DowntimeReason', entityId: id, action: 'UPDATE', before: existing as any, after: reason as any, changedBy: userId, companyId });
+    return reason;
+  }
+
+  async deleteDowntimeReason(companyId: string, id: string, userId: string) {
+    const existing = await platformPrisma.downtimeReason.findUnique({ where: { id } });
+    if (!existing || existing.companyId !== companyId) throw ApiError.notFound('Downtime reason not found');
+
+    const entryCount = await platformPrisma.pipDailyEntry.count({ where: { downtimeReasonId: id } });
+    if (entryCount > 0) {
+      throw ApiError.badRequest(`Cannot delete downtime reason — referenced by ${entryCount} daily entry/entries`);
+    }
+
+    await platformPrisma.downtimeReason.delete({ where: { id } });
+    auditLog({ entityType: 'DowntimeReason', entityId: id, action: 'DELETE', before: existing as any, changedBy: userId, companyId });
     return { id };
   }
 }
