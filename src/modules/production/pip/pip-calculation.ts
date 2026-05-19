@@ -206,9 +206,9 @@ export function calculateMethod1(
       appliedRate = 0;
       appliedSlabLabel = 'N/A';
     } else if (ratioBefore > 1.0) {
-      // Case B — Already past 100%: all of this part's production earns
+      // Case B — Already past 100%: only excess above target earns
       caseType = 'B';
-      earningQty = entry.qtyProduced;
+      earningQty = Math.max(0, entry.qtyProduced - entry.shiftTargetQty);
       const slabResult = calculateSlabAmount(
         earningQty,
         entry.shiftTargetQty,
@@ -216,7 +216,7 @@ export function calculateMethod1(
         entry.slabTiers,
       );
       incentiveAmount = slabResult.amount;
-      breakdown = `All ${earningQty} pcs earn (already past 100%); ${slabResult.breakdown}`;
+      breakdown = `${earningQty} excess pcs earn (already past 100%); ${slabResult.breakdown}`;
       consideredPct = 100;
       appliedRate = entry.slabTiers.length > 0 ? entry.slabTiers[0]!.ratePerPiece : 0;
       appliedSlabLabel = entry.slabTiers.length > 0 ? 'Slab 1' : 'N/A';
